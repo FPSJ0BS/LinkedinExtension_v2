@@ -3436,6 +3436,14 @@
    */
   async function growApplicantList(diagnostics, hasWork) {
     const walk = diagnostics.listScroll || createListWalk(diagnostics);
+    // The verdict must describe THIS call. `walk` is deliberately shared across
+    // calls so `fruitless` can retire a pager over a whole run, but that made
+    // `stoppedBy` sticky: a call that returned early on success never cleared it,
+    // so the caller could read a "settled" left behind by an earlier attempt and
+    // complete a run on a verdict nothing had just reached. It only ever ended
+    // the run before, so staleness could not show; now that an inconclusive stop
+    // is retried, the value has to mean what it says.
+    walk.stoppedBy = "running";
     const list = applicantList();
     if (!list) {
       walk.stoppedBy = "no-list";
@@ -3708,6 +3716,20 @@
     let retryingKey = "";
     let hiddenRetries = 0;
 
+    /**
+     * How many growth attempts in a row may end without telling us where the
+     * list ends.
+     *
+     * Each attempt costs `LIST_GROW_PASSES` and leaves the list further down
+     * than it found it, so consecutive attempts genuinely advance rather than
+     * repeating — this is a retry of a walk that was working, not of one that
+     * failed. Bounded because a list that has stopped responding must still end
+     * the run, and reset by any attempt that produces a row so a long run is
+     * never condemned by three slow slices spread across it.
+     */
+    const MAX_INCONCLUSIVE_GROWTHS = 3;
+    let inconclusive = 0;
+
     for (;;) {
       // The one moment the applicant list is scrolled: the run has run out of
       // rows it has not done and needs more. `growApplicantList` is asked the
@@ -3733,9 +3755,39 @@
           if (listDiagnostics.listScroll.stoppedBy === "running") {
             listDiagnostics.listScroll.stoppedBy = "list-exhausted";
           }
-          state.run.state = Applicants.RUN_STATE.COMPLETED;
+          const stoppedBy = listDiagnostics.listScroll.stoppedBy;
+          // "No new row" is not "no more applicants". Only a walk that actually
+          // reached the end of the list may finish the run; a walk that merely
+          // spent its pass budget mid-scroll is asked again, from the position it
+          // reached, which is what turns one 16-pass budget into a walk that can
+          // cross a 665-applicant list.
+          //
+          // `list-exhausted` is inconclusive too, despite the name it is recorded
+          // under. Growth only leaves `stoppedBy` at "running" when it returned
+          // early because `wanted()` was true — it had found an unprocessed row —
+          // so arriving here means that row was recycled out of the DOM between
+          // its check and this re-scan. That is a race on a virtualized list, not
+          // the end of one, and the retry resolves it on the next pass.
+          if (Applicants.isConclusiveListStop(stoppedBy)) {
+            state.run.state = Applicants.RUN_STATE.COMPLETED;
+            break;
+          }
+          inconclusive += 1;
+          if (inconclusive < MAX_INCONCLUSIVE_GROWTHS) continue;
+          // Out of retries and still unable to see the end of the list. This is
+          // the one outcome that must NOT be COMPLETED: the worker treats a
+          // completed run as final for the job, so claiming it here would also
+          // disable the return-to-the-job restart. Stopping leaves the standing
+          // instruction armed, and says why on the page.
+          state.run.state = Applicants.RUN_STATE.STOPPED;
+          state.run.lastError =
+            `Stopped after ${processed.size} applicant(s): the list would not reveal more rows (${stoppedBy}). ` +
+            "The run is not complete — reopen this job's Applicants page to continue.";
           break;
         }
+        // A growth that produced work starts the allowance over: three slow or
+        // budget-bound attempts spread across a long run are not a stuck list.
+        inconclusive = 0;
       }
 
       // Retire EVERY already-saved row on this one scan rather than spending a

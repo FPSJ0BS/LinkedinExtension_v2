@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "id": "TASK-0069",
+  "name": "Stop a run completing when the list walk only ran out of budget",
+  "request": "Stop a run completing when the list walk only ran out of budget",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T12:08:30.805Z",
+  "completedAt": "2026-08-04T12:13:14.521Z",
+  "startCommit": "3471eeb6a563f89e59a21462a729495fca374f46",
+  "gitRef": "task/TASK-0069",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 416/416 tests (up from 415, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "new test 'only a walk that reached the end of the list may complete a run' asserts the conclusive/inconclusive split, the bounded retry, the STOPPED-not-COMPLETED outcome and the per-call verdict reset; the pre-existing completion assertion was tightened to require the conclusive gate rather than merely widened",
+    "git diff --check passed; scope reviewed - applicants.js, src/applicants-core.js, tests/applicants-core.test.js and the CLAUDE.md rule that records the invariant; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): fixtures and unit tests cannot prove live DOM behaviour, and the stop reason still needs confirming from a real run's diagnostics"
+  ],
+  "result": "A run reported COMPLETED whenever growApplicantList produced no new row, without asking why it stopped. LIST_GROW_PASSES (16) covers roughly 8000px of scrolling, so on a longer list a walk that was working simply spent its budget mid-list and the run declared itself finished - and because COMPLETED reaches the worker as AUTO_RUN_STATE.COMPLETED, which is sticky by design, the false verdict also disabled the return-to-the-job restart. Added Applicants.isConclusiveListStop(): only settled and pagination-retired may complete a run; grow-budget, no-list, pagination-refused and list-exhausted are retried up to MAX_INCONCLUSIVE_GROWTHS (3), and exhausting them ends the run as STOPPED with a lastError naming the count and the reason, so the job stays restartable. growApplicantList now clears walk.stoppedBy at the start of each call, since the shared ledger made that verdict sticky and it is now read twice."
+}

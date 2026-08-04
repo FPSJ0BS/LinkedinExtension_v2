@@ -1721,6 +1721,40 @@
   }
 
   /**
+   * Why a list walk stopped, and whether that answer is worth believing.
+   *
+   * **Only a walk that reached the end of the list may complete a run.** The
+   * growth walk stops for six reasons and they are not the same kind of fact.
+   * `settled` and `pagination-retired` are *verdicts*: the container reached its
+   * bottom, stayed quiet for `LIST_QUIET_PASSES`, and either offered no pager or
+   * offered one that revealed nobody three times. Everything else is an *excuse*
+   * — the pass budget ran out mid-scroll, the list was momentarily unmounted, the
+   * pager was refused by the click policy — and means only "I could not tell
+   * yet".
+   *
+   * THE DEFECT THIS FIXES, and it is the whole of "it only goes through some of
+   * the applicants and then stops on its own". The caller treated all six
+   * identically: growth produced no new row, therefore the list has ended,
+   * therefore `COMPLETED`. A 16-pass budget covers roughly 8000px of scrolling,
+   * so on any list longer than that — every job in the report — a walk that was
+   * working perfectly simply ran out of passes mid-list and the run declared
+   * itself finished. Worse, `COMPLETED` is reported to the worker as
+   * `AUTO_RUN_STATE.COMPLETED`, which is *sticky by design*: a completed run
+   * stays completed across a reload, a route change and a reinjection. So the
+   * false verdict also disabled the one mechanism that would have restarted it,
+   * which is why it looked like the extension stopping "on its own" for good.
+   *
+   * An inconclusive stop must leave the run restartable instead — the same
+   * distinction `revealPanelContent` already draws when it reports
+   * `complete: stoppedBy === "settled"` rather than trusting any stop at all.
+   */
+  const LIST_STOP_CONCLUSIVE = Object.freeze(["settled", "pagination-retired"]);
+
+  function isConclusiveListStop(stoppedBy = "") {
+    return LIST_STOP_CONCLUSIVE.includes(cleanText(stoppedBy));
+  }
+
+  /**
    * What the runner should do next.
    *
    * The stop flag is checked before anything else and before every single row,
@@ -1764,6 +1798,7 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     applicantRowKey, unprocessedApplicantRows,
+    LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement
     cleanText, uniqueText, toLines

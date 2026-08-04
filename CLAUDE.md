@@ -680,6 +680,27 @@ lean entry per stored applicant and the verdict already made by the core. A work
 skips **nobody**, never everybody. `options.recollect` asks for the whole list again on purpose, and
 the Applicants page exposes it as **Re-collect already saved**.
 
+**Only a walk that reached the end of the list may complete a run** (3.7.9). `growApplicantList()`
+stops for six reasons and they are not the same kind of fact.
+`Applicants.isConclusiveListStop()` names the two that are *verdicts* — `settled` and
+`pagination-retired`, both of which mean the container reached its bottom, stayed quiet for
+`LIST_QUIET_PASSES`, and either offered no pager or one that revealed nobody `MAX_FRUITLESS_PAGINATION`
+times. `grow-budget`, `no-list`, `pagination-refused` and `list-exhausted` are *excuses* meaning only
+"I could not tell yet", and the run **retries** them, bounded by `MAX_INCONCLUSIVE_GROWTHS` (3) and
+reset by any growth that produces a row. The live defect: the caller treated all six identically —
+growth produced no new row, therefore the list had ended, therefore `COMPLETED`. `LIST_GROW_PASSES`
+(16) covers roughly 8000px of scrolling, so on any longer list a walk that was working simply ran out
+of passes mid-list and the run declared itself finished. Worse, `COMPLETED` reaches the worker as
+`AUTO_RUN_STATE.COMPLETED`, which is **sticky by design**, so the false verdict also disabled the
+return-to-the-job restart — which is why it read as the extension stopping on its own, for good.
+Exhausting the retries is therefore `RUN_STATE.STOPPED` and never `COMPLETED`: a stop leaves the
+standing instruction armed, and `lastError` says how many were collected and that the run is
+unfinished. `walk.stoppedBy` is reset to `running` at the **start of every growth call**, because the
+ledger is shared across calls so `fruitless` can retire a pager over a whole run, and a verdict that
+is now read twice must describe the call that just ran. This is the same distinction
+`revealPanelContent()` already draws when it reports `complete: stoppedBy === "settled"` rather than
+trusting any stop at all.
+
 **Pressing an applicant button takes the recruiter to the page** (3.7.5). Both commands are pressed
 from the extension's own Applicants page — a different tab, often in a different window — so
 `revealApplicantTab()` activates the hiring tab **and focuses its window** (`Tabs.activate(id,
