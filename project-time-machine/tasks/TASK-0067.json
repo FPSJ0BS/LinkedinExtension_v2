@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0067",
+  "name": "Archive the 65 pre-activation task records whose Git history no longer exists",
+  "request": "Archive the 65 pre-activation task records whose Git history no longer exists",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T11:45:04.314Z",
+  "completedAt": "2026-08-04T11:46:41.161Z",
+  "startCommit": "d7e55fcb862b6c6343576fd9c8f377f741c4358a",
+  "gitRef": "task/TASK-0067",
+  "files": [
+    {
+      "change": "added",
+      "path": "project-time-machine/history-archive/README.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "node project-time-machine/scripts/audit.js passed (only the expected task-in-progress warning; 65 missing-tag errors gone)",
+    "git status reviewed: no file outside project-time-machine/ was touched; no secrets or unrelated files",
+    "git diff --check passed",
+    "verified id high-water is 66 so no archived id can be reused"
+  ],
+  "result": "Moved the 65 pre-activation records (TASK-0001-0065) verbatim into project-time-machine/history-archive/ with a README stating why they are not rollback targets. Nothing was deleted or edited and no tag was fabricated. audit.js now passes, so a future real error is visible instead of buried under 65 permanent missing-tag errors."
+}
