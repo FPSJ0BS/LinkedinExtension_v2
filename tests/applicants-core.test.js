@@ -2037,7 +2037,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
   // whole 665-row walk from the first row, every glance, for twelve hours.
   assert.match(note, /if \(key === state\.autoRun\.ranKey\) return;/, "a completed view is not walked again");
   const start = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
-  assert.match(start, /if \(state\.run\?\.state === Applicants\.RUN_STATE\.COMPLETED\) state\.autoRun\.ranKey = key;/,
+  assert.match(start, /if \(state\.run\?\.state === Applicants\.RUN_STATE\.COMPLETED\) \{\s*\n\s*state\.autoRun\.ranKey = key;/,
     "and it is remembered only for a run that genuinely finished");
   // The distinction is load-bearing: an INTERRUPTED run is exactly the one a
   // return to the tab should pick up, so STOPPED must not be remembered.
@@ -2130,6 +2130,35 @@ test("the run collects every page of the applicant list, not only the first", as
 
   // And the walk says what it did, so "why only 25?" is answerable from the page.
   assert.match(source, /applicant list — \$\{walk\.rows\} row\(s\) across \$\{walk\.pages\} page\(s\)/);
+});
+
+test("a tab switch cannot restart the same walk forever", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const note = source.slice(source.indexOf("function noteReturnToTab"), source.indexOf("// ------------------------------------------------------------- messaging"));
+
+  // THE LOOP. `ranKey` is set only when a run reaches COMPLETED, so an
+  // interrupted one — and the tab going hidden is what interrupts it, which is
+  // exactly what a tab switch does — left every return restarting the whole walk
+  // from the first row, only to be interrupted by the next switch away.
+  assert.match(note, /if \(key === state\.autoRun\.ranKey\) return;/, "a completed view is still not restarted");
+  assert.match(note, /state\.autoRun\.fruitlessReturns >= MAX_FRUITLESS_RETURNS/,
+    "and an interrupted one is bounded too, or the common case is unbounded");
+  assert.match(source, /const MAX_FRUITLESS_RETURNS = 2;/, "two, so one slow start does not lose the resume feature");
+
+  // Scored by what it collected, never by the fact that it ran.
+  const start = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
+  assert.match(start, /state\.autoRun\.fruitlessReturns = state\.run\?\.collected\s*\n?\s*\? 0\s*\n?\s*: state\.autoRun\.fruitlessReturns \+ 1;/,
+    "a restart earns the next one by collecting somebody");
+  assert.match(start, /if \(state\.run\?\.state === Applicants\.RUN_STATE\.COMPLETED\) \{[\s\S]{0,200}?ranKey = key;/,
+    "an interrupted run still does not set ranKey — it is the one a return should pick up");
+
+  // A real navigation is intent; a tab regaining focus is not. Only the former clears it.
+  const arrival = source.slice(source.indexOf("function checkAutoRunArrival"), source.indexOf("function resumeAutoRun"));
+  assert.match(arrival, /state\.autoRun\.fruitlessReturns = 0;/, "a genuine arrival clears the budget");
+
+  // And pressing the button always runs, whatever this document quietened.
+  const press = source.slice(source.indexOf('if (type === "PV_APPLICANT_EXTRACT_ALL")'), source.indexOf("state.running = runEveryApplicant(message.options"));
+  assert.match(press, /state\.autoRun\.fruitlessReturns = 0;/, "a deliberate press re-arms the surface");
 });
 
 test("the resume link is saved first and downloading cannot stop the applicant run", async () => {

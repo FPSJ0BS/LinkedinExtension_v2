@@ -138,6 +138,28 @@
        * restart, because a reload is how a recruiter says "start again".
        */
       ranKey: "",
+      /**
+       * The view the fruitless-return counter below belongs to, and how many
+       * consecutive tab returns have restarted that view's run without
+       * collecting anybody new.
+       *
+       * `ranKey` only ever bounds a run that reached COMPLETION, and an
+       * interrupted run is the far more common outcome — the tab going hidden
+       * is what interrupts it, and switching tabs is exactly how the recruiter
+       * uses this. So every return restarted the entire walk from the first row,
+       * the restart was interrupted by the next switch away, and nothing was
+       * ever recorded: an unbounded loop of re-paging and re-opening rows, which
+       * is what the page is doing when it "keeps reloading".
+       *
+       * A restart must EARN the next one by collecting somebody. That keeps the
+       * feature this exists for — come back to a genuinely interrupted run and
+       * it continues — while a run that returns having achieved nothing is not
+       * tried again on the next glance.
+       */
+      returnKey: "",
+      fruitlessReturns: 0,
+      /** So the "not restarting again" line is said once, not on every switch. */
+      quietedReturns: false,
       disabled: false,
       busy: false,
       attempts: 0
@@ -3960,6 +3982,18 @@
   /** How many times one unfulfilled arrival may be retried before it is given up. */
   const AUTO_RUN_MAX_ATTEMPTS = 8;
 
+  /**
+   * How many tab returns may restart the same view's run without collecting
+   * anybody before the surface stops offering to do it again.
+   *
+   * Two, not one: the first restart may legitimately be interrupted before it
+   * reaches anyone new — a slow list, a glance away a second later — and giving
+   * up after a single such attempt would lose the resume feature on exactly the
+   * flaky runs it exists for. Two consecutive restarts that collected nobody is
+   * a loop, not a slow start.
+   */
+  const MAX_FRUITLESS_RETURNS = 2;
+
   /** Bounded wait for the list to exist. A page with no rows has nothing to run over. */
   async function waitForApplicantRows(timeoutMs = 20000) {
     const deadline = Date.now() + timeoutMs;
@@ -4045,7 +4079,24 @@
       // walk was keyed on identity, a run that merely reached the bottom of page
       // one also reported COMPLETED, and remembering that would have switched
       // the restart off in precisely the failure it exists for.
-      if (state.run?.state === Applicants.RUN_STATE.COMPLETED) state.autoRun.ranKey = key;
+      if (state.run?.state === Applicants.RUN_STATE.COMPLETED) {
+        state.autoRun.ranKey = key;
+        state.autoRun.fruitlessReturns = 0;
+        state.autoRun.quietedReturns = false;
+      } else {
+        // Interrupted, so `ranKey` is deliberately NOT set — this is the run a
+        // return to the tab should pick up. But it must not be picked up
+        // forever: score it by what it actually collected, so a restart that
+        // achieved nothing is not repeated on every glance at the tab. A
+        // restart that collected somebody has earned the next one.
+        if (key !== state.autoRun.returnKey) {
+          state.autoRun.returnKey = key;
+          state.autoRun.fruitlessReturns = 0;
+        }
+        state.autoRun.fruitlessReturns = state.run?.collected
+          ? 0
+          : state.autoRun.fruitlessReturns + 1;
+      }
     } finally {
       state.autoRun.busy = false;
     }
@@ -4098,6 +4149,11 @@
     if (key && key !== previous) {
       state.autoRun.pendingKey = key;
       state.autoRun.attempts = 0;
+      // A genuine arrival is the recruiter navigating, not the tab regaining
+      // focus, so it clears the fruitless-return budget `noteReturnToTab` spends.
+      state.autoRun.returnKey = key;
+      state.autoRun.fruitlessReturns = 0;
+      state.autoRun.quietedReturns = false;
     } else if (!key && state.autoRun.pendingKey) {
       // Left the surface before the arrival could be acted on.
       abandonAutoRun("");
@@ -4154,6 +4210,28 @@
     // "Re-collect already saved" replayed it re-opens every one of them. That is
     // what the page looked like it was doing when it "kept refreshing".
     if (key === state.autoRun.ranKey) return;
+    // And a view whose run this document has already restarted twice without
+    // collecting anybody is not restarted a third time on a tab switch.
+    //
+    // `ranKey` above bounds only the COMPLETED case, which left the common one
+    // unbounded: the tab going hidden is what interrupts a run, and switching
+    // tabs is how this extension is used, so glance away and back and the whole
+    // 665-row walk began again from the first row — then was interrupted by the
+    // next glance, recording nothing, forever. A restart has to earn the next
+    // one. A real arrival (an actual change of view) clears this, because that
+    // is the recruiter navigating rather than the tab merely regaining focus,
+    // and Stop / Collect Every Applicant re-arm it outright.
+    if (key === state.autoRun.returnKey && state.autoRun.fruitlessReturns >= MAX_FRUITLESS_RETURNS) {
+      if (!state.autoRun.quietedReturns) {
+        state.autoRun.quietedReturns = true;
+        console.info(
+          "[Profile Vault] not restarting this job again on a tab switch: "
+          + `${state.autoRun.fruitlessReturns} restart(s) collected nobody new. `
+          + "Press Collect Every Applicant to run it again."
+        );
+      }
+      return;
+    }
     state.autoRun.pendingKey = key;
     pumpAutoRun();
   }
@@ -4239,8 +4317,12 @@
       state.autoRun.pendingKey = "";
       state.autoRun.attempts = 0;
       // A deliberate press always runs, including over a view this document has
-      // already completed — that is the recruiter asking for it again.
+      // already completed, or one whose tab-return restarts were quietened for
+      // achieving nothing — that is the recruiter asking for it again.
       state.autoRun.ranKey = "";
+      state.autoRun.returnKey = "";
+      state.autoRun.fruitlessReturns = 0;
+      state.autoRun.quietedReturns = false;
       // A second press while a run is genuinely in flight is answered at once
       // rather than left hanging on the first run's promise for up to an hour.
       if (state.running) {

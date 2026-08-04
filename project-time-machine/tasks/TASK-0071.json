@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0071",
+  "name": "Stop a tab return restarting the whole applicant walk over and over",
+  "request": "Stop a tab return restarting the whole applicant walk over and over",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T12:34:39.150Z",
+  "completedAt": "2026-08-04T12:37:41.866Z",
+  "startCommit": "0ae4746603c0d4e4b39fed4ee11fc676d98a0f92",
+  "gitRef": "task/TASK-0071",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 416/416 tests (up from 415, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "new test 'a tab switch cannot restart the same walk forever' pins the bound, the collected-based scoring, that an interrupted run still does not set ranKey, that a real arrival clears the budget and that a deliberate press re-arms it; the pre-existing ranKey assertion was updated for the if-block, not weakened",
+    "git diff --check passed; scope is applicants.js and its test only; dist/applicants.js rebuilt and verified to match source; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17). This defect is pure control flow and provable by reading, but whether it is the reloading the user sees still needs a live run"
+  ],
+  "result": "The applicants page restarted the entire walk from the first row on every return to the tab. noteReturnToTab() fires on visibilitychange and its only guard was key === autoRun.ranKey, which is set ONLY when a run reaches COMPLETED - and the tab going hidden is itself what interrupts a run, so switching away and back left ranKey empty and restarted the whole walk, which the next switch away interrupted again, unbounded. Bounded it by progress: a tab-return restart that collects nobody increments fruitlessReturns, and after MAX_FRUITLESS_RETURNS (2) the surface stops restarting that view on a tab switch and says so once in the console. A restart that collects somebody resets it, a genuine arrival (a real change of view, not a tab regaining focus) clears it, and Collect Every Applicant re-arms it outright. An interrupted run still does not set ranKey, so the resume feature is intact."
+}
