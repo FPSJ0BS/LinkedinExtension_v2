@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Network | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for the "only 10 connections" bug.
+    Serve this over http (history.replaceState needs it) and read
+    document.body.dataset.result.
+
+    It reproduces the live scaffold layout exactly:
+      * <html> and <body> are pinned at 100% with overflow:hidden, so
+        document.scrollingElement has a scroll range of ZERO and window.scrollY
+        never changes. Any code that measures the bottom from the window
+        concludes the first screenful is the whole list.
+      * #scaffold, an ANCESTOR of <main>, is the element that actually scrolls.
+        The previous heuristic only looked at scrollable DESCENDANTS of the list.
+      * #people-filter is a tall scrollable panel INSIDE the list - the decoy the
+        old heuristic latched onto. Scrolling it reveals nothing.
+      * Only 10 of 35 connections are loaded at the start; five more arrive each
+        time the wrapper reaches its bottom.
+      * Rows outside a window around the scroll position are removed from the DOM
+        entirely, so a run that does not accumulate loses everything it passed.
+
+    Expected result: urls.length === 35, every /in/person-N/ from 1 to 35,
+    diagnostics.scrollContainer is NOT "none", and diagnostics.scans.length > 5.
+  -->
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    #scaffold { height: 100vh; overflow-y: auto; }
+    main { width: 760px; margin: 0 auto; }
+    #list { position: relative; }
+    .row { position: absolute; left: 0; width: 720px; height: 100px; padding: 10px; border-bottom: 1px solid #ddd; }
+    #people-filter { height: 180px; overflow-y: auto; border: 1px solid #eee; }
+    #people-filter .tall { height: 4000px; }
+  </style>
+</head>
+<body>
+<div id="scaffold">
+  <main>
+    <h2>35 Connections</h2>
+
+    <!-- The decoy: scrollable, tall, inside the list, and scrolls nothing useful. -->
+    <div id="people-filter" aria-label="Filter people"><div class="tall">Filter options</div></div>
+
+    <div id="list"></div>
+  </main>
+</div>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  globalThis.__PROGRESS__ = [];
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: {
+      onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} },
+      // Record the streamed progress so the fixture proves rows leave the page
+      // before the pass has finished.
+      sendMessage(message) { globalThis.__PROGRESS__.push((message.entries || []).length); }
+    }
+  };
+
+  const TOTAL = 35;
+  const ROW_HEIGHT = 100;
+  const state = { loaded: 10 };
+  const list = document.getElementById('list');
+  const scaffold = document.getElementById('scaffold');
+
+  function render() {
+    list.style.height = `${state.loaded * ROW_HEIGHT + 200}px`;
+    const top = scaffold.scrollTop;
+    const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - 2);
+    const last = Math.min(state.loaded, first + Math.ceil(scaffold.clientHeight / ROW_HEIGHT) + 4);
+
+    list.textContent = '';
+    for (let index = first; index < last; index += 1) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.top = `${index * ROW_HEIGHT}px`;
+      const link = document.createElement('a');
+      link.href = `/in/person-${index + 1}/`;
+      link.textContent = `Person ${index + 1}`;
+      row.appendChild(link);
+      // Relationship actions sit on every card and must never be clicked.
+      for (const label of ['Message', 'Connect']) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.addEventListener('click', () => { globalThis.__FORBIDDEN_CLICK__ = label; });
+        row.appendChild(button);
+      }
+      list.appendChild(row);
+    }
+  }
+
+  scaffold.addEventListener('scroll', () => {
+    // Lazy loading: reaching the bottom of the wrapper fetches the next slice.
+    if (scaffold.scrollTop >= scaffold.scrollHeight - scaffold.clientHeight - 20 && state.loaded < TOTAL) {
+      setTimeout(() => { state.loaded = Math.min(state.loaded + 5, TOTAL); render(); }, 120);
+    }
+    render();
+  });
+
+  render();
+  history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
+</script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../connections.js"></script>
+<script>
+  // Repeat resumable passes exactly as the service worker does, folding every
+  // pass into one cumulative set.
+  const found = new Map();
+  function pass(cursorY, remaining, done) {
+    if (!remaining) return done();
+    messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY, mode: "advance" } }, {}, (result) => {
+      for (const entry of result.entries || []) found.set(entry.url, entry.name);
+      if (result.atBottom && found.size >= 35) return done(result);
+      pass(result.cursorY, remaining - 1, done);
+    });
+  }
+  pass(0, 8, (last) => {
+    const payload = {
+      urls: [...found.keys()].sort(),
+      count: found.size,
+      progressBatches: globalThis.__PROGRESS__,
+      forbiddenClick: globalThis.__FORBIDDEN_CLICK__ || null,
+      diagnostics: last?.diagnostics || null
+    };
+    document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+/*
+ * The popup.
+ *
+ * Everything shared with the other three surfaces — tokens, buttons, fields,
+ * notices, pills — is in [theme.css](theme.css), which this page loads first.
+ * What is left here is what only a 560px panel hanging off a toolbar button
+ * needs: a tighter rhythm than a full page, the universal Stop, the collector
+ * panel and the edit form.
+ */
+
+body {
+  width: 560px;
+  min-height: 280px;
+  background: var(--pv-bg);
+}
+
+.popup-shell { padding: 18px 18px 20px; }
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.app-header h1 { font-size: 21px; }
+.app-header p { margin: 5px 0 0; color: var(--pv-ink-3); font-size: 11.5px; }
+
+.header-buttons { display: flex; gap: 6px; flex-shrink: 0; }
+.header-buttons button { padding: 6px 11px; font-size: 12px; }
+
+.status,
+.quality { margin-bottom: 12px; }
+
+.top-actions,
+.actions { display: flex; gap: 8px; }
+.top-actions { margin-bottom: 16px; }
+.top-actions button:first-child { flex: 1; }
+.actions { justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+
+/*
+ * The universal Stop.
+ *
+ * Full width, at the top, in a colour nothing else in this popup uses, and
+ * never conditional — a stop control the user has to hunt for is a stop control
+ * that does not work. It is the one place the popup shouts.
+ */
+.stop-all {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  margin-bottom: 7px;
+  letter-spacing: -0.01em;
+  /* It carries no `.danger` class of its own, so the destructive fill is
+     stated here from the same tokens `.danger` uses — the popup's Stop and the
+     Stop on every other screen have to be recognisably the same button. */
+  background: linear-gradient(180deg, var(--pv-bad-lit) 0%, var(--pv-bad-fill) 100%);
+  color: #fff;
+  box-shadow: var(--pv-shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.stop-all:hover:not(:disabled) { filter: brightness(1.07); box-shadow: var(--pv-shadow-2); transform: translateY(-1px); }
+.stop-all:active:not(:disabled) { transform: translateY(0); box-shadow: var(--pv-shadow-press); }
+.stop-all:focus-visible { outline: 2px solid var(--pv-bad-fill); outline-offset: 2px; }
+/* --------------------------------------------------------- collector panel */
+
+.import-panel {
+  border-radius: var(--pv-r);
+  padding: 14px;
+  margin-bottom: 14px;
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+
+.import-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+.import-head strong { font-size: 13px; font-weight: 640; letter-spacing: -0.01em; }
+
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--pv-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-track {
+  height: 6px;
+  background: rgba(27, 26, 32, 0.08);
+  border-radius: var(--pv-r-pill);
+  overflow: hidden;
+}
+.import-fill {
+  height: 100%;
+  border-radius: var(--pv-r-pill);
+  background: linear-gradient(90deg, var(--pv-accent) 0%, var(--pv-accent-deep) 100%);
+  transition: width var(--pv-slow) var(--pv-ease);
+}
+
+.import-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.import-actions button { padding: 8px 12px; font-size: 12.5px; }
+
+.import-hint { margin: 9px 0 0; font-size: 11px; color: var(--pv-ink-3); line-height: 1.55; }
+.import-hint.current { overflow-wrap: anywhere; }
+.import-hint.warn { color: var(--pv-bad); }
+
+/* ---------------------------------------------------------- the edit form */
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/*
+ * The experience and education card styles that used to live here are GONE.
+ *
+ * 3.6.0 removed `experience`, `yearsOfExperience`, `currentRole`,
+ * `currentCompany`, `currentEmploymentDates`, `totalExperience`, `websites` and
+ * `profileImageUrl` from the profile record, and with them every component that
+ * rendered a company block. The ~60 lines of CSS for `.company-block`,
+ * `.company-header`, `.company-logo`, `.logo-fallback`, `.company-identity`,
+ * `.role-count`, `.company-link`, `.role-block`, `.role-meta`,
+ * `.role-description`, `.education-block`, `.education-line`,
+ * `.experience-grid`, `.education-grid` and `.empty-structured` outlived them in
+ * BOTH this file and its sibling, in two slightly different copies. No React
+ * file emits any of those class names — checked, not assumed — so they styled
+ * nothing at all.
+ */

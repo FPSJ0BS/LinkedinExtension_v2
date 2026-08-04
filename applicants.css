@@ -1,0 +1,95 @@
+/*
+ * Job Applicants.
+ *
+ * The shared layer is [theme.css](theme.css) — tokens, buttons, fields,
+ * notices, pills, the table primitive with its sticky header, pinned name
+ * column and card-per-row fallback, the drawer. Deliberately the same visual
+ * language as Saved Profiles, because they are two tables in one product rather
+ * than two products.
+ *
+ * What is left here is what only this screen has to make scannable: a
+ * qualification tally, a list that has to fit in a cell without making the row
+ * as tall as the list, and the standing-instruction note.
+ */
+
+.dashboard-shell {
+  padding: 28px 28px 48px;
+  max-width: 1760px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 22px;
+}
+.dashboard-header p { margin: 7px 0 0; color: var(--pv-ink-3); font-size: 13px; max-width: 72ch; }
+
+/* The primary actions sit above a rule, so "what this page does" is visibly
+   separate from "how to narrow down what it is showing". */
+.toolbar.primary-actions {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--pv-hairline);
+}
+
+.toolbar input[type="search"] { flex: 1; min-width: 250px; }
+
+.count {
+  margin-left: auto;
+  color: var(--pv-ink-3);
+  font-size: 12px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+
+.message { margin-bottom: 14px; }
+
+/* Guarded by the card-view breakpoint: this file loads after theme.css, so an
+   unguarded rule would beat theme's `max-height: none` and clip the card list. */
+@media (min-width: 861px) {
+  .table-wrap { max-height: calc(100vh - 300px); }
+}
+
+/* ------------------------------------------------ qualifications and education */
+/*
+ * A shortlist is scanned down a column, so the cell has to hold a list without
+ * making the row as tall as the list — it scrolls inside itself instead, and the
+ * full wording lives in the drawer and in the CSV.
+ */
+
+.list-cell { min-width: 208px; max-width: 300px; }
+
+.cell-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* The row's own content box, never a number of its own. At 98px this cell was
+     taller than the row that contained it, so an education list arriving during
+     a run grew the row from 72px to 120px and shoved everything below it down —
+     half of the reported jitter. The token is derived from the row height in
+     theme.css, so the two cannot drift apart again. */
+  max-height: var(--pv-cell-content-h);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--pv-ink-2);
+}
+.cell-list li { overflow-wrap: anywhere; }
+.cell-list li + li { margin-top: 2px; }
+
+/* The `.verdict` mark's rules stood here until the Qualifications column was
+   removed from the table. The verdicts are still collected, still exported and
+   still in the details drawer — but the drawer renders them as text, so nothing
+   emits the class any more, and a rule with no reader left is dead weight. */
+
+@media (max-width: 860px) {
+  .dashboard-shell { padding: 20px 16px 40px; }
+  .dashboard-header { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .count { margin-left: 0; }
+  .list-cell { min-width: 0; max-width: none; }
+  .cell-list { max-height: none; }
+}

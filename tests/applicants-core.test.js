@@ -1,0 +1,2219 @@
+/**
+ * The recruiter hiring surface (3.7.0).
+ *
+ * Everything here runs against the pure core or against the source of the
+ * adapter — there is no jsdom in this repository, so DOM-resident logic cannot
+ * be tested at all and the policy therefore lives in the core where it can be.
+ * The fixtures are the text the attached recruiter screens actually render.
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The profile core first: the applicants core reuses its text cleaning, its
+// contact provenance and its settle policy rather than growing a second copy.
+await import("../src/extraction-core.js");
+await import("../src/applicants-core.js");
+const Applicants = globalThis.ProfileVaultApplicants;
+
+/** The address in the attached screenshot, verbatim. */
+const APPLICANTS_URL =
+  "https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&rating=GOOD_FIT&jobId=4277798308";
+
+/**
+ * Source with its comments removed.
+ *
+ * Every "this file must never mention X" assertion below runs against this
+ * rather than the raw source: these files explain in prose exactly why they do
+ * not use React, the DOM at load, or `chrome.downloads`, and a check that the
+ * word is absent would otherwise be failed by the sentence explaining its
+ * absence. `//` is only treated as a comment at a line start or after
+ * whitespace, so a `https://` inside a string or a `\/\/` inside a regex
+ * survives.
+ */
+function withoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split("\n")
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))
+    .join("\n");
+}
+
+test("the applicants core stays an export-free, DOM-free, framework-free IIFE", async () => {
+  const source = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+  assert.ok(!/^\s*(?:import|export)\s/m.test(source), "it must stay an export-free IIFE");
+  assert.ok(!/React/.test(source), "it must not reference React");
+  assert.match(source, /globalThis\.ProfileVaultApplicants/, "it must publish its API on globalThis");
+  // Nothing may touch `document` or `window` anywhere in this file — it is the
+  // pure half, and the adapter is the only place a DOM exists.
+  const code = withoutComments(source);
+  assert.ok(!/\bdocument\b|\bwindow\b/.test(code), "nothing in the core may touch the DOM");
+});
+
+test("the job and the applicant are read out of the address bar, never guessed", () => {
+  const context = Applicants.parseHiringContext(APPLICANTS_URL);
+  assert.equal(context.jobId, "4277798308");
+  assert.equal(context.applicationId, "25550787924");
+  assert.equal(context.applicantsPage, true);
+  assert.equal(context.hiringPage, true);
+
+  // The older path-based address.
+  const path = Applicants.parseHiringContext("https://www.linkedin.com/hiring/jobs/4277798308/applicants/25550787924");
+  assert.equal(path.jobId, "4277798308");
+  assert.equal(path.applicationId, "25550787924");
+
+  // An address that carries no ids yields null rather than an invented one —
+  // an applicant filed under the wrong job is worse than one filed under none.
+  const bare = Applicants.parseHiringContext("https://www.linkedin.com/hiring/");
+  assert.equal(bare.jobId, null);
+  assert.equal(bare.applicationId, null);
+
+  assert.equal(Applicants.isHiringPage("https://www.linkedin.com/in/someone"), false);
+  assert.equal(Applicants.isHiringPage("https://example.com/hiring/applicants/"), false);
+  assert.equal(Applicants.isApplicantsPage(APPLICANTS_URL), true);
+});
+
+test("every control that acts on the applicant is refused before any allowlist", () => {
+  // These sit within a few pixels of the controls this extension does open, and
+  // three of the four change something in the recruiter's own ATS.
+  const forbidden = [
+    "Shortlist", "Move to", "Reject", "Interview with AI", "Message", "Send InMail",
+    "Rate this AI-generated content", "Good fit", "Not a fit", "Archive", "Share",
+    "Save", "Schedule interview", "Add note"
+  ];
+  for (const label of forbidden) {
+    for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
+      const verdict = Applicants.classifyApplicantControl({ text: label, purpose, inContainer: true });
+      assert.equal(verdict.allowed, false, `"${label}" must never be clicked (purpose ${purpose})`);
+      assert.equal(verdict.forbidden, true, `"${label}" must be refused by the denylist, not merely unmatched`);
+    }
+  }
+
+  // The denylist beats the allowlist, so a compound label loses.
+  const compound = Applicants.classifyApplicantControl({
+    text: "Message · Contact info",
+    purpose: Applicants.CONTROL_PURPOSE.CONTACT,
+    inContainer: true
+  });
+  assert.equal(compound.allowed, false);
+  assert.equal(compound.reason, "forbidden-action");
+
+  // And an aria-label that says it, when the visible text does not.
+  const hidden = Applicants.classifyApplicantControl({
+    text: "Contact",
+    ariaLabel: "Send a message to Mahak Ayani",
+    purpose: Applicants.CONTROL_PURPOSE.CONTACT,
+    inContainer: true
+  });
+  assert.equal(hidden.forbidden, true);
+});
+
+test("a disclosure control is only allowed when it is proven inside its container", () => {
+  const inside = Applicants.classifyApplicantControl({
+    text: "Contact info",
+    purpose: Applicants.CONTROL_PURPOSE.CONTACT,
+    inContainer: true
+  });
+  assert.equal(inside.allowed, true);
+  assert.equal(inside.reason, "contact-info");
+
+  // The same label, found anywhere else on the page, is refused — exactly as
+  // pagination has to be proven inside the connections list.
+  const outside = Applicants.classifyApplicantControl({
+    text: "Contact info",
+    purpose: Applicants.CONTROL_PURPOSE.CONTACT,
+    inContainer: false
+  });
+  assert.equal(outside.allowed, false);
+  assert.equal(outside.reason, "outside-applicant-panel");
+
+  // "Show details" labels several unrelated controls, so the proof is mandatory.
+  assert.equal(
+    Applicants.classifyApplicantControl({ text: "Show more", purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE, inContainer: false }).allowed,
+    false
+  );
+  assert.equal(
+    Applicants.classifyApplicantControl({ text: "Show more", purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE, inContainer: true }).allowed,
+    true
+  );
+
+  // A resume link is unambiguous by name and needs no container proof.
+  assert.equal(
+    Applicants.classifyApplicantControl({ text: "Resume", purpose: Applicants.CONTROL_PURPOSE.RESUME }).allowed,
+    true
+  );
+  // An unknown purpose is refused rather than defaulted.
+  assert.equal(Applicants.classifyApplicantControl({ text: "Resume", purpose: "anything" }).allowed, false);
+  assert.equal(Applicants.classifyApplicantControl({ text: "", purpose: "contact", inContainer: true }).reason, "no-label");
+});
+
+test("a qualification is stored exactly as the platform displayed it", () => {
+  const matched = Applicants.parseQualificationBlock({
+    category: Applicants.QUALIFICATION_CATEGORY.MUST_HAVE,
+    lines: [
+      "Bachelor's degree in HR, Business Administration, or related field.",
+      "Mahak Ayani answered 'Yes' to having completed a Bachelor's Degree.",
+      "Based on the applicant's responses to the screening questions"
+    ]
+  });
+  assert.equal(matched.requirement, "Bachelor's degree in HR, Business Administration, or related field.");
+  assert.equal(matched.category, "must_have");
+  assert.equal(matched.result, Applicants.QUALIFICATION_RESULT.MATCHED);
+  assert.equal(matched.explanation, "Mahak Ayani answered 'Yes' to having completed a Bachelor's Degree.");
+  assert.equal(matched.source, Applicants.QUALIFICATION_SOURCE.SCREENING);
+  assert.match(matched.raw, /Based on the applicant's responses/, "the block is kept verbatim for debugging");
+
+  // "Information cannot be provided or evaluated" is unknown, never a miss.
+  const unknown = Applicants.parseQualificationBlock({
+    category: Applicants.QUALIFICATION_CATEGORY.PREFERRED,
+    lines: [
+      "Strong communication and interpersonal skills.",
+      "Information cannot be provided or evaluated for this qualification"
+    ]
+  });
+  assert.equal(unknown.result, Applicants.QUALIFICATION_RESULT.UNKNOWN);
+  assert.equal(unknown.category, "preferred");
+  assert.equal(unknown.source, Applicants.QUALIFICATION_SOURCE.UNKNOWN);
+
+  const fromProfile = Applicants.parseQualificationBlock({
+    lines: [
+      "3-5 years of experience in human resources.",
+      "Mahak Ayani has 3 years of experience as a Human Resources Manager at Healthtrip.",
+      "Based on the applicant's profile"
+    ]
+  });
+  assert.equal(fromProfile.source, Applicants.QUALIFICATION_SOURCE.PROFILE);
+  assert.equal(fromProfile.result, Applicants.QUALIFICATION_RESULT.MATCHED);
+
+  // A stated negative is a miss; a blank is not a pass.
+  assert.equal(
+    Applicants.parseQualificationBlock({ lines: ["Knowledge of employment laws.", "Mahak Ayani does not have this qualification."] }).result,
+    Applicants.QUALIFICATION_RESULT.NOT_MATCHED
+  );
+  assert.equal(
+    Applicants.parseQualificationBlock({ lines: ["Knowledge of employment laws."] }).result,
+    Applicants.QUALIFICATION_RESULT.UNKNOWN
+  );
+
+  // The icon is what the recruiter sees, so it wins over the wording.
+  assert.equal(
+    Applicants.classifyQualificationResult({ iconLabel: "Does not meet qualification", explanation: "Mahak Ayani has 3 years." }),
+    Applicants.QUALIFICATION_RESULT.NOT_MATCHED
+  );
+
+  assert.equal(Applicants.qualificationCategoryOf("Must-have"), "must_have");
+  assert.equal(Applicants.qualificationCategoryOf("Preferred"), "preferred");
+  assert.equal(Applicants.qualificationCategoryOf("Qualifications"), "");
+});
+
+test("a screening response keeps the question, the ideal answer and the answer apart", () => {
+  const response = Applicants.parseScreeningBlock({
+    lines: [
+      "Have you completed the following level of education: Bachelor's Degree?",
+      "Ideal answer: Yes",
+      "Yes"
+    ]
+  });
+  assert.equal(response.question, "Have you completed the following level of education: Bachelor's Degree?");
+  assert.equal(response.idealAnswer, "Yes");
+  assert.equal(response.answer, "Yes");
+  assert.equal(response.met, true);
+
+  const missed = Applicants.parseScreeningBlock({ lines: ["Do you have 5 years of experience?", "Ideal answer: Yes", "No"] });
+  assert.equal(missed.met, false);
+
+  // No ideal answer means the platform did not say, which is not a failure.
+  const open = Applicants.parseScreeningBlock({ lines: ["What are your salary expectations?", "12 LPA"] });
+  assert.equal(open.idealAnswer, null);
+  assert.equal(open.answer, "12 LPA");
+  assert.equal(open.met, null);
+});
+
+test("an experience card splits into role, employer and dates even with no separator", () => {
+  const current = Applicants.parseExperienceBlock([
+    "HR Manager",
+    "Naad Wellness • 2026-Present",
+    "Experience verified"
+  ]);
+  assert.equal(current.title, "HR Manager");
+  assert.equal(current.company, "Naad Wellness");
+  assert.equal(current.dateRange, "2026-Present");
+  assert.equal(current.current, true);
+  assert.equal(current.verified, true);
+
+  const past = Applicants.parseExperienceBlock(["Human Resources Manager", "Healthtrip • 2022-2025"]);
+  assert.equal(past.company, "Healthtrip");
+  assert.equal(past.dateRange, "2022-2025");
+  assert.equal(past.current, false);
+  assert.equal(past.verified, false);
+
+  // The middot does not always render — the same collapsed-metadata problem the
+  // profile core solves — so the split falls back to the date range itself.
+  const welded = Applicants.splitCompanyAndDates("Healthtrip 2022-2025");
+  assert.equal(welded.company, "Healthtrip");
+  assert.equal(welded.dateRange, "2022-2025");
+
+  // The current role comes from the card marked Present, never from the
+  // headline: the live headline here names no employer at all.
+  const derived = Applicants.deriveCurrentPosition([past, current]);
+  assert.equal(derived.currentRole, "HR Manager");
+  assert.equal(derived.currentCompany, "Naad Wellness");
+  assert.deepEqual(Applicants.deriveCurrentPosition([]), { currentRole: null, currentCompany: null });
+});
+
+test("education keeps the degree, which the connections record deliberately drops", () => {
+  const record = Applicants.parseEducationBlock(["University of Delhi", "Bachelor of Arts, Psychology", "2018-2021"]);
+  assert.equal(record.institution, "University of Delhi");
+  assert.equal(record.degree, "Bachelor of Arts");
+  assert.equal(record.field, "Psychology");
+  assert.equal(record.dateRange, "2018-2021");
+});
+
+test("the job header reads the title and the applicant count off the screen", () => {
+  const job = Applicants.parseJobHeader({
+    text: ["Human Resources Executive", "Hiring plan", "Candidate search", "Applicants (665)", "Manage coworkers"].join("\n"),
+    title: "Top fit | LinkedIn",
+    url: APPLICANTS_URL
+  });
+  assert.equal(job.id, "4277798308");
+  assert.equal(job.title, "Human Resources Executive");
+  assert.equal(job.applicantCount, 665);
+  // Not rendered on this view, so not invented on this view.
+  assert.equal(job.company, null);
+  assert.equal(job.location, null);
+  assert.equal(job.description, null);
+});
+
+test("the applicant header strips the badges and never reads the timeline as a status", () => {
+  const header = Applicants.parseApplicantHeader({
+    text: [
+      "Mahak Ayani · 2nd",
+      "HR Head | Talent Acquisition | Employer Branding | Digital Growth Strategist",
+      "Delhi, India",
+      "Applied 12mo ago • Contacted 12mo ago"
+    ].join("\n")
+  });
+  assert.equal(header.name, "Mahak Ayani", "the degree badge is not part of somebody's name");
+  assert.equal(header.location, "Delhi, India");
+  assert.equal(header.appliedAt, "12mo ago");
+  assert.equal(header.contactedAt, "12mo ago");
+  // "Contacted 12mo ago" contains the word, and is not the application status.
+  assert.equal(header.applicationStatus, "");
+
+  const shortlisted = Applicants.parseApplicantHeader({
+    text: ["Aanchal Sharma · 1st", "Talent Acquisition Specialist", "Gurugram, Haryana, India", "Shortlisted"].join("\n")
+  });
+  assert.equal(shortlisted.applicationStatus, "Shortlisted");
+  assert.equal(Applicants.cleanApplicantName("Gargi Kumari Verified · 2nd"), "Gargi Kumari");
+});
+
+test("page chrome is never saved as somebody's name", () => {
+  // The live defect, verbatim: the detail panel resolved to a container that
+  // also held the applicant list, so the first line of its text was the list's
+  // own heading — and every record came back named "Applicants".
+  for (const chrome of [
+    "Applicants", "Qualifications", "Must-have", "Preferred", "Experience", "Education",
+    "Screening question responses", "Supplementary", "Hiring plan", "Candidate search",
+    "Manage coworkers", "Top fit", "Filter and sort", "Resume", "Share", "Shortlist",
+    "Interview with AI", "Rate this AI-generated content", "View full profile", "Messaging"
+  ]) {
+    assert.equal(Applicants.isApplicantNameCandidate(chrome), false, `"${chrome}" must never be a name`);
+  }
+
+  // Real names still pass.
+  for (const name of ["Mahak Ayani", "Aanchal Sharma", "Gargi Kumari", "Jean-Luc Picard", "Ana María López"]) {
+    assert.equal(Applicants.isApplicantNameCandidate(name), true, `"${name}" is a name`);
+  }
+
+  // Neither is an address, a count, a date, or a sentence.
+  assert.equal(Applicants.isApplicantNameCandidate("ayanimahak99@gmail.com"), false);
+  assert.equal(Applicants.isApplicantNameCandidate("665 applicants"), false);
+  assert.equal(Applicants.isApplicantNameCandidate("applied 12mo ago"), false, "a lowercase first word is not a name");
+  assert.equal(Applicants.isApplicantNameCandidate("Mahak Ayani has three years of experience at Healthtrip"), false, "too many words");
+  assert.equal(Applicants.isApplicantNameCandidate(""), false);
+
+  // And the parser no longer takes the first line on trust.
+  const header = Applicants.parseApplicantHeader({ text: "Applicants\nHR Head | Talent Acquisition\nDelhi, India" });
+  assert.equal(header.name, "", "an unusable first line yields no name rather than a wrong one");
+});
+
+test("the platform's own explanation sentences say who the applicant is", () => {
+  // LinkedIn writes every verdict as a sentence about the applicant, so the
+  // words those sentences share at the front are the name — stated by the
+  // platform, in prose, where no markup change can move it.
+  const name = Applicants.nameFromExplanations([
+    "Mahak Ayani answered 'Yes' to having completed a Bachelor's Degree.",
+    "Mahak Ayani has 3 years of experience as a Human Resources Manager at Healthtrip.",
+    "Mahak Ayani is located in Delhi, India, which is commutable to Noida."
+  ]);
+  assert.equal(name, "Mahak Ayani");
+
+  // A shared verb after the name is not part of it.
+  assert.equal(
+    Applicants.nameFromExplanations([
+      "Aanchal Sharma has 5 years of experience.",
+      "Aanchal Sharma has a Bachelor's Degree."
+    ]),
+    "Aanchal Sharma"
+  );
+
+  // One sentence is a prefix of itself and proves nothing.
+  assert.equal(Applicants.nameFromExplanations(["Mahak Ayani answered 'Yes'."]), "");
+  assert.equal(Applicants.nameFromExplanations([]), "");
+  // Sentences about different people agree on nothing.
+  assert.equal(
+    Applicants.nameFromExplanations(["Mahak Ayani has 3 years.", "Gargi Kumari has 4 years."]),
+    ""
+  );
+  // A shared opener that is not a name is refused.
+  assert.equal(
+    Applicants.nameFromExplanations([
+      "Information cannot be provided for this qualification",
+      "Information cannot be evaluated for this qualification"
+    ]),
+    "",
+    "shared chrome is not a name"
+  );
+});
+
+test("the name the explanations agree with wins over the name the markup offered", () => {
+  const candidates = [
+    { value: "Applicants", source: "first-line" },
+    { value: "Mahak Ayani", source: "list-row" }
+  ];
+
+  // Corroborated: the explanations settle it, whatever order the markup gave.
+  const corroborated = Applicants.chooseApplicantName(candidates, "Mahak Ayani");
+  assert.equal(corroborated.name, "Mahak Ayani");
+  assert.equal(corroborated.source, "list-row");
+  assert.equal(corroborated.corroborated, true);
+
+  // Uncorroborated: the first candidate that could be a name at all. Note that
+  // "Applicants" is filtered out before preference order is even consulted.
+  const guessed = Applicants.chooseApplicantName(candidates, "");
+  assert.equal(guessed.name, "Mahak Ayani");
+  assert.equal(guessed.corroborated, false);
+
+  // The explanations name somebody the markup never offered: trust the prose.
+  const unseen = Applicants.chooseApplicantName([{ value: "Applicants", source: "first-line" }], "Gargi Kumari");
+  assert.equal(unseen.name, "Gargi Kumari");
+  assert.equal(unseen.source, "explanations");
+
+  // Nothing usable anywhere is an empty name, never a guess.
+  assert.deepEqual(
+    Applicants.chooseApplicantName([{ value: "Qualifications", source: "panel-heading" }], ""),
+    { name: "", source: "", corroborated: false }
+  );
+});
+
+test("a corroborated name replaces a guessed one, and nothing replaces a corroborated one", () => {
+  // The name is the one header field that may be replaced: its strongest
+  // evidence only exists once the qualifications have been read, which on a
+  // slow panel is after the first snapshot.
+  const accumulator = Applicants.createApplicantAccumulator();
+  assert.equal(accumulator.addName("Mahak"), "added");
+  assert.equal(accumulator.addName("Mahak Ayani", true), "replaced");
+  assert.equal(accumulator.snapshot().header.name, "Mahak Ayani");
+  assert.equal(accumulator.addName("Somebody Else", true), "unchanged", "a corroborated name is final");
+  assert.equal(accumulator.addName("Guess"), "unchanged");
+  assert.equal(accumulator.snapshot().header.name, "Mahak Ayani");
+
+  // Every other header field stays first-wins.
+  const other = Applicants.createApplicantAccumulator();
+  other.addHeader({ location: "Delhi, India" });
+  other.addHeader({ location: "Noida" });
+  assert.equal(other.snapshot().header.location, "Delhi, India");
+});
+
+test("an absent value is null, never an empty string and never a guess", () => {
+  const record = Applicants.normalizeApplicantRecord({
+    applicant: { name: "Mahak Ayani" },
+    job: { id: "4277798308" }
+  });
+  assert.equal(record.applicant.contact.email, null);
+  assert.equal(record.applicant.contact.phone, null);
+  assert.equal(record.applicant.contact.website, null);
+  assert.deepEqual(record.applicant.contact.other, []);
+  assert.equal(record.applicant.resume.available, false);
+  assert.equal(record.applicant.resume.filename, null);
+  assert.equal(record.applicant.resume.downloadStatus, Applicants.RESUME_STATUS.NOT_ATTEMPTED);
+  assert.equal(record.applicant.currentRole, null);
+  assert.equal(record.applicant.totalExperience, null);
+  assert.equal(record.applicant.applicationStatus, null);
+  assert.equal(record.job.company, null);
+
+  // The specified schema, key for key.
+  assert.deepEqual(Object.keys(record.applicant.contact).sort(), ["email", "other", "phone", "website"]);
+  for (const key of ["available", "filename", "fileType", "localReference", "downloadStatus"]) {
+    assert.ok(key in record.applicant.resume, `resume.${key} is part of the specified schema`);
+  }
+  for (const key of ["timestamp", "sourceUrl", "warnings", "rawData"]) {
+    assert.ok(key in record.extraction, `extraction.${key} is part of the specified schema`);
+  }
+  // Idempotent, so it is safe on read as well as on write.
+  const twice = Applicants.normalizeApplicantRecord(record);
+  assert.equal(twice.id, record.id);
+  assert.deepEqual(twice.applicant, record.applicant);
+});
+
+test("the same applicant on two different jobs is two different records", () => {
+  const first = Applicants.applicantId("4277798308", "https://www.linkedin.com/in/mahak", "Mahak Ayani", "25550787924");
+  const second = Applicants.applicantId("9999999999", "https://www.linkedin.com/in/mahak", "Mahak Ayani", "111");
+  assert.notEqual(first, second, "an applicant is a person ON A JOB");
+  // Stable, and blind to which sub-view of the profile the URL happened to be.
+  assert.equal(
+    Applicants.applicantId("4277798308", "https://www.linkedin.com/in/mahak/overlay/contact-info/", "Mahak Ayani", "25550787924"),
+    first
+  );
+});
+
+test("re-collecting an applicant enriches the record and never re-downloads the resume", () => {
+  const stored = Applicants.normalizeApplicantRecord({
+    job: { id: "4277798308" },
+    applicant: {
+      name: "Mahak Ayani",
+      skills: ["Recruitment"],
+      contact: { email: "mahak@example.com" },
+      resume: { available: true, filename: "mahak.pdf", url: "https://media.licdn.com/x.pdf", downloadStatus: "downloaded" }
+    }
+  });
+  const again = Applicants.normalizeApplicantRecord({
+    job: { id: "4277798308" },
+    applicant: {
+      name: "Mahak Ayani",
+      skills: ["Onboarding"],
+      contact: { phone: "+919876543210" },
+      resume: { available: true, url: "https://media.licdn.com/x.pdf", downloadStatus: "not_attempted" }
+    }
+  });
+  const merged = Applicants.mergeApplicantRecord(stored, again);
+
+  assert.deepEqual(merged.applicant.skills, ["Recruitment", "Onboarding"], "a second pass adds, it does not replace");
+  assert.equal(merged.applicant.contact.email, "mahak@example.com", "a value already found is never lost");
+  assert.equal(merged.applicant.contact.phone, "+919876543210", "and a new one is kept");
+  assert.equal(merged.applicant.resume.downloadStatus, "downloaded", "a saved resume stays saved");
+  assert.equal(merged.applicant.resume.filename, "mahak.pdf", "so the second visit does not download it again");
+  assert.equal(merged.collectedAt, stored.collectedAt, "record identity survives");
+  assert.equal(merged.id, stored.id);
+});
+
+test("the accumulator is merge-only, so a section scrolled past is not lost", () => {
+  const accumulator = Applicants.createApplicantAccumulator();
+  accumulator.addName("Mahak Ayani");
+  accumulator.addHeader({ location: "Delhi, India" });
+  accumulator.addExperience(Applicants.parseExperienceBlock(["HR Manager", "Naad Wellness • 2026-Present"]));
+  const afterFirst = accumulator.signature();
+
+  // The panel unmounts Experience and mounts Education as the scan moves on.
+  accumulator.addEducation(Applicants.parseEducationBlock(["University of Delhi", "Bachelor of Arts", "2018-2021"]));
+  assert.notEqual(accumulator.signature(), afterFirst, "new content must restart the quiet count");
+
+  // A later, emptier read of a header field must not blank what is already there.
+  accumulator.addHeader({ location: "" });
+  accumulator.addName("");
+  const snapshot = accumulator.snapshot();
+  assert.equal(snapshot.header.name, "Mahak Ayani");
+  assert.equal(snapshot.experience.length, 1, "the unmounted section is still in the record");
+  assert.equal(snapshot.education.length, 1);
+
+  // The same card read twice is one entry.
+  accumulator.addExperience(Applicants.parseExperienceBlock(["HR Manager", "Naad Wellness • 2026-Present"]));
+  assert.equal(accumulator.snapshot().experience.length, 1);
+});
+
+test("the finished record carries the job's requirements as well as the verdicts", () => {
+  const accumulator = Applicants.createApplicantAccumulator();
+  accumulator.addHeader({ name: "Mahak Ayani" });
+  accumulator.addQualification(Applicants.parseQualificationBlock({
+    category: "must_have",
+    lines: ["Bachelor's degree in HR.", "Mahak Ayani answered 'Yes'.", "Based on the applicant's responses to the screening questions"]
+  }));
+  accumulator.addQualification(Applicants.parseQualificationBlock({
+    category: "preferred",
+    lines: ["Strong communication and interpersonal skills.", "Information cannot be provided or evaluated for this qualification"]
+  }));
+  accumulator.addScreening(Applicants.parseScreeningBlock({
+    lines: ["Have you completed a Bachelor's Degree?", "Ideal answer: Yes", "Yes"]
+  }));
+  accumulator.addContactPanel({ emails: ["mahak@example.com", "second@example.com"], phones: ["+919876543210"], websites: [] });
+
+  const record = Applicants.buildApplicantRecord({
+    snapshot: accumulator.snapshot(),
+    context: { jobId: "4277798308", applicationId: "25550787924" },
+    sourceUrl: APPLICANTS_URL,
+    buildId: "test"
+  });
+
+  assert.deepEqual(record.job.mustHaveQualifications, ["Bachelor's degree in HR."]);
+  assert.deepEqual(record.job.preferredQualifications, ["Strong communication and interpersonal skills."]);
+  assert.equal(record.job.screeningQuestions.length, 1);
+  assert.equal(record.job.screeningQuestions[0].idealAnswer, "Yes");
+  assert.equal(record.job.screeningQuestions[0].answer, null, "the job carries the question, the person carries the answer");
+  assert.equal(record.applicant.screeningResponses[0].answer, "Yes");
+  assert.equal(record.applicant.contact.email, "mahak@example.com");
+  assert.equal(record.applicant.contact.phone, "+919876543210");
+  // Nothing found is thrown away: the second address is kept, labelled.
+  assert.deepEqual(record.applicant.contact.other, ["email: second@example.com"]);
+  assert.equal(record.applicationId, "25550787924");
+  assert.equal(record.extraction.sourceUrl, APPLICANTS_URL);
+  assert.equal(record.job.id, "4277798308");
+});
+
+test("Stop takes effect before the next applicant, not at the end of the list", () => {
+  const running = Applicants.createRunState({ state: "running", index: 3 });
+  assert.deepEqual(Applicants.nextRunStep(running, { total: 10 }), {
+    action: "collect", reason: "next-applicant", index: 3
+  });
+
+  const stopping = Applicants.createRunState({ ...running, stopRequested: true });
+  assert.equal(Applicants.nextRunStep(stopping, { total: 10 }).action, "stop");
+  // The flag is checked before the total, so Stop wins even mid-list.
+  assert.equal(Applicants.nextRunStep(stopping, { total: 0 }).action, "stop");
+
+  assert.equal(Applicants.nextRunStep(Applicants.createRunState({ index: 10 }), { total: 10 }).action, "done");
+  assert.equal(Applicants.nextRunStep(Applicants.createRunState(), { total: 0 }).action, "done");
+});
+
+test("a run knows who is already saved and walks past them", () => {
+  const saved = (patch) => Applicants.normalizeApplicantRecord({
+    applicationId: patch.applicationId,
+    job: { id: patch.jobId || "4277798308" },
+    applicant: { name: patch.name, ...patch.applicant }
+  });
+
+  const records = [
+    saved({ applicationId: "31754123946", name: "Anamika Singh", applicant: { contact: { email: "a@example.com" } } }),
+    saved({ applicationId: "25550787924", name: "Mahak Ayani", applicant: { skills: ["Recruitment"] } }),
+    // A row that was reached but produced nothing but a name is a run that
+    // FAILED on that applicant. Skipping it would make the failure permanent.
+    saved({ applicationId: "99999999999", name: "Gargi Kumari" }),
+    // Another job entirely: the same person there is still a second record.
+    saved({ applicationId: "11111111111", jobId: "9999", name: "Deepika Kukreja", applicant: { skills: ["HRMS"] } })
+  ];
+
+  const index = Applicants.createCollectedIndex(records, { jobId: "4277798308" });
+  assert.equal(index.has({ applicationId: "31754123946" }), true);
+  assert.equal(index.has({ applicationId: "25550787924" }), true);
+  assert.equal(index.has({ applicationId: "99999999999" }), false, "a name-only record is not a collected one");
+  assert.equal(index.has({ applicationId: "11111111111" }), false, "another job's record must not skip this job's row");
+
+  // The id decides whenever the row has one, so two people with the same name
+  // on one job are still two rows.
+  assert.equal(index.has({ applicationId: "40000000000", name: "Anamika Singh" }), false);
+  // The name only ever stands in for a row that carries no id at all.
+  assert.equal(index.has({ name: "Anamika Singh" }), true);
+  assert.equal(index.has({ name: "Nobody At All" }), false);
+  assert.equal(index.has({}), false);
+
+  // What the run asks for when the recruiter wants the whole list again.
+  const forced = Applicants.createCollectedIndex([], { jobId: "4277798308" });
+  assert.equal(forced.size, 0);
+  assert.equal(forced.has({ applicationId: "31754123946" }), false);
+
+  // The lean entry the worker actually sends carries the verdict already made,
+  // so the same policy serves both shapes without a second copy of the rule.
+  const lean = Applicants.createCollectedIndex(
+    [{ applicationId: "31754123946", jobId: "4277798308", name: "Anamika Singh", collected: true },
+      { applicationId: "77777777777", jobId: "4277798308", name: "Someone", collected: false }],
+    { jobId: "4277798308" }
+  );
+  assert.equal(lean.has({ applicationId: "31754123946" }), true);
+  assert.equal(lean.has({ applicationId: "77777777777" }), false);
+});
+
+test("only a record carrying something counts as collected", () => {
+  const of = (applicant) => Applicants.normalizeApplicantRecord({ applicant: { name: "X", ...applicant } });
+  assert.equal(Applicants.isCollectedApplicant(of({})), false, "a name alone is a failed pass");
+  assert.equal(Applicants.isCollectedApplicant(of({ contact: { email: "a@b.com" } })), true);
+  assert.equal(Applicants.isCollectedApplicant(of({ contact: { phone: "+918896437748" } })), true);
+  assert.equal(Applicants.isCollectedApplicant(of({ skills: ["HRMS"] })), true);
+  assert.equal(Applicants.isCollectedApplicant(of({ experience: [{ title: "Talent Partner" }] })), true);
+  assert.equal(Applicants.isCollectedApplicant(of({ education: [{ institution: "Gautam Buddha University" }] })), true);
+  assert.equal(
+    Applicants.isCollectedApplicant(of({ qualifications: [{ requirement: "Bachelor's degree", result: "matched" }] })),
+    true
+  );
+  assert.equal(Applicants.isCollectedApplicant(of({ resume: { available: true } })), true);
+  assert.equal(Applicants.isCollectedApplicant(of({ resume: { available: false } })), false);
+  assert.equal(Applicants.isCollectedApplicant(null), false);
+  assert.equal(Applicants.isCollectedApplicant({}), false);
+
+  // The counter the run reports it against.
+  assert.equal(Applicants.createRunState().alreadyCollected, 0);
+});
+
+// ------------------------------------------------------------ the adapter
+// Source assertions, the same way the profile and connections adapters are
+// held to their click budget.
+
+test("the applicants adapter clicks only its gated controls", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const clicks = source.match(/\.click\(\)/g) || [];
+  // Six gated opens — contact, resume, a collapsed section, the next row, the
+  // list's own next-page control (3.7.8, rule 9h) and the opened viewer's own
+  // Download (3.7.9, rule 9i) — plus the one shared dismiss that closes
+  // whichever overlay was opened.
+  //
+  // The pager has TWO callers since the list became on-demand, and deliberately
+  // one call site: a second site for a control rule 9 already names would raise
+  // this number without adding a control, and the number is only worth asserting
+  // while it counts controls.
+  assert.equal(clicks.length, 7, `only six gated controls and one dismiss may be clicked, found ${clicks.length}`);
+  assert.equal(
+    (source.match(/control\.element\.click\(\)/g) || []).length,
+    5,
+    "every open must go through a classified verdict"
+  );
+  assert.match(source, /pager\.element\.click\(\);/, "and so must the pager");
+  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("/** The disclosure LinkedIn mounted"));
+  assert.match(dismiss, /element\.click\(\)/, "and one dismiss closes whichever overlay was opened");
+  assert.equal((dismiss.match(/\.click\(\)/g) || []).length, 1, "the dismiss is one click, retried — never several controls");
+  assert.match(source, /Applicants\.classifyApplicantControl\(/, "the policy decides which element that is");
+  // The proof, not the assumption: every verdict is given a container test.
+  assert.match(source, /inContainer: container\.contains\(element\)/, "a control must be proven inside its container");
+});
+
+test("the applicants adapter stays framework-free and restores the scroll position", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  assert.ok(!/\bReact\b/.test(withoutComments(source)), "no React in a content script");
+  assert.match(source, /finally \{[\s\S]*?scrollPanelTo\(originalY, target\)/, "the panel must be handed back where it was");
+  assert.match(source, /Applicants\.chooseColumnScrollTarget\?\.\(candidates\)/, "the column policy must pick the container");
+  assert.match(source, /Connections\.chooseScrollTarget\(candidates\)/, "with the tested general chooser as the fallback");
+  assert.match(source, /document\.scrollingElement/, "the document must always be offered as a candidate");
+  assert.match(source, /for \(let current = root; current; current = current\.parentElement\)/, "and every ancestor of the panel");
+  assert.match(source, /document\.visibilityState === "visible"/, "a hidden page must never be read");
+});
+
+test("the column that scrolls is the panel's own, never the page around it", () => {
+  // The live defect: the hiring page scrolls its own header a little, so the
+  // connections chooser's +60 for `isScrollingElement` beat the applicant
+  // column every time. The run then scrolled the page, the column never moved,
+  // the first read was already "the bottom", and the scan settled having seen
+  // one screenful — no Experience section, and a 665-applicant list that
+  // produced a handful of rows.
+  const page = {
+    id: "document", isScrollingElement: true, isDocumentRoot: true,
+    overflowY: "auto auto", scrollHeight: 1400, clientHeight: 900,
+    containsList: true, carriesContent: true, depth: 0
+  };
+  const shell = {
+    id: "div#4", isScrollingElement: false, isDocumentRoot: false,
+    overflowY: "visible visible", scrollHeight: 900, clientHeight: 900,
+    containsList: true, carriesContent: true, depth: 4
+  };
+  const column = {
+    id: "div#9", isScrollingElement: false, isDocumentRoot: false,
+    overflowY: "auto auto", scrollHeight: 9000, clientHeight: 700,
+    containsList: true, carriesContent: true, depth: 9
+  };
+
+  const chosen = Applicants.chooseColumnScrollTarget([page, shell, column]);
+  assert.equal(chosen.id, "div#9", "the applicant column is what has to move");
+  assert.equal(chosen.range, 8300);
+
+  // The page is refused however much range it has, because handling it is the
+  // fallback chooser's job and not this one's.
+  assert.equal(Applicants.chooseColumnScrollTarget([page]), null);
+  assert.equal(Applicants.chooseColumnScrollTarget([page, shell]), null, "an element that cannot move is not a scroller");
+  assert.equal(Applicants.chooseColumnScrollTarget([]), null);
+
+  // A scroll box that carries a filter rather than the content being read is
+  // refused outright — the same rule the connections chooser applies.
+  const filter = { ...column, id: "div#11", depth: 11, carriesContent: false, containsList: false };
+  assert.equal(Applicants.chooseColumnScrollTarget([filter]), null);
+  assert.equal(Applicants.chooseColumnScrollTarget([filter, column]).id, "div#9");
+
+  // Innermost wins: an outer qualifying container here is the page shell.
+  const outer = { ...column, id: "div#2", depth: 2 };
+  assert.equal(Applicants.chooseColumnScrollTarget([outer, column]).id, "div#9");
+
+  // A candidate with no `carriesContent` falls back to `containsList`, so the
+  // descriptor the connections chooser already produces still works.
+  const legacy = { id: "div#7", overflowY: "scroll scroll", scrollHeight: 5000, clientHeight: 800, containsList: true, depth: 7 };
+  assert.equal(Applicants.chooseColumnScrollTarget([legacy]).id, "div#7");
+});
+
+test("the panel is re-resolved and the whole column is walked, not one screenful", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // A detached node keeps answering `innerText` with what it held when it was
+  // unmounted, so a scan that held one reference re-read its first screenful.
+  assert.match(source, /function livePanel\(panel\)/, "the panel must be re-resolvable");
+  assert.match(source, /panel && panel\.isConnected \? panel : applicantPanel\(\)/, "a detached panel is not the panel");
+
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("// ---------------------------------------------------------- extraction"));
+  assert.match(scan, /live = livePanel\(live\)[\s\S]*?snapshotPanel\(live/, "every read must be of the live column");
+  assert.match(scan, /target = chooseScrollTarget\(live\) \|\| target/, "and the target re-chosen once the column has content");
+  assert.match(scan, /viewportHeight: viewportOf\(target\)/, "the viewport must be read live, not remembered");
+
+  // Sections below the fold only exist once the walk has reached them, so the
+  // expander runs again there — inside one shared budget, not a second eight.
+  assert.match(scan, /await expandCollapsedSections\(live, diagnostics, budget\)/, "what mounted late may still be collapsed");
+  assert.match(source, /function createExpansionBudget\(\)/, "the expansion budget must be shared");
+  assert.match(source, /for \(; budget\.used < MAX_EXPANSIONS; \)/, "and it must still be eight clicks in total");
+
+  // `scrollHeight` is live, so `clientHeight` has to be too.
+  const max = source.slice(source.indexOf("function maxScrollPosition"), source.indexOf("function scrollPanelTo"));
+  assert.match(max, /target\.element\.scrollHeight - viewportOf\(target\)/, "a remembered height ends the walk early");
+});
+
+test("a scroll box inside the panel is offered as well as every ancestor", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const candidates = source.slice(source.indexOf("function scrollCandidates"), source.indexOf("/**\n   * The container that actually moves"));
+
+  // Which side of the scroller `applicantPanel()` lands on is markup's choice.
+  assert.match(candidates, /root\.querySelectorAll\("div,section,main,ul,ol,\[role='list'\]"\)/, "descendants must be offered too");
+  assert.match(candidates, /COLUMN_TEXT_SHARE/, "but only ones that carry essentially the whole panel");
+  assert.match(candidates, /Applicants\.COLUMN_SCROLL_EPSILON/, "and only ones that can actually move");
+  assert.match(source, /carriesContent: carriesContent === null \? holdsRoot : Boolean\(carriesContent\)/,
+    "a descendant holds no ancestor, so it has to be told that it carries the content");
+});
+
+test("the panel is walked to the bottom before any overlay is opened", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const extract = source.slice(source.indexOf("async function extractApplicant"));
+  const scanAt = extract.indexOf("await scanApplicantPanel(");
+  const contactAt = extract.indexOf("await openContactAndCollect(");
+  const resumeAt = extract.indexOf("await collectResume(");
+  const buildAt = extract.indexOf("const record = Applicants.buildApplicantRecord(");
+  assert.ok(scanAt > 0, "the panel must be scanned");
+  assert.ok(contactAt > scanAt, "a modal opened mid-scan would stop the lazy walk dead");
+  assert.ok(resumeAt > contactAt, "and the resume comes after the contact disclosure");
+  assert.ok(buildAt > resumeAt, "the record is assembled only after everything has been read");
+
+  // A failing section is a warning, not the end of the extraction.
+  assert.match(source, /function attempt\(/, "each reader must be individually recoverable");
+  assert.match(source, /accumulator\.addWarning\(/, "a failed field must be logged, not thrown away");
+  // Explicit conditions rather than fixed sleeps wherever one exists.
+  assert.match(source, /async function waitFor\(/, "waits must be on conditions");
+  assert.match(source, /waitForDomQuiet\(/, "and on the DOM settling");
+});
+
+test("every loop in the applicants adapter can be stopped", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  assert.match(source, /function assertRunnable\(/, "one place decides whether work may continue");
+  assert.match(source, /if \(state\.aborted\) throw stoppedError\(\)/, "and Stop is the first thing it checks");
+  assert.match(source, /PV_STOP_ALL/, "the universal Stop must reach this surface");
+  assert.match(source, /Applicants\.nextRunStep\(/, "the run loop must use the tested step policy");
+  // A stop is an interruption, never a failed applicant.
+  assert.match(source, /error\?\.stopped/, "a stop must be distinguished from a failure");
+});
+
+test("each finished applicant is persisted immediately, not at the end of the run", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  assert.match(source, /type: "PV_APPLICANT_SAVE", record/, "records must stream to the worker as they finish");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  assert.match(worker, /APPLICANT_MESSAGES\.SAVE/, "the worker must accept the streamed record");
+  assert.match(worker, /await saveApplicant\(/, "and persist it through the merging adapter");
+});
+
+test("the resume is fetched by the worker, only from LinkedIn, and only once", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("async function stopAllContentScripts"));
+  assert.match(download, /RESUME_HOST_PATTERN\.test\(url\)/, "a non-LinkedIn host must be refused");
+  assert.match(download, /refused-non-linkedin-host/, "and said so, rather than silently skipped");
+  assert.match(download, /await resumeAlreadyDownloaded\(url\)/, "an already-saved resume must not download twice");
+  assert.match(download, /saveAs: false/, "a 600-applicant run must not ask 600 questions");
+  assert.match(download, /conflictAction: "uniquify"/, "and two applicants' files must not collide");
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  assert.ok(!/chrome\.downloads/.test(withoutComments(source)),
+    "a content script has no downloads API and must not pretend to");
+
+  // The other half of the guard lives in the tab, for the same run.
+  assert.match(source, /state\.downloadedResumes\.has\(key\)/, "the tab keeps its own set for the current run");
+  assert.match(source, /RESUME_STATUS\.UNAVAILABLE/, "no control means unavailable, never a guessed link");
+});
+
+test("a saved resume is named after the applicant, and the name is made safe first", () => {
+  const { sanitizeFileName, resumeFileName, resumeFileExtension } = Applicants;
+
+  // A folder of `AQHb3kJ2...` media ids is a folder nobody can use, so the file
+  // is named after the person.
+  assert.equal(resumeFileName({ name: "John Smith", fileType: "pdf" }), "John Smith.pdf");
+
+  // Every character a filesystem refuses, gone — and gone as a separator, not
+  // deleted, so "Ann/Marie" does not silently become "AnnMarie".
+  assert.equal(sanitizeFileName('An/na\\Ma:ri*a?"<>|'), "An na Ma ri a");
+  assert.equal(sanitizeFileName("  Priya   Sharma  "), "Priya Sharma", "runs of whitespace collapse and the ends trim");
+  // A leading dot hides the file on Unix; a trailing dot or space is silently
+  // dropped by Windows, so the same name writes differently on two machines.
+  assert.equal(sanitizeFileName("...John."), "John");
+  assert.equal(sanitizeFileName(".hidden"), "hidden");
+  // Windows device names are not files. `CON.pdf` fails or lands somewhere else.
+  assert.equal(sanitizeFileName("CON"), "CON file");
+  assert.equal(sanitizeFileName("nul"), "nul file");
+  assert.equal(sanitizeFileName("Connie"), "Connie", "only the exact reserved word, never a name that starts with it");
+  // A control character in a scraped name is not a filename character.
+  assert.equal(sanitizeFileName("Jo\u0000hn\u001f Sm\u007fith"), "John Smith");
+  assert.equal(sanitizeFileName("   "), "", "nothing usable is empty, never a stray separator");
+  assert.ok(sanitizeFileName("x".repeat(400)).length <= 100, "and it is bounded well under any filesystem limit");
+  // It is a stem and only a stem: no path can ever come out of it.
+  for (const value of ["../../etc/passwd", "C:\\Windows\\System32\\x", "a/b/c"]) {
+    assert.ok(!/[/\\]/.test(sanitizeFileName(value)), `${value} must not yield a path separator`);
+    assert.ok(!sanitizeFileName(value).startsWith("."), `${value} must not yield a relative path`);
+  }
+
+  // The extension is the real one or none at all — a `.pdf` on a `.docx` is a
+  // lie written to the recruiter's disk (rule 6).
+  assert.equal(resumeFileExtension("pdf", "", ""), "pdf");
+  assert.equal(resumeFileExtension(".PDF", "", ""), "pdf");
+  assert.equal(resumeFileExtension("application/pdf", "", ""), "pdf");
+  assert.equal(resumeFileExtension("", "mahak-ayani.docx", ""), "docx");
+  assert.equal(resumeFileExtension("", "", "https://media.licdn.com/dms/x.doc?e=1"), "doc");
+  assert.equal(resumeFileExtension("", "", "https://media.licdn.com/dms/AQHb3kJ2"), "", "an opaque media id yields none");
+  assert.equal(resumeFileName({ name: "John Smith" }), "John Smith", "and no extension is invented");
+  assert.equal(resumeFileName({ name: "John Smith", filename: "cv.docx" }), "John Smith.docx");
+
+  // The second DIFFERENT person of that name gets " (2)". The first is just the
+  // name, and numbering starts at 2 because that is what a human would write.
+  assert.equal(resumeFileName({ name: "John Smith", fileType: "pdf", index: 0 }), "John Smith.pdf");
+  assert.equal(resumeFileName({ name: "John Smith", fileType: "pdf", index: 1 }), "John Smith (2).pdf");
+  assert.equal(resumeFileName({ name: "John Smith", fileType: "pdf", index: 2 }), "John Smith (3).pdf");
+
+  // A nameless applicant falls back rather than writing a file called ".pdf".
+  assert.equal(resumeFileName({ name: "", filename: "AQHb3kJ2.pdf" }), "AQHb3kJ2.pdf");
+  assert.equal(resumeFileName({ name: "", filename: "", fallback: "applicant_1a2b" }), "applicant_1a2b");
+  assert.equal(resumeFileName({}), "resume", "and there is always a name");
+});
+
+test("the worker names the file after the person and reports the file it wrote", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("/** Tell every LinkedIn tab"));
+
+  // The policy is the core's, tested above. The worker owns `chrome.downloads`
+  // and nothing else — it must not grow a second copy of the sanitizing.
+  assert.match(download, /Applicants\.resumeFileName\(\{/, "the name must come from the tested rule");
+  assert.match(download, /Applicants\.sanitizeFileName\(message\?\.applicantName\)/, "and so must the stem it is claimed under");
+  assert.ok(!/replace\(\/\[\\\\\/:\*\?"<>\|\]/.test(download), "the old local sanitizer must be gone, not left alongside");
+
+  // Same name, different people -> " (2)". Same person twice -> the same file.
+  assert.match(worker, /async function claimResumeName\(stem: string, applicantKey: string\)/, "the suffix must be decided per applicant");
+  const claim = worker.slice(worker.indexOf("async function claimResumeName"), worker.indexOf("async function downloadedFilePath"));
+  assert.match(claim, /const existing = owners\.indexOf\(owner\);\s*\n\s*if \(existing >= 0\) return existing;/,
+    "the same applicant must keep their own file rather than growing a suffix on every visit");
+  assert.match(claim, /if \(!nameKey \|\| !owner\) return 0;/, "an unkeyed record cannot be told from the next one");
+
+  // `resume_file` means the file on disk, so it is read back, not assumed:
+  // `uniquify` renames, and an assumed path would name a file that is not there.
+  assert.match(worker, /async function downloadedFilePath\(downloadId: number, requested: string\)/, "the real path must be read back");
+  assert.match(download, /const actual = await downloadedFilePath\(downloadId, requested\)/, "and used as the reference");
+  assert.match(download, /localReference: actual/, "which is what the resume_file column shows");
+
+  // Clearing the applicants must clear the register, or the next John Smith
+  // becomes "John Smith (2)" with no John Smith anywhere.
+  const clear = worker.slice(worker.indexOf("APPLICANT_MESSAGES.CLEAR) {"), worker.indexOf("APPLICANT_MESSAGES.DIAGNOSTICS"));
+  assert.match(clear, /chrome\.storage\.local\.remove\(RESUME_NAMES_KEY\)/, "the filename register must be cleared with the records");
+});
+
+test("the resume is downloaded, not previewed, whenever the page already has the address", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+
+  // Rule 9e: a link needs no click at all. The recruiter asked for the file, so
+  // the document address is looked for BEFORE anything is opened, and the viewer
+  // is only opened when the page has not rendered it.
+  assert.match(step, /const rendered = linkedUrl \|\| findResumeDocumentUrl\(null\)/, "the page is asked before the control is clicked");
+  assert.ok(
+    step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
+    "nothing may be opened until the page has been asked"
+  );
+  assert.match(step, /if \(!url\) \{\s*\n\s*\/\/ The page did not render it/, "the viewer is the fallback, not the method");
+  assert.match(step, /diagnostics\.resume\.foundWithoutOpening = Boolean\(rendered\)/, "and it is reported which path was taken");
+  // Whichever path ran, a viewer that was opened is closed again — and the close
+  // is VERIFIED. Discarding the result is how a preview could be left on screen
+  // without the extension ever mentioning it, which is the whole complaint.
+  assert.ok(!/if \(overlay\) await closeOpenedOverlay\(overlay\)/.test(step),
+    "the close result must not be discarded");
+  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 3,
+    "every one of the three exits from this step closes the viewer");
+  const dismiss = source.slice(source.indexOf("async function dismissResumeViewer"), source.indexOf("const MAX_RESUME_BYTES"));
+  assert.match(dismiss, /the resume viewer would not close/, "and a viewer that refuses to go says so on the record");
+
+  // The person's name reaches the worker; the path never leaves this file.
+  assert.match(step, /applicantName,\s*\n\s*applicantKey/, "the applicant's name must be sent to the downloader");
+  assert.match(step, /fileType,/, "and the type, so the saved copy keeps the right extension");
+  assert.match(source, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| ""\)/,
+    "the name the record carries is the name the file is saved under");
+  assert.ok(!/RESUME_FOLDER|profile-vault-resumes/.test(step), "a content script must never build the download path");
+});
+
+test("the detail panel can never be a container that holds the applicant list", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const panel = source.slice(source.indexOf("function applicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
+
+  // The live defect: a wrapper around both columns satisfies "two sections", so
+  // it won, and the first line of its text was the list's heading.
+  assert.match(panel, /if \(rowLinksIn\(element\) > 1\) continue/, "a container holding the list must be refused");
+  assert.ok(!/return best \|\| document\.querySelector\("main"\) \|\| document\.body;\s*\n\s*}\s*\n\s*\/\*\* A link/.test(source),
+    "the fallback must not be document.body, which always contains the list");
+  assert.match(panel, /rowLinksIn\(element\) <= 1/, "even the fallback must exclude the list");
+
+  // One row link is fine — the panel legitimately links to the application it
+  // is showing. Two or more is a list.
+  assert.match(source, /function rowLinksIn\(element\)/, "the count must be a named, reusable rule");
+});
+
+test("the applicant's name is chosen by policy, corroborated by the platform's own prose", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const finder = source.slice(source.indexOf("function findApplicantName"), source.indexOf("function readApplicantHeader"));
+
+  // Every claim to the name, in order of how far the markup can be trusted.
+  for (const [signal, why] of [
+    ["list-row", "the applicant's own row in the list"],
+    ["profile-link", "the link to their profile"],
+    ["portrait-alt", "the portrait's alt text"],
+    ["panel-heading", "a heading that names no section"],
+    ["first-line", "and the first line, last of all"]
+  ]) {
+    assert.ok(finder.includes(signal), `${why} must be a candidate`);
+  }
+  assert.match(finder, /Applicants\.nameFromExplanations\(explanations\)/, "the explanations arbitrate");
+  assert.match(finder, /Applicants\.chooseApplicantName\(candidates,/, "and the tested policy decides");
+
+  // The row is matched on the applicationId in the address bar, not on which
+  // row happens to look highlighted.
+  const selected = source.slice(source.indexOf("function selectedApplicantRow"), source.indexOf("function findApplicantName"));
+  assert.match(selected, /row\.href\.includes\(applicationId\)/, "the id in the address bar identifies the row");
+
+  // Qualifications are read before the header so the arbiter exists on the very
+  // first snapshot.
+  const snapshot = source.slice(source.indexOf("function snapshotPanel"), source.indexOf("async function scanApplicantPanel"));
+  assert.ok(
+    snapshot.indexOf("readQualifications") < snapshot.indexOf("readApplicantHeader"),
+    "the explanations must be read before the name that is checked against them"
+  );
+  assert.match(snapshot, /readApplicantHeader\(panel, sections, accumulator, diagnostics\)/,
+    "the chosen name must be reported in diagnostics");
+});
+
+test("the next applicant is only scanned once the panel is showing them", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("async function loadEveryApplicantRow"));
+
+  // The live defect: waiting for the address to change and the DOM to go quiet
+  // meant the scan started on the previous applicant's panel or on an empty
+  // one, so every row after the first had no name, role or company.
+  assert.match(source, /function panelIdentity\(\)/, "the panel must have a fingerprint");
+  assert.match(select, /const before = panelIdentity\(\)/, "taken before the click");
+  assert.match(select, /waitFor\(\(\) => panelIdentity\(\) !== before/, "and waited on after it");
+  assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
+  assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
+
+  // A row that never opened is a skip, not a record — scanning anyway would
+  // save the previous applicant a second time under this row's identity.
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+  assert.match(run, /const opened = await selectApplicantRow\(row\)/, "the result must be checked");
+  assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
+});
+
+test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+
+  // The viewer is the FALLBACK, not the method (3.7.7) — it is opened only when
+  // the page has not rendered the address — but when it is opened it is read
+  // properly, because the file name only exists inside it.
+  assert.match(step, /control\.element\.click\(\)/, "the viewer must be openable");
+  assert.match(step, /await scrollResumeViewer\(overlay\)/, "a PDF viewer renders its pages lazily");
+  assert.match(step, /readResumeViewerDetails\(overlay\)/, "and its own details must be read");
+  assert.match(step, /details\.filename \|\| fileNameFrom\(url\)/, "the viewer's name beats one derived from the URL");
+  assert.match(step, /dismissResumeViewer\(overlay, accumulator, diagnostics\)/, "and it must be closed again on every path");
+  // A viewer that mounted only once the document arrived still has to be closed.
+  assert.match(step, /if \(!overlay\) overlay = findResumeViewer\(\);/, "the viewer is re-resolved before the close");
+
+  // Still nothing guessed: a viewer that shows no name and no document URL
+  // records what it did show and says the file was not saved.
+  assert.match(step, /RESUME_STATUS\.LINK_ONLY/, "no document URL is a state, not a guess");
+  assert.match(step, /RESUME_STATUS\.UNAVAILABLE/, "no control at all means unavailable");
+
+  const scroller = source.slice(source.indexOf("async function scrollResumeViewer"));
+  assert.match(scroller.slice(0, scroller.indexOf("\n  }")), /finally \{[\s\S]*?scrollPanelTo\(startY, target\)/,
+    "the viewer must be handed back where it was, on the failure path too");
+
+  // `pages` is part of the stored resume, and null when the viewer said nothing.
+  const record = Applicants.normalizeApplicantRecord({
+    applicant: { name: "Mahak Ayani", resume: { available: true, filename: "cv.pdf", pages: 3 } }
+  });
+  assert.equal(record.applicant.resume.pages, 3);
+  assert.equal(
+    Applicants.normalizeApplicantRecord({ applicant: { name: "X", resume: { available: true } } }).applicant.resume.pages,
+    null,
+    "a viewer that showed no page count leaves it null"
+  );
+});
+
+test("a LinkedIn page is never stored or downloaded as a resume", () => {
+  // The live defect, verbatim: the resume control's href on the hiring surface
+  // is a route, so "Open resume" reopened the applicants page — and the worker
+  // fetched that HTML page and saved it as somebody's CV while reporting
+  // `downloaded`.
+  for (const route of [
+    "https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&jobId=4277798308",
+    "https://www.linkedin.com/hiring/jobs/4277798308/applicants/25550787924",
+    "https://www.linkedin.com/in/mahak-ayani",
+    "https://www.linkedin.com/talent/hire/123/manage/all"
+  ]) {
+    assert.equal(Applicants.isResumeDocumentUrl(route), false, `${route} is a page, not a file`);
+  }
+
+  // A real document is one, whether it says so by extension, by host, or by path.
+  for (const document of [
+    "https://media.licdn.com/dms/document/ABC123/resume.pdf",
+    "https://media.licdn.com/dms/document/ABC123",
+    "https://example.com/cv/mahak-ayani.docx",
+    "https://files.example.com/ambry/abcd1234"
+  ]) {
+    assert.equal(Applicants.isResumeDocumentUrl(document), true, `${document} is a file`);
+  }
+  assert.equal(Applicants.isResumeDocumentUrl(""), false);
+  assert.equal(Applicants.isResumeDocumentUrl("javascript:void(0)"), false);
+
+  // Defence in depth: a route arriving on `url` — from an older record, a hand
+  // edit, or a route mistaken for a file — is moved to `viewerUrl`, exactly as
+  // `normalizeProfile` moves a linkedin.com address off `cvUrl`.
+  const repaired = Applicants.normalizeApplicantRecord({
+    applicant: {
+      name: "Mahak Ayani",
+      resume: { available: true, url: "https://www.linkedin.com/hiring/applicants/?applicationId=1", downloadStatus: "downloaded" }
+    }
+  });
+  assert.equal(repaired.applicant.resume.url, null, "a page must never be offered as the file");
+  assert.equal(repaired.applicant.resume.viewerUrl, "https://www.linkedin.com/hiring/applicants/?applicationId=1");
+
+  const real = Applicants.normalizeApplicantRecord({
+    applicant: { name: "X", resume: { available: true, url: "https://media.licdn.com/dms/document/A/cv.pdf" } }
+  });
+  assert.equal(real.applicant.resume.url, "https://media.licdn.com/dms/document/A/cv.pdf");
+  assert.equal(real.applicant.resume.viewerUrl, null);
+});
+
+test("the adapter and the worker both refuse a page route as a resume", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("async function collectResume"));
+  assert.match(step, /const linkedUrl = Applicants\.isResumeDocumentUrl\(controlHref\) \? controlHref : ""/,
+    "the control's href is only the file when it is one");
+  assert.match(step, /const viewerUrl = linkedUrl \? "" : controlHref/, "otherwise it is the viewer address");
+  assert.match(step, /viewerUrl: viewerUrl \|\| location\.href/, "and a viewer with no document still records where to look");
+
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("async function stopAllContentScripts"));
+  assert.match(download, /RESUME_PAGE_PATTERN\.test\(url\)/, "the worker must refuse a page route");
+  assert.match(download, /refused-page-not-a-document/, "and say so rather than report it downloaded");
+  // The host check alone passed it, because the host genuinely is LinkedIn.
+  assert.ok(
+    download.indexOf("RESUME_PAGE_PATTERN") < download.indexOf("resumeAlreadyDownloaded"),
+    "the page check must run before anything is fetched"
+  );
+});
+
+test("the applicant list is grown when the run needs a row, never walked up front", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const loader = source.slice(source.indexOf("async function loadEveryApplicantRow"), source.indexOf("async function extractAllApplicants"));
+  assert.ok(loader.length > 200, "loading the list must be its own step");
+
+  // Trap 3 on a new surface: a virtualized list read once gives a screenful,
+  // and a run over a screenful reports itself complete after ten people.
+  // Growth is measured in ROW IDENTITIES, never in a count. A paginated list
+  // swaps 25 rows for 25 different people, so the count is unchanged by a whole
+  // page of progress; a virtualized list recycles, so the count is a window size
+  // that never rises at all. `rows > seen` was false in both regimes forever.
+  assert.match(loader, /quiet = takeNewRows\(\) > 0 \? 0 : quiet \+ 1/, "growth must mean new rows, never a scroll that happened");
+  assert.match(loader, /const seenKeys = new Set\(applicantRows\(\)\.map\(rowKey\)\)/, "and it remembers who, not how many");
+  assert.match(loader, /LIST_QUIET_PASSES/, "it must stop on repeated passes that reveal nothing");
+  assert.match(loader, /LIST_MAX_PASSES/, "and it must be bounded so it cannot run forever");
+  assert.match(loader, /waitForDomQuiet\(/, "the next slice is fetched over the network and must be waited for");
+  assert.match(loader, /finally \{[\s\S]*?scrollPanelTo\(startY, target\)/, "the list must be handed back where it was");
+  assert.match(loader, /assertRunnable\(\)/, "and Stop must end it");
+
+  // THE REPORT: "you do not need to scroll [the applicant list] in the start,
+  // scroll when needed". A run over a 665-applicant job used to walk the whole
+  // list to the end across every page before opening the first person — minutes
+  // of scrolling with nothing collected, and the recruiter's own list dragged
+  // away from wherever they had left it.
+  //
+  // The on-demand growth carries the SAME three bounds as the full walk, because
+  // the failure mode it protects against is the same one: growth counts new
+  // rows, a fruitless pager is retired, and the attempt is capped.
+  const grow = source.slice(source.indexOf("async function growApplicantList"), source.indexOf("async function extractAllApplicants"));
+  assert.ok(grow.length > 200, "growing the list on demand must be its own step");
+  assert.match(grow, /LIST_GROW_PASSES/, "one attempt must be bounded");
+  assert.match(grow, /walk\.fruitless < MAX_FRUITLESS_PAGINATION/, "a settled page is still not a settled list");
+  assert.match(grow, /walk\.fruitless = produced \? 0 : walk\.fruitless \+ 1/, "growth must mean new rows, never a click");
+  // And "produced" is the CALLER's question — is there a row the run has not
+  // done — so a pager that replaces a page is scored as the progress it is.
+  assert.match(grow, /const produced = wanted\(\);/, "the pager is judged by what the run can now collect");
+  assert.match(grow, /async function growApplicantList\(diagnostics, hasWork\)/, "the caller supplies the question");
+  assert.match(grow, /assertRunnable\(\)/, "and Stop must end it");
+
+  // THE REPORT: "it automatically stops working ... make sure it works until the
+  // whole list is completed." The on-demand walk took ONE observation as the
+  // verdict — a single pass that ended at the bottom having revealed nothing
+  // consulted the pager, and with no pager in sight it broke out, after which
+  // `extractAllApplicants` saw no further row and marked the run COMPLETED. A
+  // slice still in flight, or a scroll target with no range, therefore finished
+  // a 665-applicant job in the first dozen rows and called it done.
+  assert.match(grow, /quiet \+= 1;\s*\n\s*if \(quiet < LIST_QUIET_PASSES\) continue;/,
+    "the bottom has to be confirmed, not believed on sight");
+  assert.ok(
+    grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;") < grow.indexOf("const pager ="),
+    "and confirmed BEFORE the pager is consulted, or the confirmation buys nothing"
+  );
+  assert.match(grow, /quiet = 0;/, "a fruitless page click earns the same confirmation over again");
+  assert.match(grow, /const live = applicantList\(\) \|\| list;/,
+    "the list is re-resolved per pass — a detached container reports the range it had when it was unmounted");
+
+  // The other half, and the one no amount of confirming fixes: the container
+  // being driven is a guess. When it is wrong `maxScrollPosition` answers 0,
+  // every pass reads as "already at the bottom", and no row ever arrives.
+  assert.match(grow, /nudgeListToLastRow\(\)/, "the bottom must be reachable without knowing which container scrolls");
+  const nudge = source.slice(source.indexOf("function nudgeListToLastRow"), source.indexOf("/** The walk ledger"));
+  assert.match(nudge, /last\.scrollIntoView\(\{ block: "end", inline: "nearest" \}\)/,
+    "scrollIntoView scrolls every scrollable ancestor the row needs");
+  assert.ok(!/\.click\(\)/.test(nudge), "it is a read: it presses nothing");
+  // The full walk shares the defect, so it shares the escape.
+  assert.match(loader, /else nudgeListToLastRow\(\);/, "the full walk uses it too");
+
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+  assert.doesNotMatch(run, /^\s*(?:const [\w.]+ = )?await loadEveryApplicantRow\(listDiagnostics\);$/m,
+    "the run must not walk the whole list unconditionally");
+  assert.match(run, /if \(options\.loadAll === true\) await loadEveryApplicantRow\(listDiagnostics\)/,
+    "the full walk stays available, but only when it is asked for");
+  assert.match(run, /if \(!pending\.length\) \{\s*\n\s*known = await growApplicantList\(listDiagnostics, \(\) => unprocessedRows\(\)\.length > 0\)/,
+    "the list is scrolled only when the run has run out of rows it has not done");
+  // ONE list scan per turn. `applicantRows()` walks every row link in the list,
+  // and a resumed run spends most of its turns skipping already-saved rows, so
+  // scanning twice per turn cost a mostly-collected 665-applicant job over a
+  // thousand full scans to decide it had nothing to do.
+  assert.match(run, /let pending = unprocessedRows\(\);/, "the turn takes one scan");
+  assert.match(run, /known = Math\.max\(known, processed\.size \+ pending\.length\);/, "and every answer comes from it");
+  // Already-saved rows are retired in BULK from that one scan, rather than
+  // costing a whole turn - and another scan - each.
+  assert.match(run, /for \(const candidate of pending\) \{/, "collected rows are retired in bulk");
+  assert.match(run, /const saved = candidateId\s*\n\s*\? collected\.has\(\{ applicationId: candidateId \}\)/,
+    "decided from the row's own href, so no row has to be opened to find out");
+  assert.match(run, /: collected\.has\(\{ name: candidate\.name \}\);/,
+    "and the name - which forces a layout - is consulted only when there is no id");
+  assert.match(run, /scrollPanelTo\(listStartY,/, "and it is handed back where the recruiter left it when the run ends");
+});
+
+test("the run walks the list by identity, so a position can never address the wrong person", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("// -------------------------------------------------- coming back to a job"));
+
+  // THE REPORT: "it is not working for all the list of applicants ... it stops
+  // again and again". The walk was `for (let index = 0; ; index += 1)` over a
+  // freshly re-queried `applicantRows()`, reading `live[index]` as "applicant
+  // number index". Position means nothing on this list, in either regime it can
+  // be in:
+  //   - PAGINATED (rule 9h): page two renders 25 DIFFERENT people at positions
+  //     0-24, so index 25 addresses nobody and the run ends at COMPLETED; had
+  //     page two rendered 26 rows, live[25] would have been applicant #51 and
+  //     #26-#50 would never have been opened.
+  //   - VIRTUALIZED: rows are recycled out of the DOM, so applicantRows() is a
+  //     moving window of about a dozen. The index runs off the end of it after a
+  //     dozen people, no scrolling can make length exceed it, and 665 applicants
+  //     are reported complete having collected twelve.
+  // Comments first, and for once that is not a formality: this file documents
+  // the defect it fixed in the very words the check greps for, so a prose
+  // description of the old walk would read as the old walk.
+  const code = withoutComments(run);
+  assert.ok(!/for \(let index = 0; ; index \+= 1\)/.test(code), "the positional walk must not come back");
+  assert.ok(!/live\[index\]/.test(code), "and a position must never be used to address a person");
+
+  // What replaces it: a ledger of what has been finished with, and "the first
+  // rendered row I have not finished with".
+  assert.match(run, /const processed = new Set\(\);/, "the run keeps its own ledger");
+  assert.match(run, /const nextRow = \(\) => unprocessedRows\(\)\[0\] \|\| null;/, "and asks it which row is next");
+  assert.match(source, /function rowKey\(row\)/, "identity must be a named, single rule");
+  const key = source.slice(source.indexOf("function rowKey(row)"), source.indexOf("How many scroll attempts"));
+  assert.match(key, /Applicants\.applicantRowKey\(row\)/,
+    "the adapter delegates identity to the pure policy exercised against recycled rows");
+  assert.equal(Applicants.applicantRowKey({ href: APPLICANTS_URL }), "id:25550787924",
+    "keyed on the only identifier a row carries before it is opened");
+  assert.equal(Applicants.applicantRowKey({ href: "https://www.linkedin.com/hiring/applicants/custom" }),
+    "href:https://www.linkedin.com/hiring/applicants/custom", "with the href as the fallback");
+  assert.equal(Applicants.applicantRowKey({ name: "  Asha Rao  " }), "name:asha rao",
+    "and the name last, because a row with no key at all would be walked forever");
+
+  // The name is read LAZILY, and that is a performance rule rather than a style
+  // one: innerText forces a synchronous layout flush, and applicantRows() used to
+  // take it for every rendered row on every call while the walk keys on `href`
+  // alone. The `text` field it also built was read by nothing.
+  const rows = source.slice(source.indexOf("function applicantRows()"), source.indexOf("// ------------------------------------------------------------- sections"));
+  assert.match(rows, /Object\.defineProperty\(entry, "name", \{/, "the row's name must be a lazy getter");
+  assert.ok(!/text: lines\.join/.test(rows), "and the dead text field must not come back");
+  assert.ok(!/const lines = toLines\(row\.innerText/.test(rows), "no eager innerText per rendered row");
+
+  // Every TERMINAL outcome records the row; a pause deliberately does not,
+  // because a paused row still has to be done.
+  const terminal = [...run.matchAll(/processed\.add\(key\)/g)].length;
+  assert.ok(terminal >= 4, `every terminal outcome must record the row (found ${terminal}: collected, already-saved, could-not-open, failed)`);
+
+  // Completion means "no unprocessed row can be produced", never "the mounted
+  // window ran out".
+  assert.match(run, /if \(!pending\.length\) \{[\s\S]{0,400}state\.run\.state = Applicants\.RUN_STATE\.COMPLETED;/,
+    "the run ends only when growing the list still yields nothing to do");
+  // And the total handed to nextRunStep cannot itself declare the queue complete
+  // at the end of page one — the old `total: known` was a rendered-row count.
+  assert.match(run, /Applicants\.nextRunStep\(state\.run, \{ total: processed\.size \+ 1 \}\)/,
+    "the step check must not be able to complete a run the list has not exhausted");
+
+  // The first row is no longer assumed to be the one already open.
+  assert.ok(!/if \(index > 0\) \{/.test(run), "`index > 0` assumed the open panel was row zero");
+  assert.match(run, /if \(!rowId \|\| rowId !== openId\) \{/,
+    "the panel is opened unless the address bar already says it shows this row");
+  // Still exactly seven click call sites: this adds no control (rule 9).
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("the bottom of the panel is reached without knowing which container scrolls", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // Every position-based walk in this codebase depends on having correctly
+  // identified the one container that scrolls, and getting it wrong is silent:
+  // the walk runs, the position never moves, the first read is already "the
+  // bottom", and one screenful is saved as the whole applicant.
+  assert.match(source, /async function revealPanelContent\(/, "there must be a container-agnostic pass");
+  const reveal = source.slice(source.indexOf("async function revealPanelContent"), source.indexOf("async function scanApplicantPanel"));
+  assert.match(reveal, /step\.element\.scrollIntoView\(\{ block: step\.block, inline: "nearest" \}\)/,
+    "scrollIntoView scrolls every ancestor the element needs, so it need not know");
+  assert.match(reveal, /quiet = added > 0 \|\| grown > size \? 0 : quiet \+ 1/,
+    "growth must mean new content, never a scroll that happened");
+  assert.match(reveal, /REVEAL_QUIET_PASSES/, "it must stop on passes that reveal nothing");
+  assert.match(reveal, /REVEAL_MAX_PASSES/, "and it must be bounded so it cannot run forever");
+  assert.match(reveal, /assertRunnable\(\)/, "and Stop must end it");
+
+  // THE REPORT: "you are scrolling the profile side only once." The reveal used
+  // to scroll to the LAST rendered element on every pass, so pass one jumped to
+  // the bottom and passes two and three had nowhere left to go — three passes,
+  // one movement, and a lazy panel never asked for anything between the top and
+  // wherever the first screenful's markup happened to end.
+  const step = source.slice(source.indexOf("function nextRevealStep"), source.indexOf("const REVEAL_MAX_PASSES"));
+  assert.match(step, /getBoundingClientRect\(\)\.top > fold - 8/,
+    "a step is the first box that STARTS below the fold, which advances about one screenful");
+  assert.match(step, /mode: "step", block: "start"/, "aligned to the top, so the step is a step and not a jump");
+  assert.match(step, /mode: "tail", block: "end"/,
+    "and only once nothing begins below the fold does it confirm the end by reaching it");
+  // Measured in viewport coordinates on purpose: that is what makes the step
+  // blind to which container scrolls, exactly as scrollIntoView is.
+  assert.ok(!/scrollTop|scrollHeight/.test(step), "the step must not depend on having identified a scroller");
+
+  // The floor under the quiet rule. Without it the quiet rule cannot tell "there
+  // is nothing below this" from "nothing has mounted below this yet", and on a
+  // panel rebuilt in place per applicant the second is the common case.
+  // THE REPORT: "the scroll stops partway down, and restarting stops at the same
+  // place". The walk had NO notion of the bottom at all — its only exit was the
+  // quiet counter, and that counter measures CONTENT, not PROGRESS. `added` is an
+  // accumulator-count delta and `grown` is the panel's text length, so a pass
+  // that steps a full screenful CORRECTLY still counts as quiet whenever the
+  // screenful it uncovered was already in the DOM or holds nothing new to parse.
+  // Three of those plus the floor ends the walk at exactly pass four — about four
+  // screenfuls down — while the panel scrolls perfectly the whole time. No timing
+  // is involved, which is why a restart reproduced it exactly.
+  assert.match(reveal, /if \(moved\) quiet = 0;/,
+    "a pass that MOVED the panel is progress, even when it uncovered nothing new");
+  assert.match(reveal, /const moved = shifted > REVEAL_MOVED_PX \|\| step\.element !== lastAnchor;/,
+    "and movement is measured on the anchor itself, in viewport coordinates");
+  // The end condition the walk never had. `mode: "tail"` is what nextRevealStep
+  // returns once nothing begins below the fold — this function's honest
+  // equivalent of atBottom, needing no scroller identification.
+  assert.match(reveal, /if \(reachedTail && quiet >= REVEAL_QUIET_PASSES/,
+    "quiet may only end the walk once the bottom has actually been reached");
+  // An immovable anchor is retired rather than re-picked for ever.
+  assert.match(reveal, /if \(!moved && step\.mode === "step"\) stuck\.add\(step\.element\);/,
+    "an anchor that did not budge must not be offered again");
+  assert.match(step, /if \(stuck\?\.has\(element\)\) continue;/, "and nextRevealStep must honour that");
+  assert.match(step, /if \(placement === "fixed" \|\| placement === "sticky"\) continue;/,
+    "a box positioned against the viewport can never be moved by scrolling an ancestor");
+  // A walk that never reached the bottom must say so instead of reporting
+  // "settled", which is what hid this for as long as it did.
+  assert.match(reveal, /if \(!reachedTail && record\.stoppedBy === "settled"\) record\.stoppedBy = "no-movement";/,
+    "an unfinished walk must not report itself settled");
+  assert.match(reveal, /record\.stoppedBy = "time-budget";/, "and the walk needs a wall-clock bound, not only a pass count");
+
+  assert.match(source, /const REVEAL_MIN_PASSES = 4/, "at least four passes, as asked for");
+  assert.match(reveal, /quiet >= REVEAL_QUIET_PASSES && record\.passes >= REVEAL_MIN_PASSES/,
+    "the quiet rule must not be able to end the walk before the floor is met");
+  // The nested region that holds Experience and Education is walked under the
+  // same floor: it is rebuilt per applicant too, and a region that has not
+  // mounted yet reads as "no range, already at the bottom" on its first pass.
+  const region = source.slice(source.indexOf("async function revealRegion"), source.indexOf("async function revealNestedRegions"));
+  assert.match(region, /const settled = pass \+ 1 >= REVEAL_MIN_PASSES/, "the region walk shares the floor");
+  assert.match(region, /if \(settled && position >= max/, "so neither early exit can fire on the first pass");
+  assert.match(region, /if \(settled && quiet >= REVEAL_QUIET_PASSES\) break/, "including the quiet one");
+
+  // It runs after the position walk and before the record is assembled.
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("// ---------------------------------------------------------- extraction"));
+  assert.match(scan, /live = await revealPanelContent\(live, accumulator, diagnostics\) \|\| live/, "the walk must use it");
+  assert.ok(
+    scan.indexOf("revealPanelContent") < scan.indexOf("expandCollapsedSections"),
+    "what it reveals may itself be collapsed"
+  );
+  // It scrolls arbitrary ancestors, so the page's own position is restored too.
+  assert.match(scan, /const originalWindowY = window\.scrollY/, "the page position must be remembered");
+  assert.match(scan, /finally \{[\s\S]*?window\.scrollTo\(\{ top: originalWindowY/, "and handed back on every path");
+});
+
+test("a section outside the resolved panel is still the open applicant's", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const map = source.slice(source.indexOf("function collectSections"), source.indexOf("/** Visible entity blocks"));
+
+  // `applicantPanel()` picks the smallest container carrying the most section
+  // headings, and a heading that has not hydrated does not count — so a panel
+  // resolved early can be a sub-container of the real detail column, and
+  // Experience, Education and Skills were then invisible for the whole
+  // extraction. That is the "current role and company are empty on every row"
+  // report.
+  assert.match(map, /collectSections\(page, map, \{ excludeList: true, source: "page" \}\)/,
+    "a section the panel did not hold must still be searched for");
+  assert.match(map, /Object\.keys\(map\)\.length < SECTION_PATTERNS\.length/, "and only when one is actually missing");
+  assert.match(source, /const page = document\.querySelector\("main"\) \|\| document\.body/,
+    "and the page-wide root is the page, never the applicant list");
+
+  // The widening stays honest: never the list, and never a container that
+  // swallows a second section, whose blocks would belong to the wrong one.
+  assert.match(map, /if \(list && list\.contains\(heading\.element\)\) continue/, "never a heading inside the applicant list");
+  assert.match(map, /if \(list && list\.contains\(element\)\) continue/, "and never a root inside it either");
+  assert.match(map, /element\.contains\(other\.element\)\)\) continue/, "a root swallowing another section is refused");
+
+  // 3.7.6: the root a heading owns is bounded by EVERY other heading, not only
+  // by the one that follows it. An ancestor reaching back over the section
+  // above contains that section's heading — which is precisely what the
+  // widened pass refuses — so Experience, the section most often outside the
+  // resolved panel, resolved to nothing at all and every derived column was
+  // empty.
+  const rootFor = source.slice(source.indexOf("function sectionRootFor"), source.indexOf("function collectSections"));
+  assert.match(rootFor, /const others = allHeadings\.filter\(/, "the bound must be every other heading");
+  assert.match(rootFor, /if \(others\.some\(\(entry\) => node\.contains\(entry\.element\)\)\) break/,
+    "an ancestor that swallows another heading is not this section's root");
+  assert.ok(!/DOCUMENT_POSITION_FOLLOWING/.test(rootFor), "bounding on the next heading alone is what left the root too wide");
+});
+
+test("a section root has to carry the section, and a useless one never blocks a better one", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE DEFECT, reported four times. LinkedIn renders the applicant's section
+  // title in its own header row — the word plus a collapse chevron — with the
+  // entries in a SIBLING container. `sectionRootFor` walked only upwards and
+  // seeded `best` with the heading's parent, so on that markup it returned the
+  // header row: a root whose entire text is "Experience". `blocksIn` found
+  // nothing, the text fallback parsed the single word, EXPERIENCE_NOISE_PATTERN
+  // correctly discarded it, and the applicant was saved with no experience —
+  // which is exactly how current_role, current_company AND education came back
+  // empty on a row that plainly showed all three.
+  const rootFor = source.slice(source.indexOf("function carriesSectionContent"), source.indexOf("function collectSections"));
+  assert.match(rootFor, /if \(carriesSectionContent\(node, heading\)\) best = node;/,
+    "an ancestor is only this section's root if it holds more than the heading");
+  assert.ok(!/let best = heading\.element\.parentElement;/.test(rootFor),
+    "the heading's own parent must not be accepted sight unseen — that is the bare header row");
+  assert.match(rootFor, /return best \|\| siblingSectionFor\(heading, allHeadings\) \|\| null;/,
+    "and when no ancestor qualifies, the section is the heading's following siblings");
+
+  // The sibling range holds the LIVE nodes; the wrapper is detached and must
+  // never move them out of the page.
+  const siblings = source.slice(source.indexOf("function siblingSectionFor"), source.indexOf("function sectionRootFor"));
+  assert.match(siblings, /wrapper\.__pvSectionNodes = taken;/, "the real nodes are referenced, not copied");
+  assert.ok(!/appendChild|append\(/.test(siblings), "appending would move the live nodes out of the page");
+  assert.match(source, /const range = section\.element\.__pvSectionNodes;/, "and the block reader has to know about them");
+
+  // THE AMPLIFIER, and why three releases of widening the search changed
+  // nothing: once the panel pass had stored ANY root for `experience`, every
+  // later and better pass was skipped for it.
+  const map = source.slice(source.indexOf("function sectionIsUseful"), source.indexOf("/** Visible entity blocks"));
+  assert.match(map, /function sectionIsUseful\(section\)/, "a stored section can be useless");
+  assert.match(map, /const stored = map\[heading\.key\];\s*\n\s*if \(stored && sectionIsUseful\(stored\)\) continue;/,
+    "only a USEFUL stored section blocks a later pass");
+  assert.match(map, /if \(stored && !sectionIsUseful\(candidate\)\) continue;/,
+    "and a useless candidate never replaces a useful one");
+  assert.ok(!/if \(!heading\.key \|\| map\[heading\.key\]\) continue;/.test(map),
+    "presence alone must not count as an answer");
+});
+
+test("every nested scroller is revealed, not only the one the walk chose", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const regions = source.slice(source.indexOf("function scrollableRegions"), source.indexOf("async function revealRegion"));
+
+  // `scrollCandidates` refuses a descendant carrying less than COLUMN_TEXT_SHARE
+  // (60%) of the panel's text, so that a filter or a menu is never mistaken for
+  // the column. Right there, wrong here: the applicant's profile preview —
+  // Experience, Education, "View full profile" — is its own nested scroller and
+  // carries well under 60% once qualifications and screening are counted. It was
+  // refused as a scroll target, and `revealPanelContent` only ever calls
+  // scrollIntoView on the panel's last element, which moves that element's
+  // ANCESTORS. So nothing ever scrolled it, only its first screenful rendered,
+  // and the two sections below its fold were never read.
+  assert.ok(!/COLUMN_TEXT_SHARE/.test(regions), "revealing must not inherit the scroll-target text-share gate");
+  assert.match(regions, /element\.scrollHeight - element\.clientHeight <= Applicants\.COLUMN_SCROLL_EPSILON\) continue/,
+    "a region that cannot move is not a region");
+  assert.match(regions, /if \(!\/auto\|scroll\|overlay\/i\.test/, "and it has to actually be scrollable");
+  assert.match(regions, /if \(list && \(list\.contains\(element\) \|\| element\.contains\(list\)\)\) continue;/,
+    "the applicant list is walked by loadEveryApplicantRow, never dragged from here");
+  assert.match(regions, /sort\(\(a, b\) => elementDepth\(b\) - elementDepth\(a\)\)/, "innermost first");
+
+  const walk = source.slice(source.indexOf("async function revealRegion"), source.indexOf("async function revealNestedRegions"));
+  assert.match(walk, /const startTop = region\.scrollTop;/, "the region is handed back where it was");
+  assert.match(walk, /finally \{[\s\S]{0,200}region\.scrollTop = startTop;/, "on the failure path as well");
+  assert.match(walk, /assertRunnable\(\);/, "and a Stop ends it at the next step");
+
+  // And it runs where it can do any good: after the panel walk and after the
+  // scrollIntoView pass, because a section that only exists once its own region
+  // has moved cannot be found by either of them.
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"));
+  const revealAt = scan.indexOf("await revealPanelContent(");
+  const regionsAt = scan.indexOf("await revealNestedRegions(");
+  assert.ok(revealAt >= 0 && regionsAt > revealAt, "nested regions are revealed after the panel itself");
+});
+
+test("a section that produced nothing prints the markup it was read from", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // Asked for explicitly after the fourth report: a heading and a block count
+  // say a section was FOUND, and it was. The question that needed answering was
+  // what that root actually contained, and only the real HTML says that.
+  assert.match(source, /function sectionMarkup\(section\)/, "the markup must be capturable");
+  assert.match(source, /SECTION_HTML_LIMIT/, "bounded — a panel's outerHTML is hundreds of kilobytes");
+  assert.match(source, /html: sectionMarkup\(section\)/, "and carried on the diagnostics, not only the console");
+  const log = source.slice(source.indexOf("function logSectionScan"), source.indexOf("/** Visible entity blocks"));
+  assert.match(log, /for \(const key of \["experience", "education"\]\)/, "both sections that came back empty");
+  assert.match(log, /if \(diagnostics\?\.totals\?\.\[key\]\) continue;/, "and only when they actually produced nothing");
+  assert.match(log, /no section resolved\. Headings seen:/, "not-found and found-but-empty are different reports");
+});
+
+test("a section title is still a section title with a count, a qualifier or a colon after it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // The live report: current_role, current_company and total_experience empty on
+  // every row. All three are derived from the Experience section and nothing
+  // else, so an empty column means no experience card was ever read — and
+  // `^experiences?$` matched only when the account rendered that exact word.
+  const patterns = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("/** What a section title may carry"));
+  assert.match(patterns, /experiences\?\$/, "Experience is still matched");
+  assert.match(patterns, /work \|professional \|employment \|career/, "and so is the qualified wording");
+  assert.match(patterns, /\^education\(\?:al background\)\?\$/, "Education likewise");
+
+  const keyFor = source.slice(source.indexOf("function sectionKeyFor"), source.indexOf("const HEADING_SELECTOR"));
+  assert.match(keyFor, /\\\(\\s\*\\d\+\\\+\?\\s\*\\\)/, "\"Experience (5)\" is the Experience section");
+  assert.match(keyFor, /\\s\+\\d\+\\\+\?\$/, "and so is \"Experience 5\"");
+  assert.match(keyFor, /\[:：\]/, "and \"Experience:\"");
+
+  // A section LinkedIn did not mark up as a heading at all is the last resort,
+  // asked only for what nothing else found — never a class name (rule 11).
+  assert.match(source, /function sectionLabelsIn\(root, wanted\)/, "a non-heading title must still be findable");
+  const labels = source.slice(source.indexOf("function sectionLabelsIn"), source.indexOf("/** A link that opens another application"));
+  assert.match(labels, /if \(!key \|\| !wanted\.has\(key\)\) continue/, "and only for a section nothing else produced");
+  assert.match(labels, /if \(!raw \|\| raw\.length > 60\) continue/, "text is measured before layout is");
+  assert.ok(!/class\*?=/.test(labels), "a section may never be identified by a generated class name");
+
+  // Blocks that yielded nothing must not silence the text on screen — but a
+  // re-read that parsed the same records again is not "nothing", it is the same
+  // answer, and running the whole-section text fallback over it is how a root
+  // spanning Experience and Education manufactured jobs out of school names.
+  const experience = source.slice(source.indexOf("function readExperience"), source.indexOf("function readEducation"));
+  assert.match(experience, /if \(parsed\) return added;/, "the text fallback runs when the blocks PARSED nothing");
+  assert.match(experience, /if \(!record\) continue;\s*\n\s*parsed \+= 1;/, "parsing and storing are counted separately");
+  assert.ok(!/if \(added \|\| blocks\.length\) return added;/.test(experience),
+    "a section whose list items are chrome used to return 0 and never read its own text");
+});
+
+test("the qualifications card is found even when only its subheadings name it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // `Qualifications` is what LinkedIn labels the must-have / preferred verdict
+  // card, and the pattern gets the same widening Experience got in 3.7.6.
+  const patterns = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("/** What a section title may carry"));
+  assert.match(patterns, /screening \|job \|candidate \|applicant/, "the qualified wordings must be matched");
+  assert.match(patterns, /qualifications\?\(\?: summary\| overview\| match\)\?\$/, "and a summary or a match suffix");
+
+  // The real gap: plenty of accounts render only `Must-have qualifications` and
+  // `Preferred qualifications` and never the plain word, so no section key
+  // matched and the whole card was invisible — no requirements, both tallies
+  // blank, and nothing saying why.
+  assert.match(source, /function collectQualificationSubsections\(root, map, /, "the subheadings must be able to name the section");
+  const subs = source.slice(source.indexOf("function collectQualificationSubsections"), source.indexOf("function buildSectionMap"));
+  assert.match(subs, /if \(map\.qualifications \|\| !root\) return map;/, "and only when nothing else named it");
+  assert.match(subs, /Applicants\.qualificationCategoryOf\(heading\.text\)/,
+    "the same rule that files a requirement under a category, not a second copy of it");
+  assert.match(subs, /container = commonAncestor\(container, sectionRootFor\(heading, root, all\)\)/,
+    "the card is the smallest element holding every subheading");
+  assert.match(subs, /if \(all\.some\(\(other\) => other\.key && container\.contains\(other\.element\)\)\) return map;/,
+    "a container swallowing a different section is refused — a wrong qualification is worse than an absent one");
+  assert.match(subs, /if \(list && list\.contains\(container\)\) return map;/, "and never the applicant list");
+
+  // Consulted last, after every other way of naming the section has been tried.
+  const build = source.slice(source.indexOf("function buildSectionMap"), source.indexOf("/** `div#applicant-detail"));
+  assert.ok(
+    build.indexOf("collectQualificationSubsections") > build.indexOf("page-label"),
+    "the subheading fallback is the last resort, not the first"
+  );
+  assert.match(build, /collectQualificationSubsections\(page, map, \{ excludeList: true, source: "page-subheadings" \}\)/,
+    "and it is tried page-wide too, with the list refused");
+});
+
+test("an empty column is explicable from the page it was read on", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // Rule 19 in spirit: "current_role is empty" is not actionable, and a live
+  // page is the only place the answer exists. So the extraction records what it
+  // looked for and what the DOM answered, and says so in the page's console.
+  assert.match(source, /function recordSectionScan\(map, panel, page, diagnostics\)/, "the section search must report itself");
+  const scan = source.slice(source.indexOf("function recordSectionScan"), source.indexOf("function logSectionScan"));
+  assert.match(scan, /headingSelector: HEADING_SELECTOR/, "the selector that was targeted");
+  assert.match(scan, /wanted: SECTION_PATTERNS\.map/, "the patterns it was matched against");
+  assert.match(scan, /key: heading\.key \|\| ""/, "every heading the page rendered, matched or not");
+  assert.match(scan, /foundIn: section\.source \|\| "panel"/, "where each section was actually found");
+  assert.match(scan, /blocks: blocksIn\(section\)\.length/, "and how many blocks came out of it");
+  assert.match(scan, /missing: SECTION_PATTERNS/, "and which sections nothing named");
+
+  // Once per applicant, not once per snapshot — it reads innerText page-wide and
+  // a scan takes dozens of snapshots.
+  assert.match(source, /diagnostics\.sections = Object\.keys\(buildSectionMap\(panel, diagnostics\)\)/,
+    "the full scan is recorded once, after the walk");
+  assert.match(source, /if \(diagnostics\) recordSectionScan\(map, panel, page, diagnostics\)/, "and only when asked for");
+  assert.match(source, /logSectionScan\(diagnostics\)/, "and it reaches the console the recruiter can open");
+
+  // One map per snapshot, shared by every reader: seven page-wide heading scans
+  // per read is both slow and seven chances to disagree about where a section is.
+  const snapshot = source.slice(source.indexOf("function snapshotPanel"), source.indexOf("/** The last element inside"));
+  assert.match(snapshot, /const sections = buildSectionMap\(panel\);/, "the map is built once per read");
+  assert.match(snapshot, /readExperience\(sections, accumulator\)/, "and handed to the readers");
+  assert.match(snapshot, /diagnostics\.sectionsFound = Object\.keys\(sections\)/, "each read says what it could see");
+});
+
+test("the resume document is found wherever the viewer rendered it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const finder = source.slice(source.indexOf("function findResumeDocumentUrl"), source.indexOf("/** The viewer LinkedIn mounted"));
+
+  // Every applicant came back `link_only` with no file and no link: the search
+  // looked at four tag shapes and decided with a local extension regex, so a
+  // viewer handing its document to a plugin through `data-source-url`, or a
+  // media host with no extension in the path, produced nothing.
+  assert.match(finder, /DOCUMENT_URL_ATTRIBUTES/, "the address may be in more than one attribute");
+  assert.match(finder, /for \(const root of \[scope, applicantPanel\(\), document\]\)/, "nearest first, then the page");
+
+  // The widening cannot return a route: the decision is the tested rule, which
+  // refuses a linkedin.com page address before it considers anything else.
+  assert.match(finder, /Applicants\.isResumeDocumentUrl\(url\)/, "one rule decides what a file is");
+  assert.ok(!/DOCUMENT_EXTENSION_PATTERN\.test\(url\)/.test(finder), "not a second local copy of it");
+
+  // And it is waited for, not sampled on the frame the viewer appeared.
+  const step = source.slice(source.indexOf("async function collectResume"));
+  assert.match(step, /waitFor\(\s*\n\s*\(\) => findResumeDocumentUrl\(overlay\) \|\| fetchedResumeDocumentUrl\(openedAt\),\s*\n\s*\{ timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS/,
+    "the viewer mounts its shell before it fetches the document, within the fast resume budget");
+
+  // The saved file is reported by where it is, not by Chrome's download id.
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("async function stopAllContentScripts"));
+  // 3.7.7: not the requested path either, but the one Chrome actually wrote.
+  assert.match(download, /localReference: actual\.path/, "an integer told the recruiter nothing, and a guessed path little more");
+  assert.match(download, /downloadId: String\(downloadId\)/, "the id is kept, just not as the reference");
+});
+
+test("a viewer that never writes the address down is still read, from what it fetched", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const finder = source.slice(source.indexOf("function fetchedResumeDocumentUrl"), source.indexOf("/** The viewer LinkedIn mounted"));
+
+  // The remaining way to open a viewer and save no file: LinkedIn's document
+  // viewer fetches the bytes in JavaScript and paints them into a <canvas>, or
+  // hands them to a plugin as a `blob:` URL — which `resumeUrlFrom` refuses,
+  // correctly, because the worker could never fetch it. So the attribute sweep
+  // finds nothing and every applicant comes back `link_only`.
+  assert.match(finder, /performance\.getEntriesByType\("resource"\)/,
+    "what the page actually requested is an observation, not a guess");
+  assert.match(finder, /Applicants\.isResumeDocumentUrl\(url\)/, "and the same one rule still decides what a file is");
+
+  // THE SAFETY. The entry buffer belongs to the document and a run walks
+  // hundreds of applicants through one without ever navigating, so consulted
+  // unbounded this would hand applicant two applicant one's CV — under the wrong
+  // person's name, which is worse than no file at all (rule 6).
+  assert.match(finder, /if \(!Number\.isFinite\(since\)\) return "";/, "it must refuse to answer without a floor");
+  assert.match(finder, /if \(!entry \|\| !\(entry\.startTime >= since\)\) continue;/, "and only ever see this applicant's own requests");
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+  assert.match(step, /const openedAt = performance\.now\(\);\s*\n\s*try \{\s*\n\s*control\.element\.click\(\)/,
+    "the floor is stamped before the click, so nothing earlier can be picked up");
+  assert.ok(!/fetchedResumeDocumentUrl\(\)/.test(source), "it is never called without one");
+});
+
+test("a resume that did not land is never recorded as saved", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // The defect: `downloadedFilePath` returned the REQUESTED path when Chrome
+  // reported the download interrupted, and the caller still answered
+  // `downloaded` — so an expired signed media address, a 403, or an HTML error
+  // body was written onto the record as a saved file with a path that is not on
+  // disk. `mergeApplicantRecord`'s `keepDownload` then protected that wrong
+  // answer from ever being corrected by a later collection.
+  const path = worker.slice(worker.indexOf("async function downloadedFilePath"), worker.indexOf("async function downloadResume"));
+  assert.match(path, /if \(item && item\.state === "interrupted"\) \{\s*\n\s*return \{ path: "", interrupted: true/,
+    "an interrupted download must report itself as one");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("async function stopAllContentScripts"));
+  assert.match(download, /if \(actual\.interrupted\) \{[\s\S]{0,320}?status: "failed"/, "and must never be answered as downloaded");
+
+  // Second attempt, from the tab that rendered it. A content script still never
+  // touches chrome.downloads — it hands back bytes, and the worker writes them.
+  assert.match(download, /retryFromPage: !dataUrl/, "the page is asked exactly once, never in a loop");
+  assert.match(download, /url: dataUrl \|\| url/, "the direct download is still tried first, every time");
+  assert.match(download, /if \(dataUrl && !\/\^data:\/i\.test\(dataUrl\)\)/, "and only page-fetched bytes are accepted");
+  assert.ok(!/RESUME_HOST_PATTERN[\s\S]{0,200}dataUrl/.test(download),
+    "the address is still what is checked — the bytes are what was found at it");
+
+  const fetcher = source.slice(source.indexOf("async function fetchResumeBytes"), source.indexOf("async function collectResume"));
+  assert.match(fetcher, /credentials: "include"/, "the page's own session is the point of fetching it there");
+  assert.match(fetcher, /\^text\\\/html\|\^application\\\/xhtml/, "an HTML answer is never written to disk as a CV");
+  assert.match(fetcher, /MAX_RESUME_BYTES/, "and the size is bounded before it becomes a message");
+  assert.ok(!/chrome\.downloads/.test(withoutComments(source)),
+    "a content script has no chrome.downloads (rule: the worker owns it)");
+
+  // An applicant collected twice still says which file on disk is theirs.
+  assert.match(source, /downloadedResumes: new Map\(\)/, "the register remembers where each file landed");
+  assert.match(source, /localReference: state\.downloadedResumes\.get\(key\) \|\| null/,
+    "so `already_saved` names the file instead of leaving the column empty");
+});
+
+test("a stopped run can be started again without reloading the page", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // The live defect: `wentHidden` is latched the instant the recruiter switches
+  // tab — which is how they reach the extension's own Applicants page — and was
+  // only ever cleared several steps inside `extractApplicant`. So the next run
+  // threw "the applicants page is hidden" out of `loadEveryApplicantRow` before
+  // reading a row, and only a page reload (a fresh content script, a fresh
+  // `state`) ever cleared it.
+  assert.match(source, /function beginRun\(\)/, "starting work must be one named step");
+  // Re-derived from the page rather than left latched — and CLEAR-ONLY.
+  // `assertRunnable` tests `!isPageVisible() || state.wentHidden`, whose first
+  // half is self-clearing and whose second is not, so sampling the live question
+  // into the latch writes a permanent answer to a temporary one. A page that is
+  // genuinely hidden is still refused by the half that asks live.
+  assert.match(source, /function clearHiddenLatchIfVisible\(\)/, "clearing the latch must be one named rule");
+  assert.match(source, /if \(isPageVisible\(\)\) state\.wentHidden = false;/,
+    "the hidden flag must be re-derived from the page, not left latched");
+  assert.ok(
+    !/state\.wentHidden = !isPageVisible\(\)/.test(withoutComments(source)),
+    "and nothing may SET it from a sample — that is how a lost race poisoned an applicant permanently"
+  );
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+  assert.match(run, /^\s*async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*beginRun\(\);/,
+    "a run must begin by clearing both flags");
+  assert.ok(!/async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*state\.aborted = false;\s*\n/.test(source),
+    "clearing the stop flag alone is what left the run unstartable");
+  assert.match(source, /if \(type === "PV_APPLICANT_EXTRACT"\) \{\s*\n\s*beginRun\(\);/,
+    "and so must a single applicant");
+
+  // A second press while a run is genuinely in flight is answered at once
+  // rather than left hanging on the first run's promise for up to an hour.
+  assert.match(source, /if \(state\.running\) \{[\s\S]*?alreadyRunning: true/, "a run already in flight must say so");
+
+  // The other half: the hiring tab is a different tab from the page the button
+  // was pressed on, so it is hidden the moment it is clicked and LinkedIn stops
+  // rendering it. Rule 12a, and rule 12 keeps the tab decision in the controller.
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  assert.match(worker, /async function revealApplicantTab\(tab: any\)/, "the hiring tab must be made renderable");
+  assert.match(worker, /await Tabs\.activate\(tab\.id, \{ focusWindow: true \}\)/,
+    "through the controller that owns every tab decision, and raising the window a button press asked for");
+  for (const command of ["COLLECT_CURRENT", "COLLECT_ALL"]) {
+    const branch = worker.slice(worker.indexOf(`APPLICANT_MESSAGES.${command}) {`));
+    assert.ok(
+      branch.indexOf("await revealApplicantTab(tab)") < branch.indexOf("ensureContentScript"),
+      `${command} must reveal the tab before it asks the page to read itself`
+    );
+  }
+  assert.ok(!/chrome\.tabs\.update\(/.test(worker.slice(worker.indexOf("async function revealApplicantTab"))),
+    "the worker must never activate a tab itself");
+});
+
+test("a run resumes over the applicants it has not collected yet", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+
+  // The live complaint: a run stopped half way went back to the first applicant
+  // and collected all of them again.
+  assert.match(source, /async function loadCollectedIndex\(jobId\)/, "the run must ask what is already saved");
+  assert.match(source, /type: "PV_APPLICANT_COLLECTED"/, "of the worker, which is the only thing with a store");
+  assert.match(run, /Applicants\.createCollectedIndex\(\[\], \{ jobId \}\)\s*\n\s*: await loadCollectedIndex\(jobId\)/,
+    "and `recollect` is how the whole list is asked for on purpose");
+
+  // Decided from the row's own href, before anything is opened.
+  assert.match(run, /const rowId = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
+    "the id in the row's href is all a row knows before it is opened");
+  assert.match(run, /if \(collected\.has\(\{ applicationId: rowId, name: row\.name \}\)\) \{[\s\S]*?alreadyCollected \+= 1/,
+    "an applicant already saved must be walked past, not opened");
+  assert.match(run, /collected\.applications\.add\(rowId\.toLowerCase\(\)\)/,
+    "and one collected in this run must not be collected again in it");
+
+  // A worker that cannot answer must never mean "collect everything again".
+  const loader = source.slice(source.indexOf("async function loadCollectedIndex"), source.indexOf("async function extractAllApplicants"));
+  assert.match(loader, /catch \{[\s\S]*?createCollectedIndex\(\[\]/, "an unreachable worker skips nobody");
+
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const branch = worker.slice(worker.indexOf("APPLICANT_MESSAGES.COLLECTED"), worker.indexOf("APPLICANT_MESSAGES.CLEAR"));
+  assert.match(branch, /Applicants\.isCollectedApplicant\(record\)/, "one copy of the rule, in the core");
+  assert.ok(!/applicants,\s*total/.test(branch), "the reply must be lean, not every stored record");
+});
+
+test("coming back to an unfinished job run resumes it, but a completed run stays finished", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // A navigation destroys the content script and everything it knew, so coming
+  // back to a job left the surface idle until the button was pressed again. The
+  // worker is the only thing that outlives the navigation, so it is what holds
+  // the instruction — and it holds it only for a job the recruiter themselves
+  // asked to collect, with the options they asked with.
+  assert.match(worker, /async function armAutoRun\(jobId: string, options: any, tabId = 0\)/, "the worker must remember the job and owning tab");
+  const collectAllStart = worker.indexOf("APPLICANT_MESSAGES.COLLECT_ALL) {");
+  const collectAll = worker.slice(collectAllStart, worker.indexOf("return { ok: false, error", collectAllStart));
+  assert.match(collectAll, /await armAutoRun\(/, "and only Collect Every Applicant arms it");
+  assert.ok(
+    collectAll.indexOf("APPLICANT_MESSAGES.STATUS") < collectAll.indexOf("await armAutoRun("),
+    "a second press must detect the live run before it can replace that run's lifecycle token"
+  );
+  const collectOne = worker.slice(worker.indexOf("APPLICANT_MESSAGES.COLLECT_CURRENT) {"), worker.indexOf("APPLICANT_MESSAGES.COLLECT_ALL) {"));
+  assert.ok(!/armAutoRun/.test(collectOne), "collecting one applicant is not asking for the whole list");
+
+  // A Stop that a navigation could undo is not a Stop (rule 13a).
+  const stopAll = worker.slice(worker.indexOf("async function stopEverything"), worker.indexOf("async function handleApplicantCommand"));
+  assert.match(stopAll, /await disarmAutoRuns\(\)/, "the universal Stop must clear the standing instruction");
+  assert.match(worker, /APPLICANT_MESSAGES\.STOP\) \{\s*\n[\s\S]{0,200}?await disarmAutoRuns\(\)/, "and so must the page's own Stop");
+
+  // Nothing is remembered forever: a job collected last week must not restart
+  // itself because the page happened to be opened.
+  assert.match(worker, /AUTO_RUN_TTL_MS/, "an armed job must expire");
+  assert.match(worker, /return \{ ok: true, armed: false, reason: "not-collected-before" \}/,
+    "a job that was never collected is never started");
+
+  // The page asks on arrival, and an arrival is a change of VIEW within a job —
+  // opening a row changes the address bar, and keying on the URL would restart
+  // the run on every row it opened.
+  assert.match(source, /function applicantsPageKey\(url\)/, "the arrival must be keyed on something stable");
+  assert.match(source, /return Applicants\.applicantsViewKey\(url\)/,
+    "one key rule, in the core where it is tested against real addresses");
+  const arrival = source.slice(source.indexOf("function checkAutoRunArrival"), source.indexOf("function resumeAutoRun"));
+  assert.match(arrival, /if \(key && key !== previous\) \{/, "moving within one view is not an arrival");
+  assert.match(source, /\/\/ And once now[\s\S]{0,200}checkAutoRunArrival\(\);/, "a full page load is an arrival too");
+
+  // It restarts from the first row — a fresh run state, never a stale index —
+  // and it is still the recruiter's own instruction being replayed.
+  const start = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
+  assert.match(start, /type: "PV_APPLICANT_AUTO_RUN", jobId/, "the worker is asked, never assumed");
+  assert.match(start, /if \(!verdict\?\.armed\) return abandonAutoRun\(/, "and an unarmed job is left alone");
+  assert.match(start, /runEveryApplicant\(verdict\.options \|\| \{\}, verdict\.tracking \|\| null\)/,
+    "with the options and execution token the worker issued");
+  assert.match(start, /if \(state\.running \|\| state\.extracting\) return abandonAutoRun\(/,
+    "never on top of a run already in flight");
+  // A pending arrival is still acted on the moment the tab is rendering again.
+  // The handler grew a second branch in 3.7.9 — a return to the tab with no
+  // arrival pending is now an arrival in its own right — so this asserts the
+  // pending path specifically rather than the shape of the whole handler.
+  const visibility = source.slice(source.indexOf("state.visibilityHandler = "), source.indexOf('document.addEventListener("visibilitychange"'));
+  assert.match(visibility, /if \(state\.autoRun\.pendingKey\) resumeAutoRun\(\);/, "and starts when it is visible again");
+
+  // 3.7.8: the page no longer explains this in prose — the explanatory text was
+  // removed from every surface on request. The behaviour is unchanged and is
+  // documented in CLAUDE.md and README.md instead.
+  const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  assert.ok(!/<p className="page-note">/.test(page), "the page carries no explanatory prose");
+
+  // And it costs no new click: the restart replays the run, it does not invent
+  // a control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("the worker lifecycle admits one newest execution and never reopens a completed run", async () => {
+  const now = "2026-08-03T12:00:00.000Z";
+  const entry = Applicants.createAutoRunEntry({
+    options: { recollect: false }, now, runId: "run-1", tabId: 41
+  });
+  assert.equal(entry.state, Applicants.AUTO_RUN_STATE.RUNNING);
+  assert.equal(entry.attempt, 1);
+
+  // A different tab cannot become a second driver while the owner is running.
+  const otherTab = Applicants.claimAutoRun(entry, { now, tabId: 99 });
+  assert.equal(otherTab.armed, false);
+  assert.equal(otherTab.reason, "running-in-another-tab");
+
+  // The same tab may replace its destroyed/reinjected document. It gets a new
+  // attempt token, so the old closure can no longer settle the successor.
+  const replacement = Applicants.claimAutoRun(entry, { now, tabId: 41 });
+  assert.equal(replacement.armed, true);
+  assert.equal(replacement.entry.attempt, 2);
+  const stale = Applicants.settleAutoRun(replacement.entry, {
+    runId: "run-1", attempt: 1, state: Applicants.AUTO_RUN_STATE.INTERRUPTED, now
+  });
+  assert.equal(stale.changed, false);
+  assert.equal(stale.reason, "stale-attempt");
+
+  const finished = Applicants.settleAutoRun(replacement.entry, {
+    ...replacement.tracking, state: Applicants.AUTO_RUN_STATE.COMPLETED, now
+  });
+  assert.equal(finished.changed, true);
+  assert.equal(finished.entry.state, Applicants.AUTO_RUN_STATE.COMPLETED);
+  assert.equal(Applicants.claimAutoRun(finished.entry, { now, tabId: 41 }).armed, false,
+    "reload, route return and tab return must all leave a completed run finished");
+
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  assert.match(source, /PV_APPLICANT_RUN_LIFECYCLE/, "the adapter must report its terminal lifecycle");
+  assert.match(source, /runEveryApplicant\(verdict\.options \|\| \{\}, verdict\.tracking \|\| null\)/,
+    "an automatic continuation must carry the worker's attempt token");
+  assert.match(source, /runEveryApplicant\(message\.options \|\| \{\}, message\.tracking \|\| null\)/,
+    "the deliberately started run must carry the first attempt token too");
+
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  assert.match(worker, /Applicants\.settleAutoRun\(/, "the worker must reject stale lifecycle reports through the pure policy");
+  assert.match(worker, /reason: claimed\.reason \|\| "not-restartable"/,
+    "completed or conflicting work must be refused rather than restarted");
+});
+
+test("a virtualized run advances by application id and never selects a finished row again", () => {
+  const jobId = "4277798308";
+  const ids = ["25550787924", "31813284466", "31780909456", "31770484956", "31761124316", "31759007336", "31758132116"];
+  const row = (applicationId) => ({
+    name: `Applicant ${applicationId}`,
+    href: `https://www.linkedin.com/hiring/applicants/?applicationId=${applicationId}&jobId=${jobId}`
+  });
+  const processed = new Set();
+  const selected = [];
+
+  // The mounted DOM recycles: the second applicant remains visible in every
+  // window, exactly like the repeated id in the supplied recording.
+  const windows = [
+    ids.slice(0, 3),
+    [ids[1], ids[2], ids[3]],
+    [ids[1], ids[3], ids[4]],
+    [ids[1], ids[4], ids[5]],
+    [ids[1], ids[5], ids[6]]
+  ];
+  for (const mounted of windows) {
+    for (;;) {
+      const next = Applicants.unprocessedApplicantRows(mounted.map(row), processed)[0];
+      if (!next) break;
+      const key = Applicants.applicantRowKey(next);
+      assert.ok(!processed.has(key), `must not reselect ${key}`);
+      processed.add(key);
+      selected.push(key);
+    }
+  }
+
+  assert.equal(new Set(selected).size, selected.length, "every selected applicant is unique");
+  assert.deepEqual(selected, ids.map((id) => `id:${id}`), "the queue advances in first-seen list order");
+});
+
+test("returning to a job's applicant list is an arrival; opening a row is not", () => {
+  const view = Applicants.applicantsViewKey;
+  const JOB = "4277798308";
+
+  // The live reference address, and the same address with a row opened on it.
+  const list = `https://www.linkedin.com/hiring/applicants/?jobId=${JOB}`;
+  const row = `https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&rating=GOOD_FIT&jobId=${JOB}`;
+  assert.equal(view(list), view(row),
+    "opening a row is how a run ADVANCES — it must never read as arriving somewhere new");
+  assert.match(view(list), new RegExp(`^job:${JOB}@`), "the job is still what an arrival is keyed on");
+
+  // The same job in the path, with and without the application appended.
+  const pathList = `https://www.linkedin.com/hiring/jobs/${JOB}/applicants`;
+  const pathRow = `https://www.linkedin.com/hiring/jobs/${JOB}/applicants/25550787924`;
+  assert.equal(view(pathList), view(pathRow), "an id in the path is still just a row being opened");
+
+  // ...but a DIFFERENT view of the same job is somewhere else, which is what
+  // makes LinkedIn's own in-app navigation back to the list a return.
+  assert.notEqual(view(`https://www.linkedin.com/hiring/jobs/${JOB}/manage`), view(pathList),
+    "the pipeline view and the applicant list are not the same place");
+
+  // A different job is a different key even from the same view.
+  assert.notEqual(view(`https://www.linkedin.com/hiring/applicants/?jobId=999${JOB}`), view(list));
+
+  // Anything that is not an applicants view is blank, so LEAVING is observable.
+  for (const away of [
+    "https://www.linkedin.com/feed/",
+    "https://www.linkedin.com/my-items/posted-jobs/",
+    `https://www.linkedin.com/hiring/jobs/${JOB}/detail`,
+    "",
+    "not a url"
+  ]) {
+    assert.equal(view(away), "", `${away || "(blank)"} is not an applicant list`);
+  }
+});
+
+test("an arrival survives a lost race, a back button and a bfcache restore", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // ROOT CAUSE 1. 3.7.6 wrote `lastKey` before it tried to start, and starting
+  // is async and fire-and-forget with several silent bails — so one lost race
+  // lost the restart for good, and only a reload (a fresh `state`) got it back.
+  // An arrival is now RECORDED, then retried until it is fulfilled or abandoned.
+  const arrival = source.slice(source.indexOf("function checkAutoRunArrival"), source.indexOf("function resumeAutoRun"));
+  assert.match(arrival, /state\.autoRun\.pendingKey = key;/, "an arrival is recorded, not consumed");
+  assert.match(arrival, /pumpAutoRun\(\);/, "and acting on it is a separate, repeatable step");
+  const pump = source.slice(source.indexOf("function pumpAutoRun"), source.indexOf("function checkAutoRunArrival"));
+  assert.match(pump, /state\.autoRun\.attempts \+= 1;/, "retrying must be bounded");
+  assert.match(pump, /AUTO_RUN_MAX_ATTEMPTS/, "by a stated number of attempts");
+  assert.match(source, /\}, 800\);/, "the poller retries as well as watches");
+
+  // The transient bails must NOT abandon: a list that has not mounted after an
+  // in-app route, and a worker that was asleep, are the two that actually happen.
+  const start = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
+  assert.match(start, /if \(!\(await waitForApplicantRows\(\)\)\) return;\s*\n/,
+    "a list that has not mounted yet is tried again, never given up on");
+  assert.match(start, /\/\/ retried rather than read as "no instruction"|retried rather than/,
+    "a worker that did not answer is not an instruction to do nothing");
+  // ...while a Stop and a run already in flight are final.
+  assert.match(start, /if \(state\.autoRun\.disabled\) return abandonAutoRun\(/, "a Stop is final (rule 13a)");
+  assert.match(source, /function abandonAutoRun\(reason\)/, "and giving up says why");
+
+  // ROOT CAUSE 2. A poller only samples. These are the three things it misses.
+  assert.match(source, /window\.addEventListener\("popstate", state\.navigationHandler\)/, "back and forward");
+  assert.match(source, /window\.addEventListener\("hashchange", state\.navigationHandler\)/, "and a hash route");
+  assert.match(source, /window\.addEventListener\("pageshow", state\.pageShowHandler\)/, "and a restored document");
+  assert.match(source, /new MutationObserver\([\s\S]{0,400}routeCheckScheduled/,
+    "and a pushState route, which is only observable through the re-render that follows it");
+
+  // A bfcache restore is the reported case: the SAME document comes back still
+  // holding the key it was frozen on, so the return reads as "already here".
+  const pageShow = source.slice(source.indexOf("state.pageShowHandler = "), source.indexOf('window.addEventListener("pageshow"'));
+  assert.match(pageShow, /if \(!event\?\.persisted\) return;/, "only a genuine restore");
+  assert.match(pageShow, /state\.autoRun\.lastKey = "";/, "the stale key must not suppress the return");
+  assert.match(pageShow, /clearHiddenLatchIfVisible\(\);/,
+    "and the freeze latched wentHidden, which would throw 'the page is hidden' before a row was read");
+
+  // Re-injection must not leave two watchers arguing over one page — nor two
+  // RUNS. Replacing the listeners and the `state` object left any run already in
+  // flight alive inside the old closure, still walking the list and still
+  // pressing rows, and unstoppable from outside because Stop sets `aborted` on
+  // the new state while the old loop reads its own. The worker re-injects on a
+  // build-id mismatch and after a single ping timeout, so a busy page is enough.
+  assert.match(source, /if \(previous\) \{\s*\n\s*previous\.aborted = true;/, "the previous copy's run must be retired");
+  assert.match(source, /if \(previous\.run\) previous\.run\.stopRequested = true;/, "through the flags it already honours");
+  assert.match(source, /if \(previous\.autoRun\) previous\.autoRun\.disabled = true;/, "and it must not restart itself either");
+  assert.match(source, /if \(previous\?\.routeObserver\) previous\.routeObserver\.disconnect\(\);/);
+  assert.match(source, /window\.removeEventListener\("popstate", previous\.navigationHandler\)/);
+  assert.match(source, /if \(previous\?\.pageShowHandler\) window\.removeEventListener\("pageshow", previous\.pageShowHandler\)/);
+
+  // And none of it costs a click: the restart replays the run, it invents no control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("coming back to the tab restarts the run, and the page says so", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE GAP. Every watcher on this page asks "did we ARRIVE somewhere new", and
+  // `applicantsViewKey` is built so that opening a row does not count. A tab
+  // switch changes no address at all, so that test could never fire for it —
+  // while a run interrupted by the tab going hidden gives up for good once
+  // VISIBILITY_WAIT_MS passes. Glance at another window for five minutes, come
+  // back, and the surface has quietly decided the run was over. Reloading was
+  // the only cure, because a reload re-injects this script with a fresh state.
+  const visibility = source.slice(source.indexOf("state.visibilityHandler = "), source.indexOf('document.addEventListener("visibilitychange"'));
+  assert.match(visibility, /else noteReturnToTab\(\);/, "returning to the tab must be watched for in its own right");
+
+  const note = source.slice(source.indexOf("function noteReturnToTab"), source.indexOf("// ------------------------------------------------------------- messaging"));
+  // The guard rails are the whole reason this stays inside "after a direct user
+  // action" — it replays the recruiter's own instruction and invents nothing.
+  assert.match(note, /if \(state\.running \|\| state\.extracting\) return;/,
+    "a run already in flight continues in place, which is better than restarting it");
+  assert.match(note, /if \(state\.autoRun\.disabled\) return;/, "a Stop is still final (rule 13a)");
+  assert.match(note, /state\.autoRun\.pendingKey = key;/, "the return is RECORDED, then retried like any other arrival");
+
+  // ...and a view already run to completion is NOT restarted again.
+  //
+  // THE LOOP THIS ENDS: the worker keeps a job armed for twelve hours and is
+  // never told a run finished, and `state.running` is null the moment one does.
+  // So the ordinary way of using this — press Collect Every Applicant, switch to
+  // the Applicants page to watch the rows arrive, switch back — restarted the
+  // whole 665-row walk from the first row, every glance, for twelve hours.
+  assert.match(note, /if \(key === state\.autoRun\.ranKey\) return;/, "a completed view is not walked again");
+  const start = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
+  assert.match(start, /if \(state\.run\?\.state === Applicants\.RUN_STATE\.COMPLETED\) state\.autoRun\.ranKey = key;/,
+    "and it is remembered only for a run that genuinely finished");
+  // The distinction is load-bearing: an INTERRUPTED run is exactly the one a
+  // return to the tab should pick up, so STOPPED must not be remembered.
+  assert.ok(!/RUN_STATE\.STOPPED\) state\.autoRun\.ranKey/.test(start), "an interrupted run stays restartable");
+  assert.match(source, /state\.autoRun\.ranKey = "";/, "and a deliberate press clears it, so asking again always runs");
+
+  // A tick that cannot try must not spend an attempt: the 800 ms poller beats
+  // throughout the twenty seconds startAutoRun may spend waiting for the list,
+  // and each of those returned at the `busy` guard having already burnt one.
+  const pump = source.slice(source.indexOf("function pumpAutoRun"), source.indexOf("function checkAutoRunArrival"));
+  assert.ok(
+    pump.indexOf("state.autoRun.busy || !isPageVisible()") < pump.indexOf("AUTO_RUN_MAX_ATTEMPTS"),
+    "the cannot-try bails must come before the budget check"
+  );
+  assert.match(note, /pumpAutoRun\(\);/, "and fulfilled by the same bounded, retryable step");
+  // It records an arrival; it does not decide to run. `startAutoRun` still asks
+  // the worker whether this job was armed by Collect Every Applicant.
+  assert.ok(!/extractAllApplicants/.test(note), "it must not start a run behind the arming check");
+
+  // The notice. A run resuming in silence is indistinguishable from a dead one,
+  // which is what made pressing F5 look like the fix.
+  assert.match(source, /function showPageNotice\(text\)/, "there must be an on-page notice");
+  const notice = source.slice(source.indexOf("function showPageNotice"), source.indexOf("function hiddenPageError"));
+  assert.match(notice, /pointer-events:none/, "it must never come between the recruiter and their own page");
+  assert.match(notice, /setAttribute\("role", "status"\)/, "announced without stealing focus");
+  assert.match(notice, /clearTimeout\(state\.noticeTimer\)/, "and it must take itself away again");
+  assert.ok(!/\.click\(\)/.test(notice), "it is a banner, not a control");
+
+  // Said only where work actually resumes — a banner over a surface that then
+  // does nothing is worse than no banner.
+  const restart = source.slice(source.indexOf("async function startAutoRun"), source.indexOf("function pumpAutoRun"));
+  assert.match(restart, /showPageNotice\("Profile Vault resumed[\s\S]{0,80}"\);/, "the restart says so");
+  assert.ok(
+    restart.indexOf("verdict?.armed") < restart.indexOf("showPageNotice"),
+    "and only after the job is known to be armed"
+  );
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+  assert.match(run, /const resumed = await waitForVisibleAgain\(\);[\s\S]{0,400}?showPageNotice\(/,
+    "a run continuing after a hidden pause says so too");
+
+  // Re-injection must not strand a banner with no timer left alive to remove it.
+  assert.match(source, /if \(previous\?\.noticeTimer\) clearTimeout\(previous\.noticeTimer\);/);
+  assert.match(source, /previous\.noticeElement\.remove\(\)/);
+
+  // Still no new control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("the run collects every page of the applicant list, not only the first", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // Through 3.7.7 the walk scrolled and nothing else, so "the scroll container
+  // reached its bottom and stopped growing" WAS "the list has ended" — and the
+  // end of page one is indistinguishable from that. A job with more applicants
+  // than fit on one page was collected one page deep and reported complete.
+  const walk = source.slice(source.indexOf("async function loadEveryApplicantRow"), source.indexOf("function logListWalk"));
+  assert.match(walk, /const pager = fruitless < MAX_FRUITLESS_PAGINATION/, "a settled page is not a settled list");
+  assert.match(walk, /pager\.element\.click\(\);/, "the next page is asked for");
+  assert.match(walk, /if \(!pager\) \{/, "and a list with no pager still ends");
+
+  // Three bounds, each of which alone stops a run that never terminates.
+  assert.match(walk, /fruitless = gained > 0 \? 0 : fruitless \+ 1;/,
+    "growth counts NEW ROWS, never a click that happened");
+  // NEW ROWS by identity. A pager that swaps page one's 25 people for page two's
+  // 25 leaves the count untouched, so a count-based test scored a whole page of
+  // progress as nothing, pressed the pager until it was retired, and returned
+  // having walked past pages two, three and four in silence.
+  assert.match(walk, /const gained = takeNewRows\(\);/, "and it asks who arrived, not how many rows there are");
+  assert.match(source, /const MAX_FRUITLESS_PAGINATION = 3;/, "a pager revealing nothing is retired");
+  assert.match(walk, /passes < LIST_MAX_PASSES/, "and the whole walk is capped");
+
+  // The policy decides which element that is, and the denylist is consulted first.
+  const finder = source.slice(source.indexOf("function findApplicantPaginationControl"), source.indexOf("/**\n   * Every row, across every page."));
+  assert.match(finder, /purpose: Applicants\.CONTROL_PURPOSE\.PAGINATION/, "gated like every other control");
+  assert.match(finder, /inContainer: scope\.contains\(element\)/, "and proven inside the list, not assumed");
+  assert.match(finder, /if \(element\.disabled \|\| element\.getAttribute\("aria-disabled"\) === "true"\) continue;/,
+    "a disabled pager is the last page — clicking it forever is how a walk stops terminating");
+
+  const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+  const policy = core.slice(core.indexOf("function classifyApplicantControl"), core.indexOf("return refuse(\"unknown-purpose\")"));
+  assert.match(policy, /if \(!APPLICANT_PAGINATION_PATTERN\.test\(label\)\) return refuse\("not-a-pagination-control"\)/,
+    "an allowlist, by name");
+  assert.match(policy, /purpose === CONTROL_PURPOSE\.PAGINATION[\s\S]{0,400}?if \(!inContainer\) return refuse\("outside-applicant-list"\)/,
+    "and the container proof is mandatory");
+  // The denylist still wins: it is tested before any purpose branch.
+  assert.ok(
+    policy.indexOf("FORBIDDEN_APPLICANT_CONTROL_PATTERN") < policy.indexOf("CONTROL_PURPOSE.PAGINATION"),
+    "the denylist is consulted before pagination, as before every other purpose"
+  );
+
+  // And the walk says what it did, so "why only 25?" is answerable from the page.
+  assert.match(source, /applicant list — \$\{walk\.rows\} row\(s\) across \$\{walk\.pages\} page\(s\)/);
+});
+
+test("the resume link is saved first and downloading cannot stop the applicant run", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+
+  // The verified document link becomes part of the record before any worker
+  // download is awaited. A timeout therefore loses only the local file, not the
+  // applicant or the link needed to retry it.
+  assert.match(step, /accumulator\.setResume\(\{[\s\S]{0,320}?url,[\s\S]{0,320}?downloadStatus: Applicants\.RESUME_STATUS\.LINK_ONLY/,
+    "the verified resume link must be recorded before downloading");
+  assert.match(step, /diagnostics\.resume\.linkSavedBeforeDownload = true/);
+  assert.ok(
+    step.indexOf("linkSavedBeforeDownload = true") < step.indexOf("sendRuntimeMessageWithTimeout(request)"),
+    "saving the link must happen before the download request"
+  );
+
+  // The normal path uses chrome.downloads directly through the worker. It never
+  // opens a document tab, so LinkedIn cannot mark the hiring page hidden and end
+  // the row loop. The old tab cycle remains only as a compatibility handler.
+  assert.match(step, /type: "PV_APPLICANT_DOWNLOAD_RESUME"/);
+  assert.ok(!/PV_APPLICANT_OPEN_AND_SAVE_RESUME/.test(step), "the collector must not open a resume tab");
+  assert.ok(!/resumeCycle/.test(source), "no visibility bypass is needed when no tab is opened");
+  const download = worker.slice(worker.indexOf("async function downloadResume"), worker.indexOf("async function stopAllContentScripts"));
+  assert.match(download, /chrome\.downloads\.download\(\{/);
+
+  // Every potentially slow boundary is bounded. The PDF is not walked end to end
+  // merely to obtain a link, and a sleeping worker cannot pin the applicant.
+  assert.match(source, /const RESUME_VIEWER_TIMEOUT_MS = 4500/);
+  assert.match(source, /const RESUME_DOCUMENT_TIMEOUT_MS = 4500/);
+  assert.match(source, /const RESUME_MESSAGE_TIMEOUT_MS = 8000/);
+  assert.match(source, /for \(; steps < 3; steps \+= 1\)/, "resume metadata scrolling is shallow");
+  assert.match(source, /sendRuntimeMessageWithTimeout\(request\)/);
+  assert.match(worker, /const RESUME_TAB_TIMEOUT_MS = 6000/, "the compatibility tab path is also bounded tightly");
+
+  // A hidden page is still a pause for the profile scan itself, not an automatic
+  // terminal stop, and the lifecycle token prevents a stale replacement loop.
+  const loop = source.slice(source.indexOf("async function extractAllApplicants"));
+  assert.match(loop, /const resumed = await waitForVisibleAgain\(\);/);
+  assert.match(source, /async function runEveryApplicant\(options = \{\}, tracking = null\)/);
+  assert.match(source, /PV_APPLICANT_RUN_LIFECYCLE/);
+});
+
+test("the popup closes itself once Collect Every Applicant has actually started", async () => {
+  const popup = await readFile(resolve(root, "src/react/popup.tsx"), "utf8");
+
+  // The run happens on the hiring tab, which the worker has just activated and
+  // focused. A popup left hanging over it is covering the one thing the
+  // recruiter pressed the button to watch.
+  const handler = popup.slice(popup.indexOf("collectEveryApplicant = async"), popup.indexOf("renderApplicantPanel()"));
+  assert.match(handler, /if \(response\?\.started\) \{\s*\n\s*this\.closePopup\(\);/,
+    "closed on the worker's own proof that the run started");
+  assert.match(handler, /if \(response\?\.ok === false\) throw new Error/,
+    "and a failure is raised before anything closes");
+  const startedAt = handler.indexOf("response?.started");
+  const closedAt = handler.indexOf("this.closePopup()");
+  const sentAt = handler.indexOf("await chrome.runtime.sendMessage");
+  assert.ok(sentAt >= 0 && sentAt < startedAt && startedAt < closedAt,
+    "the reply is awaited first — a popup that closes before the command lands cannot report that it failed");
+
+  // A window that vanishes on failure is a button that silently did nothing.
+  assert.match(handler, /this\.setStatus\(error instanceof Error \? error\.message : String\(error\), "error"\)/,
+    "an error keeps the popup open and shows it");
+  assert.match(handler, /if \(!this\.closing\) \{/, "and nothing writes state into a closing document");
+
+  // Only this command closes. Start Collecting and Collect This Applicant share
+  // `runImport`, and neither of them may take the window away.
+  const runImport = popup.slice(popup.indexOf("runImport = async"), popup.indexOf("startCollecting ="));
+  assert.ok(!/closePopup|window\.close/.test(runImport), "the shared helper must never close the popup");
+  assert.match(popup, /collectApplicant = \(\) => this\.runImport\(/, "collecting one applicant still uses the shared helper");
+
+  assert.match(popup, /clearInterval\(this\.importTimer\);\s*\n\s*this\.importTimer = null;\s*\n\s*\}\s*\n\s*window\.close\(\);/,
+    "the poller is cleared before the close, not after");
+
+  // The full-page Applicants dashboard is a different component and must stay open.
+  const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  assert.ok(!/window\.close\(\)/.test(page), "the Job Applicants page is a page, not a popup");
+});
+
+test("the hiring surface is a content script entry scoped to LinkedIn hiring pages", async () => {
+  const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
+  const entry = manifest.content_scripts.find((script) => (script.js || []).includes("applicants.js"));
+  assert.ok(entry, "a content script entry for applicants.js must exist");
+  assert.deepEqual(entry.js, [
+    "src/extraction-core.js",
+    "src/connections-core.js",
+    "src/applicants-core.js",
+    "applicants.js"
+  ], "the cores load before the adapter that reads them");
+  for (const pattern of entry.matches) {
+    assert.match(pattern, /^https:\/\/(?:www\.)?linkedin\.com\/(?:hiring|talent)\/\*$/, `${pattern} must target the hiring surface only`);
+  }
+  // Nothing new was asked for: the surface is covered by the existing host
+  // permissions and the existing `downloads` permission.
+  assert.deepEqual(manifest.permissions.slice().sort(), ["activeTab", "alarms", "downloads", "scripting", "storage"]);
+  assert.deepEqual(manifest.host_permissions.sort(), ["https://linkedin.com/*", "https://www.linkedin.com/*"].sort());
+});

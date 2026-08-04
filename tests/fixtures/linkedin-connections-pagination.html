@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Network | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for decision D1: allowlisted pagination.
+    Open it in a browser and read document.body.dataset.result.
+
+    What this proves:
+      1. "Load more" is inside the connections list and IS clicked, revealing page 2.
+      2. "Connect" and "Message" sit next to it and are NEVER clicked, even though they
+         are buttons in the same container.
+      3. A decoy button labelled "Connect" but carrying aria-label="Load more" is NOT
+         clicked, because a forbidden action always beats the allowlist.
+      4. The advertised total (3 connections) is read and, being exact, allows coverage
+         to be reported as confirmed once all three are found.
+
+    Expected result: urls = alpha-example, beta-example, gamma-example;
+    clickedPagination = true; total = 3; totalReliable = true;
+    and window.__CLICKED__ must contain only "load-more".
+  -->
+  <style>
+    body { margin: 0; min-height: 2600px; font-family: Arial, sans-serif; }
+    main { width: 760px; margin: 0 auto; position: relative; min-height: 2400px; }
+    .row { padding: 14px; border-bottom: 1px solid #ddd; }
+    .page2 { display: none; }
+    .spacer { height: 1400px; }
+  </style>
+</head>
+<body>
+<main>
+  <h2>3 Connections</h2>
+
+  <div class="row">
+    <a href="/in/alpha-example/">Alpha Example</a>
+    <button type="button" data-forbidden="connect">Connect</button>
+    <button type="button" data-forbidden="message">Message</button>
+  </div>
+
+  <div class="row">
+    <a href="https://www.linkedin.com/in/beta-example?trk=connections_list">Beta Example</a>
+    <!-- Decoy: forbidden text, pagination aria-label. Must never be clicked. -->
+    <button type="button" aria-label="Load more" data-forbidden="decoy">Connect</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="row page2">
+    <a href="/in/gamma-example/">Gamma Example</a>
+  </div>
+
+  <button type="button" id="loadMore">Load more</button>
+</main>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  globalThis.__CLICKED__ = [];
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: { onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} } }
+  };
+
+  // Record every click so the fixture can prove which controls were activated.
+  document.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => {
+      globalThis.__CLICKED__.push(button.id === 'loadMore' ? 'load-more' : (button.dataset.forbidden || 'unknown'));
+    });
+  });
+
+  document.getElementById('loadMore').addEventListener('click', () => {
+    document.querySelectorAll('.page2').forEach((node) => { node.style.display = 'block'; });
+    document.getElementById('loadMore').remove();
+  });
+
+  history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
+</script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../connections.js"></script>
+<script>
+  // Two passes: the first reaches the bottom and pages, the second picks up page 2.
+  messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: 0 } }, {}, (first) => {
+    messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: first.cursorY } }, {}, (second) => {
+      const urls = [...new Set([...(first.urls || []), ...(second.urls || [])])];
+      const payload = { first, second, urls, clicked: globalThis.__CLICKED__ };
+      document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    });
+  });
+</script>
+</body>
+</html>

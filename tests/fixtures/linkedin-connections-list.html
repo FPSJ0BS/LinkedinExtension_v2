@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Network | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for connections discovery. Open it in a browser and read
+    document.body.dataset.result. All names and slugs are invented.
+
+    It reproduces four things the discovery pass must handle:
+      1. virtualized rows that only render near the viewport (lazy scrolling)
+      2. the same profile linked twice with different query strings and sub-paths
+      3. company/school links that must never enter the queue
+      4. a sidebar with profile links that must be rejected as excluded context
+  -->
+  <style>
+    body { margin: 0; min-height: 4200px; font-family: Arial, sans-serif; }
+    main { width: 760px; margin: 0 auto; position: relative; min-height: 4000px; }
+    aside { position: absolute; right: -260px; top: 40px; width: 240px; }
+    .row { position: absolute; left: 0; width: 720px; padding: 16px; border-bottom: 1px solid #ddd; }
+    .r1 { top: 40px; } .r2 { top: 200px; } .r3 { top: 1200px; }
+    .r4 { top: 2200px; } .r5 { top: 3200px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>3 Connections</h1>
+
+  <div class="row r1" data-virtual>
+    <a href="/in/alpha-example/">Alpha Example</a>
+    <span>Senior Engineer at Acme Systems</span>
+    <a href="/company/acme-systems/">Acme Systems</a>
+  </div>
+
+  <div class="row r2" data-virtual>
+    <a href="https://www.linkedin.com/in/beta-example?trk=connections_list">Beta Example</a>
+    <span>Designer</span>
+  </div>
+
+  <div class="row r3" data-virtual>
+    <!-- Same person as r2, reached through a sub-path: must deduplicate to one entry. -->
+    <a href="/in/beta-example/details/experience/">Beta Example — experience</a>
+  </div>
+
+  <div class="row r4" data-virtual>
+    <a href="/in/gamma-example/">Gamma Example</a>
+    <a href="/school/example-university/">Example University</a>
+  </div>
+
+  <div class="row r5" data-virtual>
+    <!-- Not a member profile: must be rejected. -->
+    <a href="/in/me">Your own profile shortcut</a>
+  </div>
+</main>
+
+<aside aria-label="People you may know">
+  <a href="/in/sidebar-example/">Sidebar Example</a>
+</aside>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: { onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} } }
+  };
+  // Only render rows near the viewport, the way LinkedIn virtualizes long lists.
+  function updateVirtualRows() {
+    const center = scrollY + innerHeight / 2;
+    document.querySelectorAll('[data-virtual]').forEach((node) => {
+      const top = Number.parseInt(getComputedStyle(node).top, 10);
+      node.style.display = Math.abs(top - center) < 900 ? 'block' : 'none';
+    });
+  }
+  addEventListener('scroll', updateVirtualRows);
+  updateVirtualRows();
+  // The discovery script reads location.href, so present a connections URL.
+  history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
+</script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../connections.js"></script>
+<script>
+  // Discovery is resumable: each call runs one pass from the supplied cursor.
+  messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: 0 } }, {}, (first) => {
+    messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: first.cursorY } }, {}, (second) => {
+      const urls = [...new Set([...(first.urls || []), ...(second.urls || [])])];
+      document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify({ first, second, urls }))));
+      // Expected urls: alpha-example, beta-example, gamma-example. No sidebar-example,
+      // no company/school links, no /in/me. The second pass resumes from first.cursorY.
+    });
+  });
+</script>
+</body>
+</html>

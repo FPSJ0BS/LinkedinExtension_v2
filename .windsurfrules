@@ -1,0 +1,16 @@
+# Project Time Machine
+
+This project uses the Project Time Machine. Before changing ANY file, read and follow:
+
+- `project-time-machine/docs/AGENTS.md` — mandatory workflow rules
+- `project-time-machine/docs/checks.md` — checks to run before completing a task
+- `project-time-machine/docs/COMMANDS.md` — the commands to use
+
+Start every session with:
+
+```bash
+node project-time-machine/scripts/status.js
+node project-time-machine/scripts/audit.js
+```
+
+No file may be created, edited, renamed, moved or deleted outside an active task.

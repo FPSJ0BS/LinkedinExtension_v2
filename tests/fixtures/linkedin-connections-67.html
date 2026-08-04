@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Network | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for count reconciliation.
+
+    LinkedIn advertises 67 connections. Only 66 profile URLs exist, because one
+    card is a restricted member that renders with no profile link at all. Three
+    cards additionally render a photo link AND a name link to the same person,
+    which is where a naive "count the anchors" implementation reports 69.
+
+    Every one of the 67 cards must therefore be accounted for as exactly one of:
+      * a unique usable profile URL     -> 66
+      * a card with no usable URL       -> 1  (of which 1 is restricted)
+    plus 3 duplicate links that collapse into connections already found.
+
+    PV_FIXTURE is the single source of truth for both this page and the Node
+    test in tests/discovery-reconciliation.test.js, so the two cannot drift.
+
+    Serve over http (history.replaceState needs it) and read
+    document.body.dataset.result.
+
+    Expected: urls.length === 66, reconciliation.balanced === true,
+    reconciliation.unexplained === 0, cardsWithoutUrl === 1, restrictedCards === 1,
+    duplicateLinks === 3.
+  -->
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    #scaffold { height: 100vh; overflow-y: auto; }
+    main { width: 760px; margin: 0 auto; }
+    #list { list-style: none; margin: 0; padding: 0; }
+    #list li { height: 90px; padding: 8px; border-bottom: 1px solid #ddd; }
+    #people-filter { height: 180px; overflow-y: auto; border: 1px solid #eee; }
+    #people-filter .tall { height: 4000px; }
+  </style>
+</head>
+<body>
+<div id="scaffold">
+  <main>
+    <h2>67 Connections</h2>
+
+    <!-- The decoy: scrollable, tall, inside the list, and scrolls nothing useful. -->
+    <div id="people-filter" aria-label="Filter people"><div class="tall">Filter options</div></div>
+
+    <ul id="list"></ul>
+  </main>
+</div>
+
+<script id="pv-fixture" type="application/json">
+{
+  "advertisedTotal": 67,
+  "totalReliable": true,
+  "expected": {
+    "uniqueUrls": 66,
+    "cardsSeen": 67,
+    "cardsWithoutUrl": 1,
+    "restrictedCards": 1,
+    "duplicateLinks": 3,
+    "accountedFor": 67,
+    "unexplained": 0,
+    "balanced": true
+  },
+  "plainCards": 63,
+  "doubleLinkedCards": 3,
+  "restrictedCards": 1
+}
+</script>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  globalThis.__PROGRESS__ = [];
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: {
+      onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} },
+      sendMessage(message) { globalThis.__PROGRESS__.push((message.entries || []).length); }
+    }
+  };
+
+  const FIXTURE = JSON.parse(document.getElementById('pv-fixture').textContent);
+  const list = document.getElementById('list');
+
+  function card(children) {
+    const item = document.createElement('li');
+    for (const child of children) item.appendChild(child);
+    // Relationship actions sit on every card and must never be clicked.
+    for (const label of ['Message', 'Connect']) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', () => { globalThis.__FORBIDDEN_CLICK__ = label; });
+      item.appendChild(button);
+    }
+    return item;
+  }
+
+  function link(index, text) {
+    const anchor = document.createElement('a');
+    anchor.href = `/in/person-${index}/`;
+    anchor.textContent = text;
+    return anchor;
+  }
+
+  let person = 0;
+  for (let index = 0; index < FIXTURE.plainCards; index += 1) {
+    person += 1;
+    list.appendChild(card([link(person, `Person ${person}`)]));
+  }
+  // The same person behind two anchors: LinkedIn paints a photo link and a name
+  // link. Counting anchors instead of people reports more connections than exist.
+  for (let index = 0; index < FIXTURE.doubleLinkedCards; index += 1) {
+    person += 1;
+    const photo = link(person, '');
+    photo.setAttribute('aria-label', `Photo of Person ${person}`);
+    list.appendChild(card([photo, link(person, `Person ${person}`)]));
+  }
+  // The 67th connection: restricted, so LinkedIn renders no profile link at all.
+  for (let index = 0; index < FIXTURE.restrictedCards; index += 1) {
+    const label = document.createElement('span');
+    label.textContent = 'LinkedIn Member — this profile is unavailable';
+    list.appendChild(card([label]));
+  }
+
+  history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
+</script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../connections.js"></script>
+<script>
+  messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: 0, mode: "advance" } }, {}, (result) => {
+    const payload = {
+      urls: (result.urls || []).slice().sort(),
+      count: (result.urls || []).length,
+      cards: result.cards || null,
+      reconciliation: result.reconciliation || null,
+      forbiddenClick: globalThis.__FORBIDDEN_CLICK__ || null,
+      expected: FIXTURE.expected,
+      diagnostics: result.diagnostics || null
+    };
+    document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,446 @@
+{
+  "schema": 2,
+  "id": "TASK-0066",
+  "name": "Record the delivered project tree as the Time Machine baseline",
+  "request": "Record the delivered project tree as the Time Machine baseline",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T10:13:48.300Z",
+  "completedAt": "2026-08-04T10:16:49.672Z",
+  "startCommit": "86ee8cb2ab5331804e1acb54145941cc04fed6c4",
+  "gitRef": "task/TASK-0066",
+  "files": [
+    {
+      "change": "added",
+      "path": ".cursorrules",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": ".gitignore",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": ".windsurfrules",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "AGENTS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "CHANGELOG.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "CHECKS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "CLAUDE.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "COMPLETE_EXTRACTION_SPEC.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "MEMORY.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "PHASES.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "PROJECT_STATUS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "README.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "SKILLS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "TECH_STACK.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "VERIFICATION.txt",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "WORKFLOW.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "applicants.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "applicants.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "applicants.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "connections.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "content.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "dashboard.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "dashboard.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "icons/icon128.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "icons/icon16.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "icons/icon32.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "icons/icon48.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "import.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "import.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "manifest.json",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "popup.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "popup.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "scripts/build.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "scripts/clean.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "scripts/validate-build.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/applicant-csv.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/applicant-db.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/applicants-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/background.ts",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/collector-tabs-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/connections-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/csv.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/db.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/extraction-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/import-queue-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/messages.ts",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/profile-utils.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/queue-db.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/applicants-dashboard.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/dashboard.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/import-dashboard.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/popup.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/react-globals.d.ts",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/types.ts",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/applicant-csv.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/applicants-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/collector-tabs.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/collector-workflow.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/connections-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/connections-discovery.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/contact-extraction.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/csv.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/extraction-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-challenge-captcha.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-connections-67.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-connections-list.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-connections-pagination.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-connections-virtualized-35.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-current-generic-div.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-profile-sanitized.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-profile-scaffold-scroll.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/fixtures/linkedin-virtualized-sections.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/import-integration.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/import-queue-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/lazy-dom-regression.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/live-regressions.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/manifest.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/profile-utils.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/react-architecture.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/universal-stop.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/visual-layer.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "theme.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tsconfig.json",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "vendor/react-dom.production.min.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "vendor/react.production.min.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm run validate passed: 31 build files, 4 React entry points, service-worker imports",
+    "npm test: 411 of 415 passed, 4 FAILED (pre-existing in the delivered snapshot, not introduced here): applicants-core IIFE purity, two resume-download worker-ownership tests, one collector-tab visibility-gating test"
+  ],
+  "result": "Activated the Project Time Machine on this snapshot: initialised Git, and recorded the delivered project tree (85 files) as the first tracked baseline so every later change is a separately reversible task. No project file was modified."
+}

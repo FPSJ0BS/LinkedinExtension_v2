@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Security Verification | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for challenge detection. Open it in a browser and read
+    document.body.dataset.result.
+
+    Discovery must return challenged: true with kind "captcha" and must NOT scroll,
+    collect links, or attempt to solve or dismiss anything. The importer pauses here
+    and waits for the user.
+  -->
+</head>
+<body>
+<main>
+  <h1>Let's do a quick security verification</h1>
+  <p>We need to make sure you're a real person before you continue.</p>
+  <div id="captcha-frame" role="img" aria-label="verification puzzle"></div>
+  <button type="button">Verify</button>
+  <!-- A profile link is present but must never be queued from a challenge page. -->
+  <a href="/in/should-not-be-queued/">Hidden profile link</a>
+</main>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: { onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} } }
+  };
+  history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
+</script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../connections.js"></script>
+<script>
+  messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: {} }, {}, (response) => {
+    document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(response))));
+    // Expected: { ok: true, urls: [], partial: true, challenge: { challenged: true, kind: "captcha" } }
+  });
+</script>
+</body>
+</html>

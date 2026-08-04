@@ -1,0 +1,310 @@
+/*
+ * Connections Collector.
+ *
+ * The shared layer is [theme.css](theme.css) — tokens, buttons, fields,
+ * notices, pills, pagination. What is left here is what only this screen has:
+ * the counts grid, the progress block, the session and state readouts, the
+ * reconciliation panel and the connection list.
+ *
+ * This file also used to contain a stray `</content>` tag on the line after the
+ * pager rules, which CSS error recovery swallowed together with the `.notice.info`
+ * rule that followed it — so the informational notice on this page has been
+ * rendering unstyled. It is gone, and `.notice.info` now lives in theme.css with
+ * the other three tones.
+ */
+
+.import-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.import-header h1 { margin: 0 0 8px; font-size: 25px; }
+.import-header p { color: var(--pv-ink-3); font-size: 13.5px; max-width: 82ch; }
+
+/* ------------------------------------------------------------------ toolbar */
+
+/* The shell already spaces its children, so this page's bars carry no margin. */
+.toolbar { margin-bottom: 0; }
+.toolbar button { padding: 10px 17px; font-size: 13.5px; }
+
+/* ----------------------------------------------------------------- settings */
+
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 17px;
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+  font-size: 13px;
+}
+
+/*
+ * These are `<label>` elements, and the shared layer sets a label to the small,
+ * tracked-out, stacked field-name voice. A setting is not a field name — it is a
+ * sentence with a control in the middle of it ("Skip if collected within [30]
+ * days") — so it is put back on one line and back into normal case.
+ */
+.setting {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  color: var(--pv-ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.setting input[type="number"] { width: 88px; font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------- counts */
+
+.counts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 11px;
+}
+
+.count-tile {
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  padding: 15px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+  transition: box-shadow var(--pv-fast) var(--pv-ease), transform var(--pv-fast) var(--pv-ease);
+}
+.count-tile:hover { box-shadow: inset 0 0 0 1px var(--pv-hairline-2), var(--pv-shadow-2); transform: translateY(-1px); }
+
+.count-tile b {
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.count-tile span {
+  font-size: 10.5px;
+  font-weight: 680;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--pv-ink-3);
+}
+.count-tile em { font-size: 12px; color: var(--pv-ink-3); font-style: normal; }
+
+/* Stated rather than left to the base rule, so the class-coverage test can tell
+   "deliberately neutral" apart from "nobody wrote a rule for this". */
+.count-tile.discovered b { color: var(--pv-ink); }
+.count-tile.completed b { color: var(--pv-good); }
+.count-tile.failed b { color: var(--pv-bad); }
+.count-tile.selected b,
+.count-tile.reported b { color: var(--pv-accent); }
+.count-tile.missing b { color: var(--pv-warn); }
+.count-tile.skipped b { color: var(--pv-ink-3); }
+
+/* ----------------------------------------------------------------- progress */
+
+.progress-block {
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+
+.bar {
+  width: 100%;
+  height: 9px;
+  background: rgba(27, 26, 32, 0.08);
+  border-radius: var(--pv-r-pill);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: var(--pv-r-pill);
+  background: linear-gradient(90deg, var(--pv-accent) 0%, var(--pv-accent-deep) 100%);
+  transition: width var(--pv-slow) var(--pv-ease);
+}
+
+.now { margin: 0; font-size: 13px; color: var(--pv-ink-3); overflow-wrap: anywhere; }
+.now b { color: var(--pv-ink); font-weight: 620; }
+
+.state-line { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; flex-wrap: wrap; }
+
+.stop-reason { margin: 10px 0 0; font-size: 12.5px; color: var(--pv-ink-3); }
+.stop-reason.challenge,
+.stop-reason.login-required,
+.stop-reason.navigation-failures,
+.stop-reason.error { color: var(--pv-bad); }
+
+.collector-warning p { margin: 5px 0 0; }
+
+/* ------------------------------------------------------------------ session */
+
+.session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 16px;
+  border-radius: var(--pv-r-sm);
+  font-size: 13px;
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+}
+.session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--pv-ink-3);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(27, 26, 32, 0.07);
+}
+.session.signed-in { background: var(--pv-good-soft); box-shadow: inset 0 0 0 1px rgba(44, 106, 79, 0.18); }
+.session.signed-in .session-dot { background: var(--pv-good); box-shadow: 0 0 0 3px var(--pv-good-soft); }
+.session.logged-out { background: var(--pv-bad-soft); box-shadow: inset 0 0 0 1px rgba(163, 53, 43, 0.18); }
+.session.logged-out .session-dot { background: var(--pv-bad); box-shadow: 0 0 0 3px var(--pv-bad-soft); }
+.session.checkpoint { background: var(--pv-warn-soft); box-shadow: inset 0 0 0 1px rgba(176, 122, 32, 0.2); }
+.session.checkpoint .session-dot { background: var(--pv-warn); box-shadow: 0 0 0 3px var(--pv-warn-soft); }
+/* Secondary, not faint: on the logged-out strip's tinted fill the muted ink was
+   the lowest-contrast enabled text on any page. */
+.session-note { color: var(--pv-ink-2); }
+
+.auth-pill { padding: 5px 12px; font-size: 11px; box-shadow: inset 0 0 0 1px var(--pv-hairline); }
+
+/* ------------------------------------------------------------ reconciliation */
+
+.reconciliation {
+  border-radius: var(--pv-r);
+  background: var(--pv-surface);
+  padding: 16px 18px;
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+.reconciliation.unresolved { background: var(--pv-warn-soft); box-shadow: inset 0 0 0 1px rgba(176, 122, 32, 0.24); }
+.reconciliation h2 { font-size: 14px; margin: 0 0 10px; }
+.reconciliation ul { margin: 0; padding-left: 18px; }
+.reconciliation li { font-size: 12.5px; line-height: 1.7; color: var(--pv-ink-2); }
+
+/* ---------------------------------------------------------------- advanced */
+
+.advanced {
+  border-radius: var(--pv-r);
+  padding: 12px 17px;
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+.advanced summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 660;
+  color: var(--pv-ink-2);
+  list-style: none;
+}
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--pv-ink-3);
+  transition: transform var(--pv-fast) var(--pv-ease);
+}
+.advanced[open] summary::before { transform: rotate(90deg); }
+.advanced-actions { padding-top: 12px; }
+
+/* --------------------------------------------------------------- list table */
+
+.list-wrap {
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  padding: 16px 18px 8px;
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+
+.list-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.list-head h2 { margin: 0; font-size: 15px; }
+.list-filters .search { min-width: 250px; }
+
+.connection-list {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.connection-list th,
+.connection-list td {
+  text-align: left;
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--pv-hairline);
+  vertical-align: top;
+}
+.connection-list tr:last-child td { border-bottom: 0; }
+
+.connection-list th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--pv-surface);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.075em;
+  color: var(--pv-ink-3);
+  white-space: nowrap;
+}
+
+.connection-list tbody tr { transition: background-color var(--pv-fast) var(--pv-ease); }
+.connection-list tbody tr:hover { background: var(--pv-row-hover); }
+
+.connection-list th.pick,
+.connection-list td.pick { width: 34px; }
+.connection-list td.who { font-weight: 620; color: var(--pv-ink); }
+.connection-list td.link a { color: var(--pv-ink-3); text-decoration: none; overflow-wrap: anywhere; }
+.connection-list td.link a:hover { color: var(--pv-accent); text-decoration: underline; }
+/*
+ * This cell is `<td className="status">`, and `.status` is also the name of the
+ * shared notice primitive — so without this the cell picked up a notice's fill,
+ * ring and 9px radius and rendered as a grey box with the real coloured `.state`
+ * pill sitting inside it. Two containers for one value.
+ */
+.connection-list td.status {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 10px 11px;
+  font-size: 13px;
+}
+.connection-list td.collected { white-space: nowrap; color: var(--pv-ink-3); font-variant-numeric: tabular-nums; }
+.connection-list td.error { color: var(--pv-bad); max-width: 280px; overflow-wrap: anywhere; }
+.connection-list tr.empty-row td { color: var(--pv-ink-3); text-align: center; padding: 36px 11px; }
+
+/* ------------------------------------------------------------------- pager */
+
+.pager { justify-content: space-between; padding: 14px 0; }
+.pager-range { font-size: 12.5px; color: var(--pv-ink-3); }
+.pager-buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+@media (max-width: 860px) {
+  .import-shell { padding: 22px 16px 56px; }
+  .toolbar button { flex: 1 1 auto; }
+  .list-wrap { padding: 14px 12px 6px; }
+  .connection-list th,
+  .connection-list td { padding: 9px 7px; }
+}

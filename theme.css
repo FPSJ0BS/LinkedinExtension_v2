@@ -1,0 +1,1056 @@
+/*
+ * Profile Vault — the shared visual layer.
+ *
+ * One stylesheet, loaded first by all four extension pages, holding everything
+ * the four surfaces have in common: the tokens, the reset, the typography
+ * scale, and every primitive that appeared in more than one file (buttons,
+ * inputs, panels, notices, pills, tables, drawers, pagination).
+ *
+ * WHY IT EXISTS. Before this, popup.css, dashboard.css, applicants.css and
+ * import.css each carried their own copy of the same primitives and disagreed
+ * about all of them: four page backgrounds (#f5f7fb / #f4f7fa / #f3f5f8 /
+ * #f4f7fa), three ink colours, two different font stacks, and two files
+ * defining the SAME custom property names with different values (`--muted` was
+ * #5b6472 in one and #687386 in another, `--good` #0a7d4a vs #17633a). `.danger`
+ * was a solid fill on three surfaces and a white outline button on the fourth.
+ * Only one file gave buttons a hover; only one declared `color-scheme`. Four
+ * screens of one product cannot be redesigned as one thing while that is true,
+ * so the tokens live here and the page files hold only what is genuinely theirs.
+ *
+ * THE LOOK, and what it is deliberately not. The surfaces are warm off-white
+ * rather than the cold blue-grey that reads as a bootstrap default; depth comes
+ * from soft, low-alpha shadows and hairlines at 8–14 % ink rather than from 1px
+ * mid-grey borders; the primary action is graphite, not a saturated blue, so the
+ * one accent colour is spent on the things that need attention — focus, links,
+ * progress, the current page — instead of on every button. Type does the
+ * hierarchy: labels are small, uppercase and tracked out; data is set at a
+ * comfortable reading size with tabular figures so columns of numbers line up.
+ *
+ * NO EXTERNAL RESOURCE OF ANY KIND. Manifest V3's CSP is `script-src 'self'`
+ * and these pages must work offline, so the font stack is the system's, and
+ * there is no @font-face, no url(), no @import. The old files named `Inter`
+ * first and shipped no Inter, so it resolved by luck and the four pages could
+ * render in different faces on the same machine.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------- colour */
+  /* Warm neutrals. The hint of yellow is what stops it reading as a template. */
+  --pv-bg: #f7f6f3;
+  --pv-bg-2: #f1efeb;
+  --pv-surface: #ffffff;
+  --pv-surface-sunken: #faf9f7;
+
+  --pv-ink: #1b1a20;
+  --pv-ink-2: #4c4955;
+  /*
+   * The muted voice: every label, every table header, every placeholder.
+   *
+   * Chosen against the DARKEST surface it is ever set on, not against white.
+   * At #78747f it cleared 4.5:1 on pure white by 0.06 and then failed on both
+   * --pv-bg and --pv-surface-sunken, which is where most of it actually sits.
+   * This clears 4.5:1 on all three (4.87 on --pv-bg, 5.00 on the sunken header
+   * fill, 5.26 on white).
+   */
+  --pv-ink-3: #6e6a77;
+
+  /* Depth without a drawn box: hairlines are ink at low alpha, so they sit on
+     any surface and never turn into the grey grid of a spreadsheet. */
+  --pv-hairline: rgba(27, 26, 32, 0.08);
+  --pv-hairline-2: rgba(27, 26, 32, 0.14);
+  /* The table grid, and deliberately stronger than either hairline above.
+     A hairline is right for a component boundary and wrong for a data grid: on a
+     twelve-column table a 0.08-alpha line is invisible two columns away, and the
+     eye loses the row it is reading half way across. Used only by the table. */
+  --pv-grid: rgba(27, 26, 32, 0.22);
+
+  /*
+   * A data row's geometry, stated ONCE so the parts cannot disagree.
+   *
+   * They did disagree, and that was the second half of the row-jitter report.
+   * The row was declared 72px tall, its cells were padded 11px top and bottom —
+   * leaving 50px of content box — and then two rules put taller things in it:
+   * a three-line clamp at 12.5px/1.5 is 56.25px, and the education list was
+   * capped at 98px. `height` on a table cell is a MINIMUM, not a maximum, so
+   * the row simply grew to whatever it was given. A row was therefore 72px with
+   * one line in it, 78px once a value wrapped to three, and 120px once the
+   * education list filled in — and all of that happens *while the recruiter is
+   * reading*, because the page re-reads the store every three seconds during a
+   * run. That is the reported "a row's height changes".
+   *
+   * `--pv-cell-content-h` is derived rather than typed, so the invariant cannot
+   * rot: nothing inside a cell may be taller than the row minus its padding.
+   */
+  --pv-row-h: 84px;
+  --pv-cell-pad-y: 11px;
+  --pv-cell-content-h: calc(var(--pv-row-h) - 2 * var(--pv-cell-pad-y));
+
+  /*
+   * A field's edge is not decoration — it is how you find the field.
+   *
+   * The hairlines above are deliberately quiet because a panel edge is
+   * decorative. A text input on a near-white page has no other boundary, so it
+   * gets a real one: 3.3:1 against white, which clears WCAG 1.4.11 for a UI
+   * component boundary. At --pv-hairline-2 it was 1.3:1 and an empty field on
+   * the popup's form was effectively invisible until focused.
+   */
+  --pv-field-line: #8e8c95;
+
+  /* Spent sparingly, and never on an ordinary button. */
+  --pv-accent: #4a41c8;
+  --pv-accent-deep: #3a32a4;
+  --pv-accent-soft: rgba(74, 65, 200, 0.10);
+  --pv-accent-ring: rgba(74, 65, 200, 0.28);
+
+  --pv-good: #2c6a4f;
+  --pv-good-soft: rgba(44, 106, 79, 0.11);
+  --pv-warn: #8a5a12;
+  --pv-warn-soft: rgba(176, 122, 32, 0.14);
+  --pv-bad: #a3352b;
+  --pv-bad-soft: rgba(163, 53, 43, 0.10);
+  /* The two stops of the destructive fill. Named because the popup's Stop is
+     not a `.danger` element — it has its own class — and "the same red as
+     everything destructive" has to be a fact rather than a coincidence. */
+  --pv-bad-lit: #b23e33;
+  --pv-bad-fill: #a3352b;
+
+  --pv-row-hover: rgba(27, 26, 32, 0.028);
+  --pv-row-selected: rgba(74, 65, 200, 0.07);
+
+  /* ---------------------------------------------------------------- shape */
+  --pv-r-xs: 6px;
+  --pv-r-sm: 9px;
+  --pv-r: 13px;
+  --pv-r-lg: 18px;
+  --pv-r-pill: 999px;
+
+  /* Two soft layers rather than one hard one: the near shadow gives the edge,
+     the far one gives the lift. */
+  --pv-shadow-1: 0 1px 1px rgba(24, 22, 32, 0.04), 0 2px 6px -2px rgba(24, 22, 32, 0.07);
+  --pv-shadow-2: 0 1px 2px rgba(24, 22, 32, 0.05), 0 10px 24px -10px rgba(24, 22, 32, 0.18);
+  --pv-shadow-3: 0 2px 6px rgba(24, 22, 32, 0.06), 0 32px 64px -24px rgba(24, 22, 32, 0.34);
+  --pv-shadow-press: inset 0 1px 2px rgba(24, 22, 32, 0.14);
+
+  /* ---------------------------------------------------------------- motion */
+  --pv-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --pv-fast: 130ms;
+  --pv-slow: 240ms;
+
+  /* --------------------------------------------------------------- metrics */
+  /* The two pinned columns of a wide table. Named so the offset of the second
+     is derived from the width of the first rather than guessed twice. */
+  --pv-pin-1: 46px;
+
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "cv05" 1, "ss01" 1;
+  color: var(--pv-ink);
+  background: var(--pv-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--pv-bg);
+  color: var(--pv-ink);
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea { font: inherit; color: inherit; }
+
+::selection { background: var(--pv-accent-soft); }
+
+/* A scrollbar that belongs to the design rather than to the platform. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(27, 26, 32, 0.22) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(27, 26, 32, 0.18);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--pv-r-pill);
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(27, 26, 32, 0.32); background-clip: content-box; }
+
+/* ========================================================================= */
+/* Typography                                                                */
+/* ========================================================================= */
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: 640;
+  letter-spacing: -0.018em;
+  line-height: 1.2;
+  color: var(--pv-ink);
+}
+
+h1 { font-size: 27px; letter-spacing: -0.024em; }
+h2 { font-size: 19px; }
+h3 { font-size: 15px; }
+h4 { font-size: 13px; }
+
+p { margin: 0; }
+
+a {
+  color: var(--pv-accent);
+  text-decoration-color: var(--pv-accent-ring);
+  text-underline-offset: 2px;
+  transition: color var(--pv-fast) var(--pv-ease);
+}
+a:hover { color: var(--pv-accent-deep); }
+
+/*
+ * The label voice.
+ *
+ * Small, tracked out, and quieter than the value it names — the whole point of
+ * the hierarchy is that a heading, a field label and a piece of data should
+ * never be mistaken for one another at a glance.
+ */
+.pv-label,
+.details-facts dt,
+.details-section h3 {
+  font-size: 10.5px;
+  font-weight: 680;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--pv-ink-3);
+}
+
+/* ========================================================================= */
+/* Buttons                                                                   */
+/* ========================================================================= */
+
+button {
+  border: 0;
+  border-radius: var(--pv-r-sm);
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  background: transparent;
+  transition:
+    background-color var(--pv-fast) var(--pv-ease),
+    box-shadow var(--pv-fast) var(--pv-ease),
+    transform var(--pv-fast) var(--pv-ease),
+    color var(--pv-fast) var(--pv-ease),
+    opacity var(--pv-fast) var(--pv-ease);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* One focus treatment, everywhere, and it is always visible. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--pv-accent);
+  outline-offset: 2px;
+  /* No `border-radius` here. Every focusable already has its own, and the
+     outline follows it — setting one made each control visibly change shape the
+     instant it took keyboard focus. */
+}
+
+/*
+ * Primary is graphite, not blue.
+ *
+ * The old screens gave every action a saturated primary colour, so nothing was
+ * emphasised because everything was. Here the ordinary confirming action is ink
+ * — quiet, solid, unmistakably the thing to press — and the accent stays
+ * available for the few places that genuinely need to pull the eye.
+ */
+.primary {
+  background: linear-gradient(180deg, #2a2833 0%, #1b1a20 100%);
+  color: #fff;
+  box-shadow: var(--pv-shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #35323f 0%, #232128 100%);
+  box-shadow: var(--pv-shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.11);
+  transform: translateY(-1px);
+}
+.primary:active:not(:disabled) { transform: translateY(0); box-shadow: var(--pv-shadow-press); }
+
+.secondary {
+  background: rgba(27, 26, 32, 0.045);
+  color: var(--pv-ink);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+}
+.secondary:hover:not(:disabled) {
+  background: rgba(27, 26, 32, 0.075);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline-2), var(--pv-shadow-1);
+  transform: translateY(-1px);
+}
+.secondary:active:not(:disabled) { transform: translateY(0); box-shadow: var(--pv-shadow-press); }
+
+.success {
+  background: linear-gradient(180deg, #33795a 0%, #2c6a4f 100%);
+  color: #fff;
+  box-shadow: var(--pv-shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.success:hover:not(:disabled) { filter: brightness(1.07); box-shadow: var(--pv-shadow-2); transform: translateY(-1px); }
+.success:active:not(:disabled) { transform: translateY(0); box-shadow: var(--pv-shadow-press); }
+
+/*
+ * Destructive, and the same idea on every screen.
+ *
+ * `.danger` used to be a solid red fill on three surfaces and a white outline
+ * button on the fourth, so "the dangerous one" looked like two different things
+ * inside one product. It is one thing now, with `.ghost` as the quieter variant
+ * for a destructive action that is not the point of the screen.
+ */
+.danger {
+  background: linear-gradient(180deg, var(--pv-bad-lit) 0%, var(--pv-bad-fill) 100%);
+  color: #fff;
+  box-shadow: var(--pv-shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.danger:hover:not(:disabled) { filter: brightness(1.07); box-shadow: var(--pv-shadow-2); transform: translateY(-1px); }
+.danger:active:not(:disabled) { transform: translateY(0); box-shadow: var(--pv-shadow-press); }
+
+.danger.ghost {
+  background: var(--pv-bad-soft);
+  color: var(--pv-bad);
+  box-shadow: inset 0 0 0 1px rgba(163, 53, 43, 0.18);
+  filter: none;
+}
+.danger.ghost:hover:not(:disabled) {
+  background: rgba(163, 53, 43, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(163, 53, 43, 0.28), var(--pv-shadow-1);
+  filter: none;
+}
+
+.small { padding: 5px 10px; font-size: 11.5px; border-radius: var(--pv-r-xs); }
+
+.link-button {
+  background: none;
+  color: var(--pv-accent);
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--pv-accent-ring);
+  text-underline-offset: 2px;
+  box-shadow: none;
+}
+.link-button:hover:not(:disabled) { color: var(--pv-accent-deep); background: none; transform: none; box-shadow: none; }
+
+/* ========================================================================= */
+/* Fields                                                                    */
+/* ========================================================================= */
+
+input,
+select,
+textarea {
+  border: 0;
+  border-radius: var(--pv-r-sm);
+  padding: 9px 11px;
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-field-line);
+  transition: box-shadow var(--pv-fast) var(--pv-ease), background-color var(--pv-fast) var(--pv-ease);
+}
+input::placeholder,
+textarea::placeholder { color: var(--pv-ink-3); }
+
+input:hover:not(:focus),
+select:hover:not(:focus),
+textarea:hover:not(:focus) { box-shadow: inset 0 0 0 1px var(--pv-ink-3); }
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--pv-accent), 0 0 0 3px var(--pv-accent-ring);
+}
+
+input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  accent-color: var(--pv-accent);
+  box-shadow: none;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+textarea { resize: vertical; min-height: 66px; line-height: 1.5; }
+
+select {
+  appearance: none;
+  padding-right: 30px;
+  /* An inline SVG data URI is not a remote resource, so the CSP is satisfied. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2378747f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 11px;
+  cursor: pointer;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 680;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pv-ink-3);
+}
+/* The value inside a labelled field is data, not a label — it reads normally. */
+label input,
+label select,
+label textarea {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--pv-ink);
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--pv-ink-2);
+  cursor: pointer;
+}
+
+/* ========================================================================= */
+/* Surfaces, panels and notices                                              */
+/* ========================================================================= */
+
+.pv-panel {
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+
+/*
+ * One notice, four names.
+ *
+ * `.status`, `.message` and `.notice` were three near-identical blocks in three
+ * files. They are one thing with one set of tones, so a success on the popup
+ * and a success on the importer are recognisably the same event.
+ */
+/*
+ * The status line, and the space it occupies whether or not it has anything to
+ * say.
+ *
+ * The second half of the row-jitter report. These banners are rendered
+ * conditionally — `{message ? <div className="message"> : null}` — so every time
+ * one appeared or cleared, everything below it moved, including the whole table.
+ * On the Job Applicants page that happens on a three-second poll, which is
+ * exactly the "keeps shifting during use" being described. `.pv-slot` reserves
+ * the height so the arrival of a message costs no layout.
+ */
+.pv-slot { min-height: 42px; }
+
+.status,
+.message,
+.notice,
+.quality {
+  padding: 11px 14px;
+  border-radius: var(--pv-r-sm);
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: rgba(27, 26, 32, 0.04);
+  color: var(--pv-ink-2);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+}
+.status strong,
+.message strong,
+.notice strong { color: var(--pv-ink); font-weight: 640; }
+
+.status.success,
+.message.success,
+.notice.success { background: var(--pv-good-soft); color: var(--pv-good); box-shadow: inset 0 0 0 1px rgba(44, 106, 79, 0.18); }
+
+.status.error,
+.message.error,
+.notice.error { background: var(--pv-bad-soft); color: var(--pv-bad); box-shadow: inset 0 0 0 1px rgba(163, 53, 43, 0.18); }
+
+.notice.info { background: var(--pv-accent-soft); color: var(--pv-accent-deep); box-shadow: inset 0 0 0 1px rgba(74, 65, 200, 0.18); }
+
+.notice.stop,
+.quality { background: var(--pv-warn-soft); color: var(--pv-warn); box-shadow: inset 0 0 0 1px rgba(176, 122, 32, 0.2); }
+
+.notice p { margin: 5px 0 0; }
+.notice strong { display: block; }
+
+/* ========================================================================= */
+/* Pills and badges                                                          */
+/* ========================================================================= */
+
+/*
+ * Every status word in the product, in one shape.
+ *
+ * Colour is a hint and never the only signal — each of these always states its
+ * value in words, so nothing is lost to a colour-blind reader.
+ */
+.import-pill,
+.state,
+.state-pill,
+.status-pill,
+.auth-pill,
+.gap-pill,
+.tally,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--pv-r-pill);
+  font-size: 10.5px;
+  font-weight: 660;
+  letter-spacing: 0.03em;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: rgba(27, 26, 32, 0.055);
+  color: var(--pv-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-pill,
+.state,
+.state-pill,
+.status-pill,
+.auth-pill { text-transform: uppercase; letter-spacing: 0.055em; }
+
+/* Working. */
+.import-pill.running,
+.state.processing,
+.state-pill.discovering,
+.state-pill.extracting,
+.state-pill.reconciling,
+.state-pill.navigating_to_connections { background: var(--pv-accent-soft); color: var(--pv-accent-deep); }
+
+/* Done. */
+.import-pill.completed,
+.state.completed,
+.state-pill.completed,
+.status-pill.collected,
+.auth-pill.signed-in { background: var(--pv-good-soft); color: var(--pv-good); }
+
+/* Needs attention but is not a failure. */
+.import-pill.paused,
+.state-pill.completed_with_gap,
+.status-pill.partial,
+.auth-pill.checkpoint,
+.gap-pill { background: var(--pv-warn-soft); color: var(--pv-warn); }
+
+/* Failed. */
+.state.failed,
+.state-pill.failed,
+.state-pill.paused_visibility,
+.state-pill.paused_challenge,
+.status-pill.failed,
+.auth-pill.login-required { background: var(--pv-bad-soft); color: var(--pv-bad); }
+
+/* Idle. */
+.import-pill.stopped,
+.state-pill.idle,
+.state-pill.stopped,
+.state.skipped,
+.state.pending { background: rgba(27, 26, 32, 0.055); color: var(--pv-ink-3); }
+
+.chip {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 550;
+  font-size: 11px;
+  color: var(--pv-ink-2);
+}
+.chip.more { background: var(--pv-accent-soft); color: var(--pv-accent-deep); font-weight: 660; }
+
+.chip-list { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.tally { text-transform: none; letter-spacing: normal; font-size: 11.5px; font-weight: 660; }
+.tally.must { background: var(--pv-good-soft); color: var(--pv-good); }
+.tally.preferred { background: var(--pv-accent-soft); color: var(--pv-accent-deep); }
+
+/* ========================================================================= */
+/* Tables                                                                    */
+/* ========================================================================= */
+
+/*
+ * A wide table, made navigable rather than merely scrollable.
+ *
+ * The complaint these rules answer is "tables that overflow with horizontal
+ * scrollbars". Four things fix that without hiding a single column:
+ *   1. The header sticks, so the column you are reading is always named.
+ *   2. The first two columns — the checkbox and the person — pin to the left,
+ *      so scrolling right never leaves you looking at anonymous cells.
+ *   3. The wrapper carries scroll shadows, so there is a visible cue that more
+ *      exists to the right, and it disappears at the end.
+ *   4. Below 860px the whole table becomes one card per row (see the media
+ *      query at the end of this file), because a horizontal scrollbar on a
+ *      narrow window is not a table anybody can read.
+ */
+.table-wrap {
+  background: var(--pv-surface);
+  border-radius: var(--pv-r);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+  overflow: auto;
+  max-height: calc(100vh - 250px);
+  overscroll-behavior: contain;
+
+  /* The two outer gradients are painted on the CONTENT (`local`), so they slide
+     away as you scroll; the two inner ones are painted on the frame (`scroll`)
+     and stay. The result is a shadow that appears only on the side that still
+     has content hidden behind it. */
+  background-image:
+    linear-gradient(to right, var(--pv-surface) 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to left, var(--pv-surface) 30%, rgba(255, 255, 255, 0)),
+    radial-gradient(farthest-side at 0 50%, rgba(27, 26, 32, 0.13), rgba(27, 26, 32, 0)),
+    radial-gradient(farthest-side at 100% 50%, rgba(27, 26, 32, 0.13), rgba(27, 26, 32, 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 44px 100%, 44px 100%, 15px 100%, 15px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.table-wrap table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.table-wrap th,
+.table-wrap td {
+  text-align: left;
+  /* The vertical half comes from the token the row height is derived from, so
+     changing one can never silently invalidate the other. */
+  padding: var(--pv-cell-pad-y) 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  vertical-align: middle;
+  /* Both axes. A row separator on its own leaves twelve columns running into
+     each other, and "which cell is this value in" stops being answerable — which
+     is half of what a ruined table looks like even once the cells are back in
+     the grid. The column rule is what makes a cell a cell. */
+  border-bottom: 1px solid var(--pv-grid);
+  border-right: 1px solid var(--pv-grid);
+}
+.table-wrap th:last-child,
+.table-wrap td:last-child { border-right: 0; }
+
+.table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background: var(--pv-surface-sunken);
+  /* The one line that has to read as "everything below me is data". */
+  border-bottom: 2px solid var(--pv-grid);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+  color: var(--pv-ink-3);
+  white-space: nowrap;
+}
+
+/*
+ * A row is one fixed height, and stays that height.
+ *
+ * The reported jitter: rows visibly resize while the page is in use. Two things
+ * caused it, and this is the first. The Job Applicants page re-reads the store
+ * every three seconds so the table fills in while a run is walking the list —
+ * which means a cell goes from "—" to a value, a qualifications list goes from
+ * empty to ten entries, and a resume path appears. Every one of those changes
+ * that row's natural height, and a row growing shoves every row below it down.
+ *
+ * With a fixed height the content changes and the geometry does not. Each cell
+ * clips, and the two cells that legitimately hold a list scroll inside
+ * themselves — which is what `.cell-list` was already for. Only above the card
+ * breakpoint: a card row is as tall as its content by design.
+ */
+@media (min-width: 861px) {
+  .table-wrap tbody tr { height: var(--pv-row-h); }
+  .table-wrap tbody td { height: var(--pv-row-h); overflow: hidden; }
+
+  /*
+   * THE RULE THAT ACTUALLY HOLDS THE ROW STILL.
+   *
+   * `height` on a `<td>` is a minimum: the table layout algorithm sizes a row to
+   * its tallest cell's CONTENT and only then applies `height` as a floor. So
+   * declaring the row 72px never stopped it becoming 120px — it only stopped it
+   * becoming 40px. `overflow: hidden` on the cell does not help either, because
+   * the cell has already been sized by then.
+   *
+   * The content is what has to be capped, so it is capped here, once, for
+   * everything a cell can contain — the clamped text boxes, the education list,
+   * a pill, a link, a button row. An element that wants to scroll inside itself
+   * still does: only `max-height` is set, never `overflow`, so `.cell-list`
+   * keeps its own `overflow-y: auto`.
+   */
+  .table-wrap tbody td > * { max-height: var(--pv-cell-content-h); }
+
+  /*
+   * Long text truncates to a fixed number of lines rather than pushing the row —
+   * and the clamp lives on a box INSIDE the cell, never on the cell.
+   *
+   * THE DEFECT THIS FIXES, because it is the same one `.actions-cell` documents
+   * fifty lines below for `display: flex`. `display: -webkit-box` was set on the
+   * `<td>` itself, and a cell given a box display **stops being a table cell**:
+   * it leaves the row, and its column stops participating in the table's column
+   * sizing. Six cells carried the rule — email, mobile, both resume columns,
+   * current role and current company — so all six dropped out of the grid and
+   * stacked vertically inside one anonymous block, each drawing its own bottom
+   * border, while the cells that kept `display: table-cell` (the checkbox, the
+   * name, total experience, the two lists and the actions) laid out as a proper
+   * row underneath them. The header still had twelve columns; the body did not.
+   * The reported symptom was exactly that: the email, the phone number and
+   * "Open file" stacked in the EMAIL column with rules between them, and the
+   * name sitting on a baseline of its own well below.
+   *
+   * Wrapping the content is what makes the clamp safe: `.cell-clip` is not a
+   * table cell, so nothing it is given can take a cell out of the table.
+   */
+  .table-wrap tbody td.text-cell > .cell-clip,
+  .table-wrap tbody td.contact-cell > .cell-clip {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Below the card breakpoint a row is as tall as its content by design, so the
+   wrapper must not clamp there — it is a plain inline box again. */
+.cell-clip { display: block; }
+
+.table-wrap tbody tr { transition: background-color var(--pv-fast) var(--pv-ease); }
+.table-wrap tbody tr:last-child td { border-bottom: 0; }
+.table-wrap tbody tr:hover > td { background: var(--pv-row-hover); }
+.table-wrap tbody tr.selected > td { background: var(--pv-row-selected); }
+
+/* The pinned pair. Both need an opaque background of their own, because a
+   sticky cell has content sliding underneath it. */
+.table-wrap thead th:first-child,
+.table-wrap tbody td:first-child:not(.empty) {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: var(--pv-pin-1);
+  min-width: var(--pv-pin-1);
+  background: var(--pv-surface);
+}
+.table-wrap thead th:first-child { z-index: 5; background: var(--pv-surface-sunken); }
+
+.table-wrap .name-cell {
+  position: sticky;
+  left: var(--pv-pin-1);
+  z-index: 3;
+  background: var(--pv-surface);
+  font-weight: 620;
+  letter-spacing: -0.008em;
+  color: var(--pv-ink);
+  white-space: nowrap;
+  min-width: 168px;
+  /* Cast to the right so the pin is legible as a pin, not as a stuck cell. */
+  box-shadow: 10px 0 12px -12px rgba(27, 26, 32, 0.55);
+}
+.table-wrap thead .name-cell { z-index: 5; background: var(--pv-surface-sunken); }
+
+.table-wrap tbody tr:hover > td:first-child:not(.empty),
+.table-wrap tbody tr:hover > .name-cell { background: #fbfaf9; }
+.table-wrap tbody tr.selected > td:first-child:not(.empty),
+.table-wrap tbody tr.selected > .name-cell { background: #f6f4fe; }
+
+/* Column sizing: text wraps and is bounded, numbers never wrap. */
+.text-cell,
+.contact-cell { min-width: 148px; max-width: 250px; overflow-wrap: anywhere; }
+.summary-cell { white-space: nowrap; color: var(--pv-ink-2); font-variant-numeric: tabular-nums; }
+.skills-cell { max-width: 264px; }
+.select-cell { width: var(--pv-pin-1); min-width: var(--pv-pin-1); }
+/* Deliberately NOT `display: flex`. A `<td>` given a flex display stops being a
+   table cell for layout purposes, and the column it is in stops participating
+   in the table's column sizing — the buttons sit in a row either way, so this
+   buys the same result without taking the cell out of the table. */
+.actions-cell { white-space: nowrap; min-width: 132px; }
+.actions-cell > button + button { margin-left: 6px; }
+.job-cell { min-width: 172px; font-weight: 600; color: var(--pv-ink-2); }
+
+/* Scoped to beat `.table-wrap th, .table-wrap td`, which is (0,1,1) and would
+   otherwise win text-align, padding and font-size from a bare `.empty`. */
+.table-wrap td.empty,
+.empty {
+  text-align: center;
+  padding: 44px 20px;
+  color: var(--pv-ink-3);
+  font-size: 13px;
+}
+
+/* ========================================================================= */
+/* Pagination                                                                */
+/* ========================================================================= */
+
+.pagination,
+.pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--pv-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.pagination { justify-content: center; margin-top: 18px; }
+
+.page-button {
+  background: var(--pv-surface);
+  color: var(--pv-ink-2);
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--pv-r-xs);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  font-variant-numeric: tabular-nums;
+}
+.page-button:hover:not(:disabled):not(.current) {
+  background: rgba(27, 26, 32, 0.045);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline-2);
+}
+.page-button.current {
+  background: var(--pv-ink);
+  color: #fff;
+  box-shadow: var(--pv-shadow-1);
+  cursor: default;
+}
+.page-gap { color: var(--pv-ink-3); padding: 0 2px; }
+
+/* ========================================================================= */
+/* The details drawer                                                        */
+/* ========================================================================= */
+
+.details-backdrop,
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(20, 18, 26, 0.42);
+  backdrop-filter: blur(3px);
+  animation: pv-fade var(--pv-slow) var(--pv-ease);
+}
+.details-backdrop { display: flex; justify-content: flex-end; }
+.modal-backdrop { display: grid; place-items: center; padding: 24px; }
+
+@keyframes pv-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pv-slide { from { transform: translateX(22px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pv-rise { from { transform: translateY(12px) scale(0.99); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.details-panel {
+  width: min(680px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--pv-surface);
+  padding: 26px 30px 40px;
+  box-shadow: var(--pv-shadow-3);
+  animation: pv-slide var(--pv-slow) var(--pv-ease);
+}
+
+.details-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--pv-hairline);
+}
+.details-head h2 { margin: 0 0 5px; font-size: 22px; }
+.details-head p { color: var(--pv-ink-2); font-size: 13.5px; }
+
+.details-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px 24px;
+  margin: 22px 0;
+}
+.details-facts .fact { min-width: 0; }
+.details-facts dd {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--pv-ink);
+  overflow-wrap: anywhere;
+}
+
+.details-section { margin-top: 26px; }
+.details-section h3 { margin: 0 0 10px; }
+.details-about { white-space: pre-wrap; font-size: 13.5px; line-height: 1.65; color: var(--pv-ink-2); }
+.details-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.75; color: var(--pv-ink-2); }
+.details-list li { overflow-wrap: anywhere; }
+.details-foot { display: flex; gap: 8px; margin-top: 30px; }
+
+/* ========================================================================= */
+/* Shared page furniture                                                     */
+/* ========================================================================= */
+
+.header-actions,
+.toolbar,
+.list-filters,
+.dialog-actions,
+.advanced-actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/*
+ * A command bar is a surface, on all three pages that have one.
+ *
+ * The importer's toolbar was a white card while the identically structured bars
+ * on Saved Profiles and Job Applicants were bare strips on the page background
+ * — the same control group looking like two different things inside one
+ * product, which is exactly the inconsistency this shared layer exists to end.
+ */
+.toolbar {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: var(--pv-r);
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+.dialog-actions { justify-content: flex-end; margin-top: 22px; }
+
+.wide { grid-column: 1 / -1; }
+
+/* ========================================================================= */
+/* Narrow windows: one card per row, never a horizontal scrollbar            */
+/* ========================================================================= */
+
+@media (max-width: 860px) {
+  .table-wrap {
+    overflow: visible;
+    max-height: none;
+    background: none;
+    background-image: none;
+    box-shadow: none;
+  }
+  .table-wrap table { display: block; width: 100%; min-width: 0; }
+  .table-wrap thead { display: none; }
+  .table-wrap tbody { display: block; }
+
+  .table-wrap tbody tr {
+    display: block;
+    margin-bottom: 12px;
+    padding: 6px 2px;
+    border-radius: var(--pv-r);
+    background: var(--pv-surface);
+    box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+  }
+  /* The pinned pair's own hover/selected tints are (0,4,3) and (0,3,2), so a
+     plain `tr:hover > td` neutraliser loses to them and a selected card ends up
+     highlighted only in its first two cells. Matched selector for selector. */
+  .table-wrap tbody tr:hover > td,
+  .table-wrap tbody tr.selected > td,
+  .table-wrap tbody tr:hover > td:first-child:not(.empty),
+  .table-wrap tbody tr:hover > .name-cell,
+  .table-wrap tbody tr.selected > td:first-child:not(.empty),
+  .table-wrap tbody tr.selected > .name-cell { background: transparent; }
+  .table-wrap tbody tr.selected { box-shadow: inset 0 0 0 1px var(--pv-accent-ring), var(--pv-shadow-1); }
+
+  .table-wrap tbody td {
+    display: grid;
+    grid-template-columns: minmax(92px, 33%) 1fr;
+    align-items: start;
+    gap: 12px;
+    padding: 8px 14px;
+    border-bottom: 0;
+    /* The pinning is meaningless once there is nothing to scroll sideways. */
+    position: static;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  /* The label comes from `data-label`, which the table writes from the same
+     words as its own header — so a column that is renamed cannot leave a stale
+     label behind on the card view. */
+  .table-wrap tbody td[data-label]::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--pv-ink-3);
+    padding-top: 2px;
+  }
+
+  /*
+   * `.table-wrap .name-cell` is (0,2,0) and the reset above is (0,1,2), so the
+   * name cell keeps its pinning, its `nowrap` and its edge shadow unless the
+   * reset is restated at matching specificity. Left alone, a long name pushes
+   * the card wider than the viewport and brings back the horizontal scrollbar
+   * this whole media query exists to remove.
+   */
+  .table-wrap tbody td.name-cell {
+    grid-template-columns: 1fr;
+    font-size: 15px;
+    font-weight: 640;
+    padding-top: 12px;
+    position: static;
+    white-space: normal;
+    min-width: 0;
+    box-shadow: none;
+  }
+  .table-wrap tbody td.name-cell::before { display: none; }
+  /* Same inversion: the pin rule is (0,3,2) and sets `width: var(--pv-pin-1)`. */
+  .table-wrap tbody td:first-child:not(.empty) {
+    padding-bottom: 0;
+    position: static;
+    width: auto;
+    min-width: 0;
+  }
+  .table-wrap tbody td.actions-cell { display: flex; padding: 12px 14px; }
+  .table-wrap tbody td.actions-cell::before { display: none; }
+  .table-wrap tbody td.empty { display: block; }
+  .table-wrap tbody td.empty::before { display: none; }
+}
+
+/* ========================================================================= */
+/* Motion preferences                                                        */
+/* ========================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .primary:hover:not(:disabled),
+  .secondary:hover:not(:disabled),
+  .success:hover:not(:disabled),
+  .danger:hover:not(:disabled) { transform: none; }
+}

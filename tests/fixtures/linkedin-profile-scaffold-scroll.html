@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Asha Rao | LinkedIn</title>
+  <!--
+    Sanitized manual fixture for the "profile extraction misses sections" bug.
+    Open it in a browser and read document.body.dataset.result.
+
+    Same root cause as the connections list, on the profile side:
+      * <html>/<body> are pinned with overflow:hidden, so window.scrollY never
+        moves and a scan driven by it never leaves the top card.
+      * #scaffold, an ancestor of <main>, is the real scroll container.
+      * Every section below the top card mounts only when it nears the viewport
+        and is removed again once the scan has moved past it, so a run that does
+        not accumulate loses the middle of the profile.
+      * Two roles at one company, two education institutions, and lazily rendered
+        Skills and Certifications sections sit at the very bottom.
+
+    Expected result: experience has ONE card for Acme Systems with TWO nested
+    roles plus one for Northwind; education has TWO cards, one per institution;
+    skills contains TypeScript and Kubernetes; certifications contains CKA;
+    diagnostics.scrollContainer is NOT "none"; diagnostics.lazyScroll.complete
+    is true and diagnostics.totals matches the saved counts.
+  -->
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    #scaffold { height: 100vh; overflow-y: auto; }
+    main { width: 800px; margin: 0 auto; position: relative; height: 7200px; }
+    .card { position: absolute; left: 0; width: 760px; padding: 20px; border: 1px solid #ccc; background: #fff; }
+    .profile-card { top: 20px; }
+    .profile-card img { width: 120px; height: 120px; }
+    .name { font-size: 28px; }
+    .headline { font-size: 18px; }
+    .section-title { font-size: 24px; font-weight: 700; }
+    [data-view-name="profile-component-entity"] { min-height: 70px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+<div id="scaffold">
+  <main>
+    <div class="card profile-card" data-persistent>
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='gray'/%3E%3C/svg%3E" alt="Asha Rao's profile picture">
+      <div class="name">Asha Rao · 1st</div>
+      <div class="headline">CTO at Acme Systems | Platform engineering</div>
+      <div>Jaipur, Rajasthan, India · Contact info</div>
+      <button>Follow</button><button>Message</button>
+    </div>
+
+    <div class="card" data-virtual style="top: 700px">
+      <div class="section-title">About</div>
+      <div>Builds developer platforms and the teams that run them.</div>
+    </div>
+
+    <div class="card" data-virtual style="top: 1500px">
+      <div class="section-title">Experience</div>
+      <div data-view-name="profile-component-entity">
+        <a href="/company/acme/">Acme Systems Pvt. Ltd.</a>
+        <div data-view-name="profile-component-entity"><div>CTO</div><div>Jan 2023 – Present · 3 yrs</div><div>Jaipur, India</div></div>
+        <div data-view-name="profile-component-entity"><div>Head of Engineering</div><div>Jan 2021 – Dec 2022 · 2 yrs</div><div>Jaipur, India</div></div>
+      </div>
+      <div data-view-name="profile-component-entity"><div>Analyst</div><div>Northwind</div><div>Jan 2019 – Dec 2020 · 2 yrs</div></div>
+    </div>
+
+    <div class="card" data-virtual style="top: 3100px">
+      <div class="section-title">Education</div>
+      <div data-view-name="profile-component-entity"><div>Example University</div><div>MSc, Computer Science</div><div>2019 – 2021</div></div>
+      <div data-view-name="profile-component-entity"><div>Example University</div><div>BSc, Computer Science</div><div>2015 – 2019</div></div>
+      <div data-view-name="profile-component-entity"><div>Second College</div><div>Diploma, Engineering</div><div>2013 – 2015</div></div>
+    </div>
+
+    <div class="card" data-virtual style="top: 4600px">
+      <div class="section-title">Skills</div>
+      <div data-view-name="profile-component-entity"><div>TypeScript</div><div>42 endorsements</div></div>
+      <div data-view-name="profile-component-entity"><div>Kubernetes</div><div>18 endorsements</div></div>
+    </div>
+
+    <div class="card" data-virtual style="top: 6000px">
+      <div class="section-title">Licenses &amp; Certifications</div>
+      <div data-view-name="profile-component-entity"><div>Certified Kubernetes Administrator</div><div>CNCF</div><div>Issued Mar 2022 – Expires Mar 2025</div></div>
+    </div>
+  </main>
+</div>
+
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: {
+      onMessage: { addListener(handler) { messageHandler = handler; }, removeListener() {} },
+      sendMessage() {}
+    }
+  };
+
+  const scaffold = document.getElementById('scaffold');
+  // Sections mount near the viewport and unmount once the scan has passed them.
+  function updateVirtualSections() {
+    const centre = scaffold.scrollTop + scaffold.clientHeight / 2;
+    document.querySelectorAll('[data-virtual]').forEach((node) => {
+      const top = Number.parseInt(node.style.top, 10);
+      node.style.display = Math.abs(top - centre) < 900 ? 'block' : 'none';
+    });
+  }
+  scaffold.addEventListener('scroll', updateVirtualSections);
+  updateVirtualSections();
+  history.replaceState({}, '', '/in/asha-rao/');
+</script>
+<script src="../../src/extraction-core.js"></script>
+<script src="../../src/connections-core.js"></script>
+<script src="../../content.js"></script>
+<script>
+  messageHandler({ type: "PV_EXTRACT", options: { lazyScroll: true } }, {}, (response) => {
+    document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(response))));
+  });
+</script>
+</body>
+</html>

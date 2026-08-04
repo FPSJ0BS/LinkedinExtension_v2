@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Aarav Mehta | LinkedIn</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    main { width: 800px; margin: 0 auto; }
+    .card { min-height: 160px; margin: 20px 0; padding: 20px; border: 1px solid #ccc; }
+    .profile-card img { width: 120px; height: 120px; }
+    .name { font-size: 28px; }
+    .headline { font-size: 18px; }
+    .location { font-size: 15px; }
+    .section-title { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+    [data-view-name="profile-component-entity"] { min-height: 80px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card profile-card">
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='gray'/%3E%3C/svg%3E" alt="Aarav Mehta's profile picture">
+    <div class="name">Aarav Mehta · 3rd</div>
+    <div class="headline">Head - WhatsApp, Founder - CRED, curious.</div>
+    <div class="location">Bengaluru, Karnataka, India · Contact info</div>
+    <div>1,395,858 followers</div>
+    <button>Follow</button><button>Message</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title">About</div>
+    <div>I build products and support early-stage teams with strategy and execution.</div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Experience</div>
+    <div data-view-name="profile-component-entity">
+      <div>Head</div><div>WhatsApp</div><div>Jun 2022 – Present · 4 yrs 2 mos</div><div>Bengaluru, Karnataka, India</div>
+    </div>
+    <div data-view-name="profile-component-entity">
+      <div>Independent Director</div><div>Example Systems Limited</div><div>Nov 2021 – Present · 4 yrs 9 mos</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Education</div>
+    <div data-view-name="profile-component-entity">
+      <div>SVKM's Narsee Monjee Institute of Management Studies (NMIMS)</div><div>Doctorate</div><div>2003 – 2004</div>
+    </div>
+    <div data-view-name="profile-component-entity">
+      <div>Wilson College</div><div>Bachelor of Arts, Philosophy</div><div>1994 – 2000</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Skills</div>
+    <div data-view-name="profile-component-entity"><div>Entrepreneurship</div><div>Endorsed by 2 colleagues</div></div>
+    <div data-view-name="profile-component-entity"><div>Product Strategy</div><div>99+ endorsements</div></div>
+  </div>
+</main>
+<script>
+  globalThis.__PROFILE_VAULT_TEST_PAGE__ = true;
+  let messageHandler = null;
+  globalThis.chrome = {
+    runtime: {
+      onMessage: {
+        addListener(handler) { messageHandler = handler; },
+        removeListener() {}
+      }
+    }
+  };
+</script>
+<script src="../../src/extraction-core.js"></script>
+<script src="../../content.js"></script>
+<script>
+  messageHandler({ type: "PV_EXTRACT", options: { lazyScroll: true } }, {}, (response) => {
+    document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(response))));
+  });
+</script>
+</body>
+</html>

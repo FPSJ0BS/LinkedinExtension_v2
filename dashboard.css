@@ -1,0 +1,80 @@
+/*
+ * Saved Profiles.
+ *
+ * The shared layer is [theme.css](theme.css) — tokens, buttons, fields,
+ * notices, pills, the table primitive with its sticky header, pinned name
+ * column and card-per-row fallback, the drawer. What is left here is what only
+ * this page has: the page shell, the editor modal, and the structured
+ * experience/education blocks its details drawer renders.
+ */
+
+.dashboard-shell {
+  padding: 28px 28px 48px;
+  max-width: 1760px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 22px;
+}
+.dashboard-header p { margin: 6px 0 0; color: var(--pv-ink-3); font-size: 13px; }
+
+.toolbar input[type="search"] { flex: 1; min-width: 250px; }
+
+.message { margin-bottom: 14px; }
+
+/*
+ * The table's own max height: this shell has a shorter header than the
+ * applicants page, so the viewport sum differs by exactly that much.
+ *
+ * Guarded by the same breakpoint the card view uses. This file loads AFTER
+ * theme.css, so an unguarded rule here would beat the `max-height: none` inside
+ * theme's 860px block and leave the card list clipped to a fixed height with
+ * `overflow: visible`.
+ */
+@media (min-width: 861px) {
+  .table-wrap { max-height: calc(100vh - 236px); }
+}
+
+/* ------------------------------------------------------------- the editor */
+
+.editor-modal {
+  width: min(920px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: var(--pv-r-lg);
+  padding: 26px 28px 28px;
+  background: var(--pv-surface);
+  box-shadow: var(--pv-shadow-3);
+  animation: pv-rise var(--pv-slow) var(--pv-ease);
+}
+.editor-modal h2 { margin: 0 0 20px; font-size: 21px; }
+
+.editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/*
+ * The experience and education card styles that used to live here are GONE.
+ *
+ * 3.6.0 removed `experience`, `yearsOfExperience`, `currentRole`,
+ * `currentCompany`, `currentEmploymentDates`, `totalExperience`, `websites` and
+ * `profileImageUrl` from the profile record, and with them every component that
+ * rendered a company block. The ~60 lines of CSS for `.company-block`,
+ * `.company-header`, `.company-logo`, `.logo-fallback`, `.company-identity`,
+ * `.role-count`, `.company-link`, `.role-block`, `.role-meta`,
+ * `.role-description`, `.education-block`, `.education-line`,
+ * `.experience-grid`, `.education-grid` and `.empty-structured` outlived them in
+ * BOTH this file and its sibling, in two slightly different copies. No React
+ * file emits any of those class names — checked, not assumed — so they styled
+ * nothing at all.
+ */
+
+@media (max-width: 860px) {
+  .dashboard-shell { padding: 20px 16px 40px; }
+  .dashboard-header { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .editor-grid { grid-template-columns: 1fr; }
+  .wide { grid-column: auto; }
+}
