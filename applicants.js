@@ -1201,6 +1201,10 @@
       // descriptor rather than a document.
       downloadControl: resume.downloadControl || "none",
       downloadClicked: Boolean(resume.downloadClicked),
+      // Download controls the PANEL offers, found without pressing anything. A
+      // non-empty list here means the viewer open is removable for this account:
+      // there is a control LinkedIn already shows that would fetch the file.
+      panelDownloadLabels: resume.panelDownloadLabels || [],
       descriptor: resume.descriptor || "not-checked",
       refetchedFromPage: Boolean(resume.refetchedFromPage),
       savedAs: resume.savedAs || "",
@@ -1654,6 +1658,44 @@
       return { element, verdict };
     }
     return null;
+  }
+
+  /**
+   * Does the applicant PANEL carry a Download control of its own? Observation
+   * only — nothing here is ever pressed.
+   *
+   * WHY THIS EXISTS. The request is "download the resume without opening it".
+   * That already happens whenever the page renders the document's address, but
+   * when the resume control carries only a route the address does not exist
+   * anywhere until LinkedIn's viewer resolves it, so the viewer is opened as the
+   * last resort. The one honest way to remove that open is to press a Download
+   * control LinkedIn *already shows on the panel* — and this repo has never
+   * looked for one, because rule 9i has only ever searched inside the viewer.
+   * Whether such a control exists is a live-DOM question no fixture can answer
+   * (rule 17), so it is measured before anything is amended.
+   *
+   * `inContainer: false` is deliberate and is what makes this safe: the verdict
+   * can never come back `allowed`, so no code path can be tempted to press what
+   * this finds. A label that cleared the denylist and matched the download
+   * allowlist surfaces as `outside-resume-viewer`, which is exactly the signal —
+   * "there is a Download here, and only the container proof is refusing it".
+   */
+  function probePanelDownloadControls(panel) {
+    if (!panel) return [];
+    const seen = new Set();
+    for (const element of panel.querySelectorAll("button,a,[role='button'],[role='menuitem']")) {
+      if (!isVisible(element)) continue;
+      const verdict = Applicants.classifyApplicantControl({
+        text: cleanText(element.textContent),
+        ariaLabel: cleanText(element.getAttribute("aria-label")),
+        purpose: Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD,
+        inContainer: false
+      });
+      // Only the container proof refused it, so the label itself qualified.
+      if (verdict.reason !== "outside-resume-viewer") continue;
+      if (verdict.label) seen.add(verdict.label);
+    }
+    return [...seen];
   }
 
   /** Everything a dismiss control is ever marked up as — not `button` alone. */
@@ -2315,6 +2357,9 @@
     // be taken for a file here either.
     const rendered = linkedUrl || findResumeDocumentUrl(null);
     diagnostics.resume.foundWithoutOpening = Boolean(rendered);
+    // Observation only, and only worth the DOM walk when the viewer is about to
+    // be opened — that is the case a panel-level Download would remove.
+    diagnostics.resume.panelDownloadLabels = rendered ? [] : probePanelDownloadControls(panel);
 
     let overlay = null;
     let details = { filename: "", fileType: "", pages: null, text: "" };

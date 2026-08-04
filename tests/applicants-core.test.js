@@ -2412,6 +2412,33 @@ test("PERMANENT: only a walk that reached the list end may complete a run", asyn
   void RUN_STATE;
 });
 
+test("the panel Download probe observes and never presses", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const probe = source.slice(source.indexOf("function probePanelDownloadControls"), source.indexOf("const DISMISS_SELECTOR"));
+
+  // The safety property, and the whole reason this can exist without amending
+  // rule 9: `inContainer: false` means the verdict can NEVER come back allowed,
+  // so no path can press what the probe finds. It reports labels, not elements.
+  assert.match(probe, /inContainer: false/, "the probe can never produce an allowed verdict");
+  assert.match(probe, /verdict\.reason !== "outside-resume-viewer"/,
+    "only a label the denylist and the allowlist both cleared is reported");
+  assert.ok(!/\.click\(\)/.test(probe), "the probe must never press anything");
+  assert.ok(!/return \{ element/.test(probe), "and must not hand an element back to be pressed");
+
+  // The click budget is untouched: rule 9 governs controls that are pressed.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "still exactly seven clicks");
+
+  // And what it found reaches the recruiter's console, which is the point.
+  assert.match(source, /panelDownloadLabels: resume\.panelDownloadLabels \|\| \[\]/,
+    "the finding is logged per applicant");
+
+  // Only walked when the viewer would otherwise be opened — that is the case a
+  // panel-level Download would remove, and the only case worth the DOM walk.
+  const step = source.slice(source.indexOf("async function collectResume"));
+  assert.match(step, /panelDownloadLabels = rendered \? \[\] : probePanelDownloadControls\(panel\)/,
+    "no cost on the path that already downloads without opening");
+});
+
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));

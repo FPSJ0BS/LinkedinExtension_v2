@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0080",
+  "name": "Record any Download control the applicant panel carries, without pressing it",
+  "request": "Record any Download control the applicant panel carries, without pressing it",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:59:43.509Z",
+  "completedAt": "2026-08-04T14:02:17.406Z",
+  "startCommit": "0ec313f39a130fc743df3d71a5b5037db8354dec",
+  "gitRef": "task/TASK-0080",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 422/422 tests (up from 421, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "the new test pins the safety properties: inContainer false, only outside-resume-viewer labels reported, no .click() and no element returned from the probe, the click budget still exactly seven, and the probe skipped when the address was already found",
+    "git diff --check passed; scope is applicants.js and its test only; dist/applicants.js rebuilt and verified to match source; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17). This task exists precisely because whether such a control exists is a live-DOM question, and its answer has not been read yet"
+  ],
+  "result": "Added probePanelDownloadControls(), which reports any Download control the applicant PANEL carries without pressing it. This is the measurement that decides whether the viewer open can be removed at all: the open only happens when the resume control carries a route and the document address exists nowhere on the page, and the one honest way to remove it is to press a Download control LinkedIn already shows on the panel - which this repo has never looked for, because rule 9i has only ever searched inside the viewer. inContainer is passed as false deliberately, so the verdict can never be allowed and no path can press what the probe finds; a label that cleared the denylist and matched the download allowlist surfaces as outside-resume-viewer, which is the signal wanted. The labels are logged per applicant by logResume, and the probe is skipped entirely when the address was already found. No rule amended, no control added, click budget still exactly seven."
+}
