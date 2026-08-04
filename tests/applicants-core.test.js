@@ -1193,8 +1193,10 @@ test("the applicant list is grown when the run needs a row, never walked up fron
     "the run must not walk the whole list unconditionally");
   assert.match(run, /if \(options\.loadAll === true\) await loadEveryApplicantRow\(listDiagnostics\)/,
     "the full walk stays available, but only when it is asked for");
-  assert.match(run, /if \(!pending\.length\) \{\s*\n\s*known = await growApplicantList\(listDiagnostics, \(\) => unprocessedRows\(\)\.length > 0\)/,
+  assert.match(run, /if \(!pending\.length\) \{[\s\S]{0,1800}?grown = await growApplicantList\(listDiagnostics, \(\) => unprocessedRows\(\)\.length > 0\)/,
     "the list is scrolled only when the run has run out of rows it has not done");
+  assert.equal((run.match(/await growApplicantList\(/g) || []).length, 1,
+    "and from exactly one place, so no path can scroll the list unconditionally");
   // ONE list scan per turn. `applicantRows()` walks every row link in the list,
   // and a resumed run spends most of its turns skipping already-saved rows, so
   // scanning twice per turn cost a mostly-collected 665-applicant job over a
@@ -2130,6 +2132,31 @@ test("the run collects every page of the applicant list, not only the first", as
 
   // And the walk says what it did, so "why only 25?" is answerable from the page.
   assert.match(source, /applicant list — \$\{walk\.rows\} row\(s\) across \$\{walk\.pages\} page\(s\)/);
+});
+
+test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
+
+  // THE DEFECT. `growApplicantList` calls `assertRunnable()` every pass, which
+  // throws on a hidden page — and `state.wentHidden` stays latched until
+  // `beginRun()`. Outside a try/catch that throw escaped the row loop and
+  // `extractAllApplicants` entirely, so the run died and `noteReturnToTab`
+  // restarted it from the first row. That is the "stops after N profiles and
+  // starts over": N was however many rows were rendered before growth was first
+  // needed, never a counter.
+  assert.match(run, /try \{\s*\n\s*grown = await growApplicantList\(/,
+    "growing the list must be inside the same pause handling the row work has");
+  assert.match(run, /if \(!error\?\.hidden\) throw error;[\s\S]{0,400}?await waitForVisibleAgain\(\)/,
+    "a hidden page during growth is a pause, exactly as it is during extraction");
+  assert.match(run, /await waitForVisibleAgain\(\);[\s\S]{0,600}?beginRun\(\);\s*\n\s*continue;/,
+    "and the run continues where it left off rather than unwinding");
+
+  // A Stop is still a Stop, and a real error is still a real error.
+  assert.match(run, /if \(error\?\.stopped\) \{\s*\n\s*state\.run\.state = Applicants\.RUN_STATE\.STOPPED;/,
+    "Stop during growth still ends the run as an interruption");
+  assert.ok(/if \(!error\?\.hidden\) throw error;/.test(run),
+    "anything that is not a pause is still allowed to surface");
 });
 
 test("a tab switch cannot restart the same walk forever", async () => {

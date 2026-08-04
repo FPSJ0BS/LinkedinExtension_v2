@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0072",
+  "name": "Pause instead of dying when the page hides while the applicant list grows",
+  "request": "Pause instead of dying when the page hides while the applicant list grows",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T12:51:29.646Z",
+  "completedAt": "2026-08-04T12:53:24.312Z",
+  "startCommit": "c932f01f23056a6a8c81aed388ca6b70b0c446cd",
+  "gitRef": "task/TASK-0072",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 417/417 tests (up from 416, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "new test 'a page that hides while the list grows pauses the run, it does not kill it' pins the try/catch placement, the hidden-is-a-pause branch, the continue-not-unwind path, and that Stop and real errors still behave; the pre-existing growth assertion was updated for the new shape and strengthened with a single-call-site count",
+    "git diff --check passed; scope is applicants.js and its test only; dist/applicants.js rebuilt and verified to match source; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17). The control-flow defect is provable by reading; that it is the whole of the reported symptom is not, and the resume-download report has not been diagnosed at all"
+  ],
+  "result": "Found the cause of the stop-after-N-profiles: it is not a counter, a limit or a timeout. growApplicantList() calls assertRunnable() on every pass, which throws hiddenPageError the moment the tab is hidden or while state.wentHidden is still latched from an earlier switch (only beginRun clears it). That call sat outside the row loop's try/catch, so the throw was not a pause - it propagated out of extractAllApplicants and runEveryApplicant rethrew it, killing the run; noteReturnToTab then restarted it from the first row, which is the stop-and-start-over the recruiter sees. N was simply however many rows were already rendered before the list first needed growing. Growing the list is now inside the same pause handling extractApplicant has had since 3.7.7: wait for the page, clear the latch, continue where it left off. Stop still ends the run and a non-pause error still surfaces. waitForVisibleAgain's five-minute bound is the only limit, so nothing can spin."
+}

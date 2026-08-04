@@ -3748,7 +3748,49 @@
       // — so one scan is not merely cheaper, it is the only honest number.
       let pending = unprocessedRows();
       if (!pending.length) {
-        known = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
+        /**
+         * THE STOP AFTER N PROFILES, and it is not a counter anywhere.
+         *
+         * `growApplicantList` calls `assertRunnable()` on every pass, which
+         * throws `hiddenPageError` the moment the tab is hidden — or merely the
+         * moment `state.wentHidden` is still latched from an earlier switch,
+         * since only `beginRun()` clears it. This call sat **outside** the
+         * try/catch below, so that throw was not a pause: it propagated out of
+         * the row loop, out of `extractAllApplicants`, and `runEveryApplicant`
+         * rethrew it. The run was dead, and dead runs are restarted from the
+         * first row by `noteReturnToTab` — so the recruiter saw it collect the
+         * handful of rows that happened to be rendered, stop, and start over.
+         * The count was never a limit; it was however many rows were already on
+         * screen before the list first needed growing.
+         *
+         * `extractApplicant` has been treated as a pause since 3.7.7. Growing
+         * the list is the same kind of work on the same page and gets the same
+         * treatment: wait for the page to come back, clear the latch, and carry
+         * on where it left off. `waitForVisibleAgain` is the bound — five
+         * minutes hidden ends the run — so nothing here can spin.
+         */
+        let grown;
+        try {
+          grown = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
+        } catch (error) {
+          if (error?.stopped) {
+            state.run.state = Applicants.RUN_STATE.STOPPED;
+            break;
+          }
+          if (!error?.hidden) throw error;
+          state.run.lastError = error.message;
+          const resumed = await waitForVisibleAgain();
+          if (!resumed) {
+            state.run.state = Applicants.RUN_STATE.STOPPED;
+            break;
+          }
+          showPageNotice("Profile Vault resumed — continuing where it left off.");
+          // Nothing was processed and nothing partial was saved, so the next
+          // turn simply asks for rows again.
+          beginRun();
+          continue;
+        }
+        known = grown;
         // The DOM genuinely moved, so this re-scan is the one that is earned.
         pending = unprocessedRows();
         if (!pending.length) {
