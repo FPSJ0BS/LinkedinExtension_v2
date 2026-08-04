@@ -12,7 +12,9 @@
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "https://linkedin.com/*"
+    "https://linkedin.com/*",
+    "https://media.licdn.com/*",
+    "https://static.licdn.com/*"
   ],
   "action": {
     "default_title": "Profile Vault React",

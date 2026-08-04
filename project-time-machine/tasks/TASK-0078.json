@@ -1,0 +1,41 @@
+{
+  "schema": 2,
+  "id": "TASK-0078",
+  "name": "Allow the licdn media host so the resume fetch is not silently blocked",
+  "request": "Allow the licdn media host so the resume fetch is not silently blocked",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:41:01.137Z",
+  "completedAt": "2026-08-04T13:43:37.536Z",
+  "startCommit": "5640c322567b8c6a165c7bd3b20885344bd7979d",
+  "gitRef": "task/TASK-0078",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/manifest.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 421/421 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "rule discipline followed: CLAUDE.md rule 5 amended in this same task before the manifest change, and both host assertions kept as exact deepEqual lists with an added origin-shape check; the forbidden-permission assertions were not touched",
+    "git diff --check passed; scope is manifest.json, applicants.js, the two test files and the rule; no secrets; the signed media URL is never logged - only host plus two path segments via safeHost()",
+    "NOT verified against live LinkedIn (rule 17): whether the fetch was in fact being blocked on the user's account is exactly what the new warning will now say, and has not yet been read from a live run"
+  ],
+  "result": "The resume document is served from licdn.com while the page rendering it is on linkedin.com - a different origin - and licdn was absent from host_permissions, so the two page-side credentialed fetches (resolveResumeDocumentUrl and fetchResumeBytes) were refused before the request left the page. The only trace was a descriptor: check-failed field nobody opens, which is exactly the silent failure that makes a download problem undiagnosable. Added media.licdn.com and static.licdn.com to host_permissions, and made the blocked case log the host (never the signed URL) plus the hint that this is what an every-applicant check-failed means. Rule 5 was amended FIRST to state that LinkedIn's own media CDN counts as LinkedIn and that nothing else may be added without amending it again; the two exact-list manifest assertions were then updated deliberately and strengthened with a LinkedIn-owned-origin pattern check, rather than weakened. The permissions list is unchanged and the denied list is still asserted."
+}

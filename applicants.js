@@ -1166,6 +1166,24 @@
    * came from, whether the file landed and — if not — why, so the next failure
    * is answerable from the console instead of from another round of guessing.
    */
+  /**
+   * A signed media address is a credential. Log where it pointed, never the URL.
+   *
+   * `media.licdn.com/dms/document/…` carries an expiring signature, so printing
+   * one into a console the recruiter may screenshot or paste into an issue hands
+   * that document to whoever reads it. Host plus the first two path segments is
+   * enough to tell a document from an image, which is the whole diagnostic value.
+   */
+  function safeHost(url) {
+    try {
+      const parsed = new URL(String(url || ""));
+      const segments = parsed.pathname.split("/").filter(Boolean).slice(0, 2).join("/");
+      return segments ? `${parsed.host}/${segments}/…` : parsed.host;
+    } catch {
+      return "(unreadable address)";
+    }
+  }
+
   function logResume(diagnostics, name) {
     const resume = diagnostics?.resume;
     if (!resume) return;
@@ -2235,8 +2253,22 @@
     let response;
     try {
       response = await fetch(url, { credentials: "include" });
-    } catch {
+    } catch (error) {
+      // Said out loud rather than swallowed. This catch is where a **missing host
+      // permission** lands: the media CDN is a different origin from
+      // `linkedin.com`, so without `media.licdn.com` in `host_permissions` the
+      // fetch is refused before it leaves the page and the only trace was a
+      // `descriptor: "check-failed"` field nobody opens. The address is still
+      // returned unchanged — a failed check is not evidence of anything, and the
+      // worker's own refusals still apply — but the reason is now on the record
+      // and in the console, because "every applicant came back check-failed" is
+      // the one sentence that names this cause.
       diagnostics.resume.descriptor = "check-failed";
+      diagnostics.resume.descriptorError = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[Profile Vault ${BUILD_ID}] resume: could not read ${safeHost(url)} — ${diagnostics.resume.descriptorError}. `
+        + "If this is every applicant, the media host is not in manifest host_permissions."
+      );
       return url;
     }
     if (!response.ok) {

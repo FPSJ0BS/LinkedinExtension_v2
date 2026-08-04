@@ -2557,8 +2557,16 @@ test("the hiring surface is a content script entry scoped to LinkedIn hiring pag
   for (const pattern of entry.matches) {
     assert.match(pattern, /^https:\/\/(?:www\.)?linkedin\.com\/(?:hiring|talent)\/\*$/, `${pattern} must target the hiring surface only`);
   }
-  // Nothing new was asked for: the surface is covered by the existing host
-  // permissions and the existing `downloads` permission.
+  // No new *permission* was asked for: the surface runs on the existing
+  // `downloads`, `scripting`, `storage`, `activeTab` and `alarms`.
   assert.deepEqual(manifest.permissions.slice().sort(), ["activeTab", "alarms", "downloads", "scripting", "storage"]);
-  assert.deepEqual(manifest.host_permissions.sort(), ["https://linkedin.com/*", "https://www.linkedin.com/*"].sort());
+  // The host list gained LinkedIn's own media CDN in 3.7.9 (rule 5) so the resume
+  // document can be read from the page that rendered it. Still LinkedIn-owned,
+  // still an exact list.
+  assert.deepEqual(manifest.host_permissions.slice().sort(), [
+    "https://linkedin.com/*",
+    "https://media.licdn.com/*",
+    "https://static.licdn.com/*",
+    "https://www.linkedin.com/*"
+  ]);
 });

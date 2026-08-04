@@ -30,7 +30,21 @@ test("manifest references existing extension source files", async () => {
 
 test("host access is limited to LinkedIn", async () => {
   const manifest = await loadManifest();
-  assert.deepEqual(manifest.host_permissions.sort(), ["https://linkedin.com/*", "https://www.linkedin.com/*"].sort());
+  // LinkedIn's own media CDN counts as LinkedIn (rule 5, amended in 3.7.9): the
+  // resume document is served from `licdn.com` while the page rendering it is on
+  // `linkedin.com`, so a page-side credentialed fetch of the file was refused as
+  // cross-origin before it left the page. Read-only, and still an exact list —
+  // a fourth host may only arrive by amending rule 5 again.
+  assert.deepEqual(manifest.host_permissions.slice().sort(), [
+    "https://linkedin.com/*",
+    "https://media.licdn.com/*",
+    "https://static.licdn.com/*",
+    "https://www.linkedin.com/*"
+  ]);
+  for (const host of manifest.host_permissions) {
+    assert.match(host, /^https:\/\/(?:[a-z0-9-]+\.)?(?:linkedin\.com|licdn\.com)\/\*$/,
+      `${host} must be a LinkedIn-owned origin`);
+  }
 });
 
 test("permissions stay minimal", async () => {

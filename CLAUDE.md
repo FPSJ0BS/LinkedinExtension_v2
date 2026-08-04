@@ -136,7 +136,17 @@ commands are unrecoverable.
    [connections.js](connections.js), or `src/*-core.js`.
 3. React loads locally from [vendor/](vendor/), never a CDN — MV3 CSP is `script-src 'self'`.
 4. Chrome loads [dist/](dist/), never the repo root.
-5. Host permissions stay LinkedIn-only; permissions stay minimal.
+5. Host permissions stay LinkedIn-only; permissions stay minimal. **LinkedIn's own media CDN
+   counts as LinkedIn** (amended in 3.7.9): `media.licdn.com` and `static.licdn.com` are listed
+   alongside `linkedin.com`, and nothing else may be added without amending this rule again.
+   They are there because the resume document is *served from* `licdn.com` while the page that
+   renders it is on `linkedin.com` — a different origin — so `resolveResumeDocumentUrl()` and
+   `fetchResumeBytes()` were refused before the request ever left the page, and the only trace was
+   a `descriptor: "check-failed"` field nobody opens. A CDN LinkedIn serves the recruiter's own
+   documents from is not a third party, and the access is **read-only fetches of a file that
+   account already has**. The blocked case is now logged loudly as well, because "every applicant
+   came back `check-failed`" is the one sentence that names this cause. `<all_urls>`, `tabs`,
+   `webRequest`, `cookies` and the rest of the denied list are unchanged and still asserted.
 
 **Extraction & import behavior**
 
