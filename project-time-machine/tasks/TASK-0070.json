@@ -1,0 +1,44 @@
+{
+  "schema": 2,
+  "id": "TASK-0070",
+  "name": "Rollback of TASK-0069 (Stop a run completing when the list walk only ran out of budget)",
+  "request": "Rollback of TASK-0069 (Stop a run completing when the list walk only ran out of budget)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-04T12:22:31.311Z",
+  "completedAt": "2026-08-04T12:22:32.521Z",
+  "startCommit": "9839f14959773f4cfb603692699c84342a208abf",
+  "commit": null,
+  "gitRef": "task/TASK-0070",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-04T12-22-31-069Z created and verified"
+  ],
+  "result": "Reversed TASK-0069 — Stop a run completing when the list walk only ran out of budget",
+  "target": {
+    "taskId": "TASK-0069",
+    "taskName": "Stop a run completing when the list walk only ran out of budget",
+    "commit": "9839f14959773f4cfb603692699c84342a208abf"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-04T12-22-31-069Z",
+    "commit": "9839f14959773f4cfb603692699c84342a208abf"
+  }
+}
