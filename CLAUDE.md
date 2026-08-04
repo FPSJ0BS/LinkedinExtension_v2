@@ -205,6 +205,27 @@ commands are unrecoverable.
       the real file. It reveals a file the recruiter's account already has and changes nothing on
       LinkedIn. `Save` remains forbidden — the denylist is consulted first, so a control whose label
       pairs a download with an action on the applicant is still refused.
+
+      **⚠ PERMANENT — this chain may never be removed.** Requested outright by the user and binding
+      from 3.7.9 on: *when the extension opens a resume it presses Download, saves the file to disk,
+      and keeps that link as the resume link.* All five steps are load-bearing and none may be
+      dropped, shortened or made conditional:
+      **(1)** open the viewer → **(2)** press the viewer's own Download control
+      (`clickResumeDownload`, gated by `classifyApplicantControl`) → **(3)** take the address that
+      produced and prove it is a document, resolving a descriptor to the file it names
+      (`resolveResumeDocumentUrl`) → **(4)** record that address as the resume link **before** the
+      download is attempted (`linkSavedBeforeDownload`), so a refused or timed-out download still
+      leaves a usable link → **(5)** save the file through the worker
+      (`PV_APPLICANT_DOWNLOAD_RESUME`; a content script has no `chrome.downloads`) and put
+      `localReference` and `downloadStatus` on the record beside the link.
+      Step 2 must stay **before** step 3: pressing Download is what makes the page request the real
+      file, which is what puts its address in the entry log at all — reordering them silently returns
+      the surface to saving a descriptor, or nothing. The test
+      `PERMANENT: the opened resume is downloaded by pressing Download, and its link is kept`
+      ([tests/applicants-core.test.js](tests/applicants-core.test.js)) asserts every step and is
+      itself not to be deleted or weakened. If this behaviour ever genuinely has to change, **this
+      rule changes first, in its own task**, and the test changes with it — never the other way
+      round.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
       `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a

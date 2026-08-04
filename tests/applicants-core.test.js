@@ -2134,6 +2134,81 @@ test("the run collects every page of the applicant list, not only the first", as
   assert.match(source, /applicant list — \$\{walk\.rows\} row\(s\) across \$\{walk\.pages\} page\(s\)/);
 });
 
+/**
+ * PERMANENT. Requested outright: "when it opens the resume I need the extension
+ * to click download and save the resume to disk and save that link as the resume
+ * link — and make sure to never remove this feature in future."
+ *
+ * Every link of that chain is asserted here, so removing ANY of them fails the
+ * build rather than quietly reverting the behaviour: open the viewer, press the
+ * viewer's own Download control, resolve the address that produces to a real
+ * document, record it as the resume link, and save the file through the worker.
+ * Rule 9i names the control; this is what stops the code drifting away from it.
+ *
+ * Do not delete or weaken this test. If the feature must genuinely change, the
+ * rule in CLAUDE.md changes first, in its own task, and this test changes with it.
+ */
+test("PERMANENT: the opened resume is downloaded by pressing Download, and its link is kept", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+
+  // 1. The control exists as a named, gated step — not an inline click.
+  const press = source.slice(source.indexOf("async function clickResumeDownload"), source.indexOf("* Prove a candidate address is the DOCUMENT"));
+  assert.ok(press, "clickResumeDownload must exist");
+  assert.match(press, /findControl\(viewer, Applicants\.CONTROL_PURPOSE\.RESUME_DOWNLOAD\)/,
+    "the control is chosen by the tested policy, never by a local selector");
+  assert.match(press, /control\.element\.click\(\);/, "and it is actually pressed");
+  assert.match(press, /diagnostics\.resume\.downloadClicked = true;/, "and says so, so a silent no-op is visible");
+
+  // 2. The policy still gates it: whole-label allowlist, proven inside the
+  //    viewer, denylist first. A wider match here would press something else.
+  const policy = core.slice(core.indexOf("function classifyApplicantControl"), core.indexOf('return refuse("unknown-purpose")'));
+  assert.match(policy, /if \(!RESUME_DOWNLOAD_CONTROL_PATTERN\.test\(label\)\) return refuse\("not-a-download-control"\)/);
+  assert.match(policy, /purpose === CONTROL_PURPOSE\.RESUME_DOWNLOAD[\s\S]{0,500}?if \(!inContainer\) return refuse\("outside-resume-viewer"\)/,
+    "proven inside the viewer this extension opened, exactly as pagination is proven inside the list");
+  assert.ok(
+    policy.indexOf("FORBIDDEN_APPLICANT_CONTROL_PATTERN") < policy.indexOf("CONTROL_PURPOSE.RESUME_DOWNLOAD"),
+    "the denylist is still consulted first, so Save and ATS actions stay refused"
+  );
+  assert.equal(Applicants.classifyApplicantControl({
+    text: "Download", purpose: Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD, inContainer: true
+  }).allowed, true, "the viewer's own Download is allowed");
+  assert.equal(Applicants.classifyApplicantControl({
+    text: "Download", purpose: Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD, inContainer: false
+  }).allowed, false, "a Download outside the viewer is not");
+  assert.equal(Applicants.classifyApplicantControl({
+    text: "Save", purpose: Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD, inContainer: true
+  }).allowed, false, "Save remains forbidden");
+
+  // 3. It is pressed when the resume is opened, and BEFORE the document address
+  //    is looked for — pressing it is what makes the page resolve its own
+  //    descriptor and request the real file, which is what puts that address in
+  //    the entry log at all.
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+  assert.match(step, /await clickResumeDownload\(overlay, diagnostics\);/, "the opened viewer's Download is pressed");
+  assert.ok(
+    step.indexOf("await clickResumeDownload(") < step.indexOf("label: \"resume-document\""),
+    "and pressed before the document address is waited for"
+  );
+
+  // 4. The address is proven to be a document, then kept as the resume link —
+  //    before the download, so a failed download still leaves a usable link.
+  assert.match(step, /url = await resolveResumeDocumentUrl\(url, diagnostics\)/,
+    "a descriptor is resolved to the file it names, never saved as the CV");
+  assert.match(step, /accumulator\.setResume\(\{[\s\S]{0,320}?url,[\s\S]{0,320}?downloadStatus: Applicants\.RESUME_STATUS\.LINK_ONLY/,
+    "the verified link is recorded as the resume link");
+  assert.ok(
+    step.indexOf("linkSavedBeforeDownload = true") < step.indexOf("sendRuntimeMessageWithTimeout(request)"),
+    "the link is kept before the file is attempted"
+  );
+
+  // 5. The file is saved to disk by the worker, and the final record carries the
+  //    link, the saved copy and the outcome together.
+  assert.match(step, /type: "PV_APPLICANT_DOWNLOAD_RESUME"/, "the worker owns chrome.downloads");
+  assert.match(step, /accumulator\.setResume\(\{[\s\S]{0,600}?localReference: result\?\.localReference \|\| null,\s*\n\s*downloadStatus: status/,
+    "the saved file and its status land on the record with the link");
+});
+
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));

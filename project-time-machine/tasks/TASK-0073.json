@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0073",
+  "name": "Lock the open-resume click-Download save-and-link chain against removal",
+  "request": "Lock the open-resume click-Download save-and-link chain against removal",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T12:59:10.649Z",
+  "completedAt": "2026-08-04T13:01:28.980Z",
+  "startCommit": "37058d88e100d17875f285415eb50e6d07aa9d6e",
+  "gitRef": "task/TASK-0073",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 418/418 tests (up from 417, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "mutation-verified the lock: simulated removal of the Download click, the descriptor resolve and the worker download message each make the new test fail",
+    "git diff --check passed; scope is the test file and the CLAUDE.md rule only, no production code touched; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): this locks the code path, it does not prove the control is found on the user's live viewer"
+  ],
+  "result": "The open-resume click-Download save-and-link chain was already implemented end to end but almost unprotected: the only assertion was the link-before-download ordering, so the Download click, the descriptor resolution and the worker save could all have been removed without a single test failing. Added a PERMANENT lock test asserting all five steps and the policy gating (whole-label allowlist, proven inside the viewer, denylist first, Save still refused), and verified by mutation that dropping any one link fails it. Recorded the chain as a binding non-removable clause under rule 9i in CLAUDE.md, stating that the rule changes first and the test with it, never the reverse. No production code changed - this task makes existing behaviour permanent."
+}
