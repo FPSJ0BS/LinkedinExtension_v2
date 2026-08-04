@@ -34,9 +34,20 @@ const APPLICANTS_URL =
  * absence. `//` is only treated as a comment at a line start or after
  * whitespace, so a `https://` inside a string or a `\/\/` inside a regex
  * survives.
+ *
+ * **Line endings are normalised first, and that is not cosmetic.** The repo is
+ * LF-canonical, but Git checks the tree out as CRLF wherever `core.autocrlf` is
+ * true — every Windows clone. `.` does not match `\r`, so on such a checkout
+ * `(^|\s)\/\/.*$` never reaches the `$` of a `// …\r` line and the comment is
+ * left in place. Three "this file must never mention X" assertions then read the
+ * sentence explaining the absence as the thing itself, and failed on a tree
+ * whose committed content is byte-for-byte correct. A check that passes only on
+ * one platform's checkout is worse than no check: it reports a defect nobody can
+ * find and hides the real one.
  */
 function withoutComments(source) {
   return source
+    .replace(/\r\n?/g, "\n")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .split("\n")
     .map((line) => line.replace(/(^|\s)\/\/.*$/, "$1"))

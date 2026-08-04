@@ -1,0 +1,28 @@
+{
+  "schema": 2,
+  "id": "TASK-0068",
+  "name": "Make the source-scanning tests line-ending agnostic so they pass on a CRLF checkout",
+  "request": "Make the source-scanning tests line-ending agnostic so they pass on a CRLF checkout",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T11:50:32.323Z",
+  "completedAt": "2026-08-04T11:51:54.447Z",
+  "startCommit": "9fd821745777b1df2e20b51bc175e2cd81820ce0",
+  "gitRef": "task/TASK-0068",
+  "files": [
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-tabs.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 415/415 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "npm test went from 411/415 to 415/415; no test was weakened - verified independently that the code satisfies all three assertions (0 chrome.downloads in applicants.js, 0 DOM refs in applicants-core.js, 2 visibility guards in background.ts)",
+    "git diff --check passed; only the two test files changed, no production source touched, no secrets"
+  ],
+  "result": "Fixed the 4 failing tests. Root cause was line endings, not logic: the repo is LF-canonical but core.autocrlf=true checks the tree out as CRLF, and '.' does not match CR, so withoutComments() left every '// ...' comment intact and three 'this file must never mention X' assertions read the sentence explaining the absence as the thing itself; a fourth regex used a bare backslash-n and matched neither visibility guard. Normalized line endings in withoutComments() and made the collector-tabs guard regex accept CR-LF. No production code was touched - applicants.js has 0 chrome.downloads, applicants-core.js has 0 DOM references and background.ts has both visibility guards, all verified independently."
+}

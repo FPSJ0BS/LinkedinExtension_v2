@@ -330,7 +330,11 @@ test("the worker refuses to save a profile read from a tab that went hidden", as
 
   // Gated before reading AND again before writing: the tab can go hidden in the
   // window between the content script returning and the record being persisted.
-  const guards = body.match(/if \(!\(await collectorIsRenderable\(\)\)\) \{\n\s*return \{ ok: false, hidden: true/g) || [];
+  // `\r?\n` because the repo is LF-canonical but a checkout with core.autocrlf
+  // true — every Windows clone — hands this file to the test as CRLF, and a bare
+  // `\n` then matches neither guard and reports "found 0" against a worker that
+  // has both.
+  const guards = body.match(/if \(!\(await collectorIsRenderable\(\)\)\) \{\r?\n\s*return \{ ok: false, hidden: true/g) || [];
   assert.ok(guards.length >= 2, `both the read and the save must be gated on visibility, found ${guards.length}`);
   assert.ok(
     body.indexOf("collectorIsRenderable") < body.indexOf("persistProfile"),
