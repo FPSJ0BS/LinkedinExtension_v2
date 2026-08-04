@@ -551,10 +551,16 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
   route was stored as the file, so "Open resume" reopened the applicants page — and the worker
   downloaded that HTML page as somebody's CV and reported `downloaded`. A LinkedIn host is not a file.
 - **The table and the CSV were restructured in 3.7.1; the resume is two columns since 3.7.6.**
-  `APPLICANT_TABLE_COLUMNS` is now `applicant_name, email, mobile, resume_link, resume_file,
-  current_role, current_company, total_experience, must_have_met, preferred_met, application_status,
-  collected_at` — the person first, then both ways to reach them, then the resume in **two** columns:
-  **where to click** and **which file we have**. `resume_link` is the document address when the page
+  `APPLICANT_TABLE_COLUMNS` is `applicant_name, email, mobile, resume_file, current_role,
+  current_company, total_experience, education` — the person first, then both ways to reach them,
+  then the resume in **one** column since 3.7.9: **which file we have**. `resume_link` was removed
+  from the table on request ("we can skip the link and remove it from table too") and is
+  **demoted into the detail columns, never dropped** — it is the only column carrying `url` /
+  `viewerUrl`, so deleting it outright would take the document address out of the export
+  altogether, and `resume.url` itself must stay on the record because `resumeAlreadyDownloaded()`
+  is what stops every run re-downloading every file. The same treatment `qualifications` got, with
+  the same two-part test: removed from the table, still asserted present in the export.
+  `resume_link` is the document address when the page
   rendered one and the LinkedIn viewer page when that is all there is, because either way the cell
   means "open the CV"; `resume_file` is the saved copy's path under the downloads folder, falling back
   to the file name LinkedIn showed. Both are `resumeLink()` / `resumeFile()` in

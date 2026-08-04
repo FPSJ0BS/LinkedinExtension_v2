@@ -408,15 +408,13 @@ class ApplicantsApp extends React.Component {
             made the table unreadable. The link is the document when one was
             found and the LinkedIn viewer page when it is not, because either
             way the cell means "open the CV". */}
-        <td className="text-cell" data-label="Resume Link">
-          <span className="cell-clip">
-            {resumeLink(record)
-              ? <a href={resumeLink(record)} target="_blank" rel="noreferrer" title={resumeLink(record)}>
-                  {record.applicant.resume.url ? "Open file" : "View on LinkedIn"}
-                </a>
-              : "—"}
-          </span>
-        </td>
+        {/* The **Resume Link** column that stood here was removed on request in
+            3.7.9 — "we can skip the link and remove it from table too". What the
+            recruiter wants from this row is the CV on disk, not an address to
+            click. The link is **demoted, not dropped**: it still exports as the
+            `resume_link` detail column and still shows in the details drawer
+            below, because it is the only place `url`/`viewerUrl` reach the CSV
+            at all. */}
         {/* The saved copy's path when there is one, the file name when there is
             not. A file:// link would be blocked, so it is shown as text. */}
         <td className="text-cell" data-label="Resume File"><span className="cell-clip">{show(resumeFile(record))}</span></td>
@@ -578,7 +576,6 @@ class ApplicantsApp extends React.Component {
                 <th className="name-cell">Applicant Name</th>
                 <th>Email</th>
                 <th>Mobile</th>
-                <th>Resume Link</th>
                 <th>Resume File</th>
                 <th>Current Role</th>
                 <th>Current Company</th>

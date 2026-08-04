@@ -120,12 +120,26 @@ test("the export leads with the applicant, and the resume is exactly two columns
   // 3.7.6: the resume is TWO columns. Five of them answered one question
   // between them and made the table impossible to read across; the two that are
   // acted on are where the resume is and which file we have.
-  assert.deepEqual(labels.slice(0, 5), [
-    "applicant_name", "email", "mobile", "resume_link", "resume_file"
-  ], "name, both ways to reach them, then where the CV is and which file it is");
+  // ...and ONE of those two from 3.7.9, on request: "we can skip the link and
+  // remove it from table too". What the row is scanned for is whether the CV is
+  // on disk, not an address to click.
+  assert.deepEqual(labels.slice(0, 4), [
+    "applicant_name", "email", "mobile", "resume_file"
+  ], "name, both ways to reach them, then which file we actually have");
   for (const gone of ["resume_status", "resume_viewer", "resume_saved_as"]) {
     assert.ok(!labels.includes(gone), `${gone} must no longer be a column`);
   }
+  // **Demoted, never dropped** — the same treatment `qualifications` got. This
+  // is the only column carrying `url`/`viewerUrl`, so deleting it outright would
+  // take the document address out of the export altogether.
+  assert.ok(
+    !Csv.APPLICANT_TABLE_COLUMNS.includes("resume_link"),
+    "the resume link is no longer a table column"
+  );
+  assert.ok(
+    labels.includes("resume_link"),
+    "and it must still export — removing the column must never drop the data"
+  );
 
   const record = Applicants.normalizeApplicantRecord({
     applicant: {
@@ -201,7 +215,7 @@ test("education is a column of the table; qualifications are detail behind it", 
   // application status and the collected-at timestamp are detail, not something
   // a shortlist is scanned down.
   assert.deepEqual(
-    [...Csv.APPLICANT_TABLE_COLUMNS].slice(5),
+    [...Csv.APPLICANT_TABLE_COLUMNS].slice(4),
     ["current_role", "current_company", "total_experience", "education"],
     "the last columns are what the shortlist is actually read for"
   );

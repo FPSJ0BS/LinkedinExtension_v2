@@ -185,7 +185,10 @@ test("a wide table is navigable, not merely scrollable", async () => {
   // stale label behind in a stylesheet.
   const applicants = await read("src/react/applicants-dashboard.tsx");
   const dashboard = await read("src/react/dashboard.tsx");
-  assert.match(applicants, /<td className="text-cell" data-label="Resume Link">/);
+  // "Resume Link" was removed as a column in 3.7.9; "Resume File" is the resume
+  // cell the table now carries, and it must still name itself when the table
+  // becomes cards.
+  assert.match(applicants, /<td className="text-cell" data-label="Resume File">/);
   assert.match(applicants, /<td className="summary-cell" data-label="Total Experience">/);
   assert.match(dashboard, /<td className=\{props\.className \|\| "summary-cell"\} data-label=\{props\.label\}>/,
     "the shared compact cell carries the label through");

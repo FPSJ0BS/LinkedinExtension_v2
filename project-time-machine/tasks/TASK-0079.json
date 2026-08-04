@@ -1,0 +1,41 @@
+{
+  "schema": 2,
+  "id": "TASK-0079",
+  "name": "Demote the resume link out of the applicants table into the detail columns",
+  "request": "Demote the resume link out of the applicants table into the detail columns",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:55:33.277Z",
+  "completedAt": "2026-08-04T13:59:14.472Z",
+  "startCommit": "2cfff154d2e13821e739c9d68d5e49b67b16c3ce",
+  "gitRef": "task/TASK-0079",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 421/421 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "the three tests that pinned the old column order were updated deliberately and each records why: the 5-column slice became 4, the table tail slice moved from 5 to 4, and the responsive data-label assertion now names Resume File; two new assertions were ADDED pinning the demotion (absent from the table, present in the export)",
+    "git diff --check passed; scope is applicant-csv.js, the dashboard, two test files and the CLAUDE.md column rule; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): this is a table and export change, verified by unit tests; it was not observed in a running extension"
+  ],
+  "result": "Removed the Resume Link column from the applicants table and the CSV table block, on request. It is DEMOTED into the detail columns, not dropped: resume_link is the only column carrying url/viewerUrl, so deleting it would take the document address out of the export entirely, and resume.url must stay on the record because resumeAlreadyDownloaded() is the cross-session guard that stops every run re-downloading every file. The table now carries one resume column - which file we have. Same treatment and same two-part test as the earlier qualifications demotion: asserted absent from APPLICANT_TABLE_COLUMNS and asserted still present in the export. The details drawer is untouched; it reads resume.url and resume.viewerUrl directly."
+}

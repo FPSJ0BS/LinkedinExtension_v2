@@ -54,7 +54,7 @@ const Applicants = /** @type {any} */ (globalThis).ProfileVaultApplicants;
  */
 export const APPLICANT_TABLE_COLUMNS = Object.freeze([
   "applicant_name", "email", "mobile",
-  "resume_link", "resume_file",
+  "resume_file",
   "current_role", "current_company", "total_experience",
   "education"
 ]);
@@ -101,8 +101,12 @@ export const APPLICANT_CSV_COLUMNS = [
   ["applicant_name", (record) => record.applicant.name],
   ["email", (record) => record.applicant.contact.email],
   ["mobile", (record) => record.applicant.contact.phone, { asText: true }],
-  // The resume, in two columns and no more: where to click, and which file.
-  ["resume_link", resumeLink],
+  // The resume, in ONE table column since 3.7.9: which file we have. Asked for
+  // outright — "we can skip the link and remove it from table too" — because the
+  // recruiter wants the CV on disk, not an address to click. `resume_link` is
+  // **demoted into the detail block below, never dropped**: it is the only column
+  // carrying `url`/`viewerUrl`, so deleting it would take the document address
+  // out of the export altogether. The same treatment `qualifications` got.
   ["resume_file", resumeFile],
   ["current_role", (record) => record.applicant.currentRole],
   ["current_company", (record) => record.applicant.currentCompany],
@@ -149,6 +153,10 @@ export const APPLICANT_CSV_COLUMNS = [
   ["screening_responses", (record) => record.applicant.screeningResponses.map(formatScreening)],
   ["experience", (record) => record.applicant.experience.map(formatExperience)],
   ["skills", (record) => record.applicant.skills],
+  // Demoted out of the table in 3.7.9, kept here in full: the document address
+  // when one was proven, otherwise the viewer page. Removing the COLUMN must
+  // never drop the DATA — this is the only column carrying `url`/`viewerUrl`.
+  ["resume_link", resumeLink],
   ["resume_file_type", (record) => record.applicant.resume.fileType],
   ["resume_pages", (record) => record.applicant.resume.pages],
   ["job_id", (record) => record.job.id],
