@@ -2260,6 +2260,75 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
   );
 });
 
+/**
+ * PERMANENT. The required flow, stated by the user:
+ *
+ *   click applicant in left list -> wait for right panel -> scroll right panel
+ *   completely -> extract -> save -> click next applicant
+ *
+ * with the page and the left list mounted throughout, only the right panel
+ * updating, only the right column scrolling, and never a second click while a
+ * profile is still loading.
+ */
+test("PERMANENT: one click per applicant, wait for the right panel, scroll only that column", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // 1. The page is never navigated or reloaded: the run changes applicants by
+  //    clicking, and LinkedIn swaps the right panel underneath.
+  assert.ok(!/location\.(?:reload|assign|replace)\s*\(/.test(source), "the applicants page is never reloaded");
+  assert.ok(!/location\.href\s*=[^=]/.test(source), "and never navigated away from");
+
+  // 2. Applicants change by clicking a row of the left list, gated and proven
+  //    inside that list — never by building an address.
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
+  assert.match(select, /purpose: Applicants\.CONTROL_PURPOSE\.APPLICANT_ROW/, "the row is a gated control");
+  assert.match(select, /inContainer: Boolean\(list && list\.contains\(row\.control\)\)/, "proven inside the left list");
+  assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "and clicked exactly once per applicant");
+
+  // 3 + 5. After the click it WAITS for the right panel to become a different
+  //    applicant, then lets it finish mounting. No second click can happen while
+  //    a profile is still loading, because the caller only advances on the
+  //    resolved value.
+  assert.match(select, /const before = panelIdentity\(\);[\s\S]{0,200}?click\(\)/,
+    "the panel's identity is taken before the click");
+  assert.match(select, /await waitFor\(\(\) => panelIdentity\(\) !== before/,
+    "and the click is followed by waiting for the panel to actually change");
+  assert.match(select, /await waitForDomQuiet\([\s\S]{0,80}?return Boolean\(changed\);/,
+    "then the panel is allowed to finish mounting before the caller proceeds");
+
+  // The caller does not re-click an applicant already shown, and treats a row
+  // that never opened as a skip rather than scanning whatever is on screen.
+  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
+  assert.match(run, /if \(!rowId \|\| rowId !== openId\) \{/, "an applicant already open is not clicked again");
+  assert.match(run, /const opened = await selectApplicantRow\(row\);[\s\S]{0,400}?if \(!opened\) \{/,
+    "a row that did not open is skipped, never scanned as somebody else");
+
+  // 4. Scrolling moves a column, never the recruiter's page.
+  assert.match(source, /function anchorPage\(run\)/, "there is one helper that holds the page still");
+  assert.match(source, /anchorPage\(\(\) => step\.element\.scrollIntoView\(/,
+    "the detail-panel reveal scrolls inside the page anchor");
+  assert.match(source, /anchorPage\(\(\) => last\.scrollIntoView\(/,
+    "and so does growing the left list");
+  const scrollCalls = source.split("\n").filter((line) => /\.scrollIntoView\(\{/.test(line));
+  assert.equal(scrollCalls.length, 2, "exactly two columns are scrolled: the detail panel and the list");
+  for (const line of scrollCalls) {
+    assert.match(line, /anchorPage\(\(\) =>/,
+      `every scrollIntoView must be inside the page anchor, or it moves the whole page: ${line.trim()}`);
+  }
+
+  // And progress is measured against the panel, so holding the page still cannot
+  // be mistaken for a column that refused to scroll.
+  assert.match(source, /const offsetInPanel = \(\) => \{[\s\S]{0,220}?rect\.top - frame\.top/,
+    "movement is measured relative to the panel, not the viewport");
+
+  // 6. The order: the scan completes before the record is built and saved.
+  const extract = source.slice(source.indexOf("async function extractApplicant"));
+  assert.ok(
+    extract.indexOf("scanApplicantPanel") < extract.indexOf("buildApplicantRecord"),
+    "the panel is scrolled and read before the record is built"
+  );
+});
+
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));

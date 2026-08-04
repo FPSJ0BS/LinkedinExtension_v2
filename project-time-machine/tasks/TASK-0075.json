@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0075",
+  "name": "Scroll only the applicant detail column and hold the page still during a scan",
+  "request": "Scroll only the applicant detail column and hold the page still during a scan",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:08:11.904Z",
+  "completedAt": "2026-08-04T13:11:41.144Z",
+  "startCommit": "19c86b45f697a9f309a336db48069ea3f506c8d0",
+  "gitRef": "task/TASK-0075",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 420/420 tests (up from 419, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "the new test asserts all six clauses: no navigation, one gated click proven inside the list, wait-for-panel-then-quiet, no re-click of an open applicant, a skipped row is not scanned, exactly two scrollIntoView call sites and both anchored, panel-relative movement, and scan-before-build ordering",
+    "git diff --check passed; scope is applicants.js, its test and the CLAUDE.md rule; dist/applicants.js rebuilt and verified to match source; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): the anchoring and the panel-relative measure are correct by construction but only a live run proves the detail column still reaches its true bottom on the user's account"
+  ],
+  "result": "Five of the six required behaviours were already in place - no navigation on this surface, one gated click on a left-list row, waiting on panelIdentity rather than the address bar, skipping a row that never opened, and scan-then-build-then-save ordering. The gap was scrolling: revealPanelContent and nudgeListToLastRow called scrollIntoView bare, which scrolls every scrollable ancestor including the document, so a scan dragged the recruiter's whole page around and only restored it when the applicant finished. Added anchorPage(), which snapshots the document position and puts it back on the same frame, and wrapped both scrollIntoView call sites in it - keeping scrollIntoView as the mechanism because it needs no guess about which container scrolls. Movement is now measured relative to the panel (offsetInPanel) instead of the viewport, because a held-still page would otherwise read as a column that refused to scroll and end the reveal early. Locked the whole flow with a PERMANENT test and recorded it as a binding rule."
+}

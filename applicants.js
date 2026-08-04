@@ -527,6 +527,33 @@
     if (target?.element) target.element.scrollTop = value;
   }
 
+  /**
+   * Do a scroll step with the PAGE held exactly where it was.
+   *
+   * `scrollIntoView` is the right tool for a column whose markup differs per
+   * account — the browser scrolls every scrollable ancestor the element needs, so
+   * a container this code failed to recognise still moves. Its cost is that "every
+   * ancestor" includes the document, so a scan visibly dragged the recruiter's
+   * whole page around and only put it back when the applicant was finished.
+   *
+   * The requirement is that a scan moves the detail column and nothing else. So
+   * the mechanism is kept — the guess stays out of it — and the document is simply
+   * put back on the same frame, before anything can be painted at the wrong
+   * offset. Whatever column actually scrolled keeps its new position; the page
+   * never appears to move at all.
+   */
+  function anchorPage(run) {
+    const left = window.scrollX;
+    const top = window.scrollY;
+    try {
+      return run();
+    } finally {
+      if (window.scrollX !== left || window.scrollY !== top) {
+        window.scrollTo({ top, left, behavior: "auto" });
+      }
+    }
+  }
+
   // ------------------------------------------------------- panel and list
   // Two columns: the applicant list on the left and the detail panel on the
   // right. Both are found by what they contain, never by a class name — the
@@ -2817,9 +2844,24 @@
         record.stoppedBy = "nothing-to-reveal";
         break;
       }
-      const before = step.element.getBoundingClientRect().top;
+      // Measured RELATIVE TO THE PANEL, not to the viewport.
+      //
+      // The viewport measure was blind to which container scrolled, which was the
+      // point while the document was allowed to move. Now that the page is held
+      // still, a viewport measure would report a page scroll that has just been
+      // undone as movement — and, worse, report a column that scrolled correctly
+      // underneath a restored page as movement too, which happens to be right but
+      // for the wrong reason. The offset from the panel's own top is invariant to
+      // the page position and changes exactly when the column scrolls, which is
+      // the question this walk is actually asking.
+      const offsetInPanel = () => {
+        const rect = step.element.getBoundingClientRect();
+        const frame = live?.getBoundingClientRect?.();
+        return frame ? rect.top - frame.top : rect.top;
+      };
+      const before = offsetInPanel();
       try {
-        step.element.scrollIntoView({ block: step.block, inline: "nearest" });
+        anchorPage(() => step.element.scrollIntoView({ block: step.block, inline: "nearest" }));
       } catch {
         record.stoppedBy = "scroll-refused";
         break;
@@ -2834,12 +2876,11 @@
       }
       await waitForDomQuiet(320, 2400);
 
-      // Did this pass MOVE anything? Measured on the anchor itself, in viewport
-      // coordinates, so it stays blind to which container did the scrolling —
-      // the same property that makes `scrollIntoView` the right tool here.
-      const after = step.element.isConnected
-        ? step.element.getBoundingClientRect().top
-        : before;
+      // Did this pass move the COLUMN? Same panel-relative measure as `before`,
+      // so it stays blind to which container inside the panel did the scrolling —
+      // the property that makes `scrollIntoView` the right tool — while ignoring
+      // the page, which `anchorPage` has already put back.
+      const after = step.element.isConnected ? offsetInPanel() : before;
       const shifted = Math.abs(after - before);
       record.movedBy += shifted;
       const moved = shifted > REVEAL_MOVED_PX || step.element !== lastAnchor;
@@ -3421,7 +3462,9 @@
     const last = rows[rows.length - 1]?.element;
     if (!last) return false;
     try {
-      last.scrollIntoView({ block: "end", inline: "nearest" });
+      // The list is a column too: revealing more rows must move that column and
+      // not the recruiter's page, which stays exactly where they left it.
+      anchorPage(() => last.scrollIntoView({ block: "end", inline: "nearest" }));
       return true;
     } catch {
       return false;

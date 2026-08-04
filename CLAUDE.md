@@ -680,6 +680,33 @@ viewer mounts its shell before it fetches the file.
 
 
 
+**⚠ PERMANENT — the required flow, and the page never moves.** Stated by the user and binding:
+`click applicant in left list → wait for right panel → scroll right panel completely → extract →
+save → click next applicant`. Every clause of it is load-bearing.
+
+- **The page and the left list stay mounted.** A run changes applicants by *clicking*, never by
+  navigating: there is no `location.reload/assign/replace` and no `location.href =` on this surface,
+  and LinkedIn swaps only the right panel underneath.
+- **One click per applicant, and only a row of the left list** — `selectApplicantRow`, gated by
+  `classifyApplicantControl` and proven inside the list (rule 9g), with exactly one `.click()`.
+- **Then it waits for the right panel**, on `panelIdentity()` changing rather than on the address bar,
+  and then for the DOM to go quiet so the shell has finished mounting. **Nothing may click again
+  while a profile is still loading**: the caller advances only on the resolved value, an applicant
+  already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
+  rather than scanned as somebody else.
+- **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
+  `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
+  document position and putting it back on the same frame. `scrollIntoView` stays the mechanism
+  because it needs no guess about which container scrolls (see below); anchoring keeps its one cost,
+  "every scrollable ancestor" including the document, off the page. A `scrollIntoView` that escapes
+  `anchorPage` drags the whole page around for the length of a run, and a test asserts there are
+  exactly two and both are anchored.
+- **Movement is measured relative to the panel** (`offsetInPanel`), not in viewport coordinates.
+  Holding the page still would otherwise read as a column that refused to scroll, retire the anchor,
+  and end the reveal early — the 3.7.6 failure by another route.
+
+Locked by `PERMANENT: one click per applicant, wait for the right panel, scroll only that column`.
+
 **The hiring surface scrolls a *column*, not the page, and one policy does not fit both surfaces.**
 The applicant detail panel and the applicant list each own an independently scrolling container,
 inside a page that moves only its own nav and job header. `Connections.chooseScrollTarget()` is tuned
