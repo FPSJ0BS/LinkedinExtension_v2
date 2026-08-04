@@ -1080,6 +1080,25 @@ test("a LinkedIn page is never stored or downloaded as a resume", () => {
   ]) {
     assert.equal(Applicants.isResumeDocumentUrl(document), true, `${document} is a file`);
   }
+  // A LinkedIn MEDIA address is not a document either, and this is the hole that
+  // threatened the no-open path specifically. The pre-click sweep
+  // (`findResumeDocumentUrl(null)`) reads `meta[content]`, `[data-delayed-url]`
+  // and `[data-src]` across the whole `document` — which includes `<head>` — and
+  // `RESUME_MEDIA_PATTERN` accepted ANY licdn host on the host alone, with no
+  // path and no extension. So an `og:image` or a portrait satisfied "the address
+  // is already known", nothing was opened, and a JPEG was written to
+  // `profile-vault-resumes/` under the applicant's name and reported
+  // `downloaded`. Rule 6, on the exact path this surface is meant to prefer.
+  for (const media of [
+    "https://media.licdn.com/dms/image/v2/D5603AQ/profile-displayphoto-shrink_400_400/0/1700000000000",
+    "https://media.licdn.com/dms/image/C4E0BAQ/company-logo_200_200/0/1600000000000",
+    "https://static.licdn.com/aero-v1/sc/h/abc.png",
+    "https://media.licdn.com/dms/video/D4E05AQ/mp4-720p/0/1700000000000.mp4",
+    "https://media.licdn.com/dms/document/ABC123/preview.jpg"
+  ]) {
+    assert.equal(Applicants.isResumeDocumentUrl(media), false, `${media} is media, not a document`);
+  }
+
   assert.equal(Applicants.isResumeDocumentUrl(""), false);
   assert.equal(Applicants.isResumeDocumentUrl("javascript:void(0)"), false);
 
@@ -1118,6 +1137,16 @@ test("the adapter and the worker both refuse a page route as a resume", async ()
   assert.ok(
     download.indexOf("RESUME_PAGE_PATTERN") < download.indexOf("resumeAlreadyDownloaded"),
     "the page check must run before anything is fetched"
+  );
+
+  // And a picture is refused as firmly as a page. The host check passes
+  // `media.licdn.com` on its own, so without this a portrait picked up by the
+  // page-side sweep lands on disk under the applicant's name as their CV.
+  assert.match(download, /RESUME_NON_DOCUMENT_PATTERN\.test\(url\)/, "the worker must refuse a media address");
+  assert.match(download, /refused-media-not-a-document/, "and name that refusal distinctly");
+  assert.ok(
+    download.indexOf("RESUME_NON_DOCUMENT_PATTERN") < download.indexOf("resumeAlreadyDownloaded"),
+    "the media check must also run before anything is fetched"
   );
 });
 

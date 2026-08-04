@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0077",
+  "name": "Refuse a LinkedIn image or media address as a resume document",
+  "request": "Refuse a LinkedIn image or media address as a resume document",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:35:25.758Z",
+  "completedAt": "2026-08-04T13:38:26.674Z",
+  "startCommit": "9d980cf9c83786e333d5ee48411ddbb49785c801",
+  "gitRef": "task/TASK-0077",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 421/421 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "rule 18 followed: the failing cases were added first and confirmed failing (profile-displayphoto asserted false) before the policy change; the four pre-existing accepted documents including the extensionless /dms/document/ABC123 were re-verified true afterwards",
+    "verified the built output carries both patterns (dist/src/applicants-core.js and dist/src/background.js each contain them); the source/dist hash differs only because dist is LF and the working tree is CRLF",
+    "NOT verified against live LinkedIn (rule 17): the hole is provable from the source, but whether it was firing on the user's account is a live-DOM question answered only by diagnostics.resume.foundWithoutOpening and the saved file's type"
+  ],
+  "result": "isResumeDocumentUrl accepted ANY licdn.com host on the host alone - no path, no extension - because an opaque /dms/document/<id> really is the file. But the pre-click sweep findResumeDocumentUrl(null) reads meta[content], [data-src] and [data-delayed-url] across the whole document including <head>, so an og:image or a profile portrait satisfied 'the address is already known': nothing was opened, and a JPEG was written to profile-vault-resumes/ under the applicant's name and reported downloaded. Nothing downstream caught it - the descriptor check only refuses JSON, the page fetch only refuses HTML, and the worker's host check passes media.licdn.com. Added NON_DOCUMENT_MEDIA_PATTERN covering /dms/image|video|audio/, profile-displayphoto, profile-originalphoto, company-logo and image/AV/asset extensions, consulted AFTER the document-extension accept so a genuine pdf or docx still wins however it is served, and mirrored it as RESUME_NON_DOCUMENT_PATTERN in the worker before anything is fetched. This protects the no-open path specifically, which is the one the user is asking to rely on more."
+}

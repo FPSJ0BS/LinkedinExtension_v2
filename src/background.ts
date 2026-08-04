@@ -1389,6 +1389,25 @@ const RESUME_HOST_PATTERN = /^https:\/\/(?:[a-z0-9-]+\.)*(?:linkedin\.com|licdn\
  */
 const RESUME_PAGE_PATTERN =
   /^https:\/\/(?:[a-z0-9-]+\.)*linkedin\.com\/(?:hiring|talent|in|jobs|feed|company|school|mynetwork|messaging)\b/i;
+
+/**
+ * A LinkedIn media address that is not a document, refused here as well as in
+ * the core's `isResumeDocumentUrl`.
+ *
+ * Defence in depth, for the same reason `RESUME_PAGE_PATTERN` exists next to it:
+ * the host check alone passes `media.licdn.com`, so a portrait or an `og:image`
+ * picked up by the page-side sweep would be written to disk under an applicant's
+ * name and reported `downloaded`. The core refuses it first; this is what stops a
+ * future caller — or a stored record written before that refusal existed — from
+ * reaching `chrome.downloads` with one anyway.
+ */
+const RESUME_NON_DOCUMENT_PATTERN = new RegExp([
+  "/dms/(?:image|video|audio)/",
+  "profile-displayphoto",
+  "profile-originalphoto",
+  "company-logo",
+  "\\.(?:png|jpe?g|gif|webp|svg|ico|bmp|avif|mp4|webm|mov|mp3|wav|css|js)(?:$|[?#])"
+].join("|"), "i");
 const APPLICANT_EXTRACT_TIMEOUT_MS = 180000;
 /** A whole-job run is bounded only by the list; the reply is not awaited. */
 const APPLICANT_RUN_TIMEOUT_MS = 3600000;
@@ -1747,6 +1766,11 @@ async function downloadResume(message: any): Promise<any> {
   // file that opens as the applicants page, under a name that says it is a CV.
   if (RESUME_PAGE_PATTERN.test(url)) {
     return { ok: false, status: "link_only", reason: "refused-page-not-a-document" };
+  }
+  // A picture is refused as firmly as a page: saving one produces a JPEG under a
+  // person's name, reported as their CV.
+  if (RESUME_NON_DOCUMENT_PATTERN.test(url)) {
+    return { ok: false, status: "link_only", reason: "refused-media-not-a-document" };
   }
   if (await resumeAlreadyDownloaded(url).catch(() => false)) {
     return { ok: true, status: "already_saved", reason: "already-downloaded" };

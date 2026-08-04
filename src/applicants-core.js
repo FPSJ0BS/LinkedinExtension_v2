@@ -959,6 +959,37 @@
     /^https?:\/\/(?:[a-z0-9-]+\.)*(?:licdn\.com|licdn\.cn)\//i;
   const RESUME_MEDIA_PATH_PATTERN = /\/(?:dms|ambry|media-proxy|documents?|attachments?)\//i;
 
+  /**
+   * A LinkedIn media address that is emphatically NOT the document.
+   *
+   * THE HOLE THIS CLOSES, and it threatened the no-open path specifically.
+   * `RESUME_MEDIA_PATTERN` accepts a licdn host on the HOST ALONE — no path, no
+   * extension — because an opaque `/dms/document/<id>` with no extension really
+   * is the file. But the pre-click sweep `findResumeDocumentUrl(null)` reads
+   * `meta[content]`, `[data-src]` and `[data-delayed-url]` across the whole
+   * `document`, `<head>` included, so an `og:image` or a portrait satisfied
+   * "the address is already known": nothing was opened, and a JPEG was written to
+   * `profile-vault-resumes/` under the applicant's name and reported
+   * `downloaded`. Nothing downstream could catch it either — the descriptor check
+   * only refuses JSON, the page fetch only refuses HTML, and the worker's host
+   * check passes `media.licdn.com` happily.
+   *
+   * This file already knew the distinction: `imageManifestUrl` is deliberately
+   * excluded from `DESCRIPTOR_URL_FIELDS` because it "names the page IMAGES the
+   * viewer paints, not the file". The same reasoning, applied to the address.
+   *
+   * Consulted AFTER `RESUME_EXTENSION_PATTERN`, so a genuine `.pdf`/`.docx` wins
+   * however it is served, and before the host and path accepts, which are the two
+   * that cannot tell a picture from a CV.
+   */
+  const NON_DOCUMENT_MEDIA_PATTERN = new RegExp([
+    "/dms/(?:image|video|audio)/",
+    "profile-displayphoto",
+    "profile-originalphoto",
+    "company-logo",
+    "\\.(?:png|jpe?g|gif|webp|svg|ico|bmp|avif|mp4|webm|mov|mp3|wav|css|js)(?:$|[?#])"
+  ].join("|"), "i");
+
   /** A LinkedIn page — an address bar destination, never a file. */
   const LINKEDIN_PAGE_PATTERN =
     /^https?:\/\/(?:[a-z0-9-]+\.)*linkedin\.com\/(?:hiring|talent|in|jobs|feed|company|school|mynetwork|messaging)\b/i;
@@ -982,6 +1013,8 @@
     if (!url || !/^https?:\/\//i.test(url)) return false;
     if (LINKEDIN_PAGE_PATTERN.test(url)) return false;
     if (RESUME_EXTENSION_PATTERN.test(url)) return true;
+    // A picture, a video or a stylesheet is not a CV, however LinkedIn serves it.
+    if (NON_DOCUMENT_MEDIA_PATTERN.test(url)) return false;
     if (RESUME_MEDIA_PATTERN.test(url)) return true;
     return RESUME_MEDIA_PATH_PATTERN.test(url);
   }
