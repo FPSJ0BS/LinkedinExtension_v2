@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0029",
+  "name": "Read the whole applicant panel however it scrolls, and find the resume document wherever it renders",
+  "request": "Read the whole applicant panel however it scrolls, and find the resume document wherever it renders",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T18:34:21.003Z",
+  "completedAt": "2026-08-01T18:37:09.492Z",
+  "startCommit": "74d25ee63101eae195c8228f4b109fa6d10669fc",
+  "gitRef": "task/TASK-0029",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 383 tests, validate"
+  ],
+  "result": "The empty current_role, current_company and resume columns had two causes beyond the scroll target, and both are removed rather than narrowed. First, revealPanelContent(): a container-agnostic pass that drags the bottom of the panel into view with scrollIntoView until the panel stops growing. Every position-based walk here depends on having correctly identified the one container that scrolls, and getting it wrong is silent - the walk runs, the position never moves, the first read is already the bottom. scrollIntoView does not need to know: the browser scrolls every scrollable ancestor the element needs. Bounded by REVEAL_MAX_PASSES and by the same growth-means-new-content rule discovery uses, stoppable, and the page's own scroll position is now remembered and restored as well as the column's. Second, buildSectionMap() now falls back to a page-wide search for any section the resolved panel did not hold. applicantPanel() picks the smallest container carrying the most section headings and a heading that has not hydrated does not count, so a panel resolved early can be a sub-container of the real detail column and Experience, Education and Skills were invisible for the whole extraction - which is exactly why current_role and current_company were empty on every row, since deriveCurrentPosition already falls back to the first entry. The widening refuses any heading or root inside the applicant list and any root that swallows a second section, so a wrong entry can never be preferred to an empty one. Third, findResumeDocumentUrl() was looking at four tag shapes and deciding with a local extension regex, so every applicant came back link_only with no file and no link; it now searches DOCUMENT_URL_ATTRIBUTES across viewer, panel and page in that order and decides with the tested Applicants.isResumeDocumentUrl, which refuses a linkedin.com page address first - so the wider search still cannot return a route. The document URL is now waited for over the full overlay timeout rather than sampled for three seconds on the frame the viewer appeared. The worker's localReference is now the file's actual path rather than Chrome's download id."
+}

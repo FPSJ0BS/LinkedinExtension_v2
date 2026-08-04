@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0034",
+  "name": "Reduce the applicant resume columns from five to two: the link and the file",
+  "request": "Reduce the applicant resume columns from five to two: the link and the file",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T06:38:44.367Z",
+  "completedAt": "2026-08-03T06:41:37.120Z",
+  "startCommit": "9429362a8e987cf134c4c9d4a40be7e9a5238559",
+  "gitRef": "task/TASK-0034",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 389 tests, validate)"
+  ],
+  "result": "The applicants table and the applicant CSV carried five resume columns - resume_file, resume_status, resume_link, resume_viewer, resume_saved_as - which is five cells to answer one question and a table nobody can read across. They are now two, and this is a deliberate removal stated in the file header. resume_link is where to click: the document address when the page rendered one, the LinkedIn viewer page when that is all there is, because either way the cell means 'open the CV'. resume_file is which file we have: the saved copy's path under the downloads folder when the worker fetched one, falling back to the file name LinkedIn showed. Both are exported as named functions (resumeLink, resumeFile) so the table cell and the CSV cell are the same rule, and neither ever invents a value - an applicant with no resume exports two empty cells. resume_status, resume_viewer and resume_saved_as are gone as columns and their table cells with them; every underlying record field is kept, because downloadStatus is what stops the same file being downloaded twice and is what the page's resume filter reads, and viewerUrl/localReference are what the two new columns are built out of. The details drawer keeps all three visible, and gained the saved path it never showed. The empty-table colSpan is now derived from APPLICANT_TABLE_COLUMNS rather than the stale literal 15."
+}

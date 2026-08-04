@@ -1,0 +1,74 @@
+{
+  "schema": 2,
+  "id": "TASK-0001",
+  "name": "Restore parser field boundaries for role, company and skills",
+  "request": "Restore parser field boundaries for role, company and skills",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T07:50:41.566Z",
+  "completedAt": "2026-08-01T07:53:14.225Z",
+  "startCommit": "5664fba73a0527a1f9847ab80e829ef40506b154",
+  "gitRef": "task/TASK-0001",
+  "files": [
+    {
+      "change": "modified",
+      "path": ".build/src/background.js"
+    },
+    {
+      "change": "modified",
+      "path": ".build/src/import-queue-core.js"
+    },
+    {
+      "change": "modified",
+      "path": ".build/src/react/import-dashboard.js"
+    },
+    {
+      "change": "modified",
+      "path": ".build/src/react/popup.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/build-meta.json"
+    },
+    {
+      "change": "modified",
+      "path": "dist/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/src/background.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/src/import-queue-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/src/react/import-dashboard.js"
+    },
+    {
+      "change": "modified",
+      "path": "dist/src/react/popup.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 196 tests, 0 failures",
+    "npm run validate passed",
+    "behavioural spot-check: TechMatrix Consulting 9 mos -> company TechMatrix Consulting, Full-time/9 mos rejected as companies, Endorse and role sentences rejected as skills"
+  ],
+  "result": "Employment metadata can no longer become a company or a role title, and endorsement controls can no longer become skills. Added stripEntityMeta/isEmploymentMeta/sanitizeCompanyName/sanitizeRoleTitle/isSkillValue to extraction-core.js and applied them at parse, grouping and accumulator level; content.js now reads skill names from the card heading (entityHeadingText) instead of the container innerText, and the section-wide sweep became a fallback."
+}

@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0041",
+  "name": "Download the resume rather than leave a preview open, and never report a failed download as saved",
+  "request": "Download the resume rather than leave a preview open, and never report a failed download as saved",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T07:54:58.379Z",
+  "completedAt": "2026-08-03T08:02:35.664Z",
+  "startCommit": "3bc1541bae7fe535250766942ea35ac45049106e",
+  "gitRef": "task/TASK-0041",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 400 tests, validate)"
+  ],
+  "result": "Four defects behind 'resumes still open instead of downloading', found by tracing the path end to end rather than by patching the symptom. The download WAS wired in and the applicant's name WAS threaded through correctly - collectResume sends PV_APPLICANT_DOWNLOAD_RESUME, the worker calls chrome.downloads.download with the sanitized person's name - so the fixes are elsewhere. (1) THE PREVIEW LEFT ON SCREEN. closeOpenedOverlay dispatched a synthetic Escape (isTrusted:false, which many overlays ignore) and then only looked for a <button> INSIDE the matched element; LinkedIn's document viewer renders its close as an <a> or [role=button] and often in the modal wrapper rather than the content, so there was nothing to find - and the boolean result was discarded at all three call sites, so the viewer stayed up silently. It now retries three times, dispatches to the overlay as well as the document, searches the overlay AND its modal wrapper across button/a/[role=button]/[aria-label], and dismissResumeViewer() records the result and warns on the record when it would not close. Still exactly one click; the budget is unchanged at five. (2) THE FILE THAT WAS NEVER FOUND. The attribute sweep cannot see a viewer that fetches the bytes in JavaScript and paints them into a canvas or hands them over as a blob: URL, so every such applicant came back link_only with the preview shown and no download message ever sent. fetchedResumeDocumentUrl() reads performance.getEntriesByType('resource') - the browser's record of what the page ACTUALLY requested, an observation rather than a guess - filtered through the same tested isResumeDocumentUrl, so it can no more return a route than the attribute sweep can. Its safety is the since floor, which is mandatory: the entry buffer belongs to the document and a run walks hundreds of applicants through one without navigating, so unbounded it would save applicant one's CV under applicant two's name. The floor is stamped with performance.now() before the click and it is only consulted inside that branch. (3) A FAILED DOWNLOAD REPORTED AS SAVED. downloadedFilePath returned the requested path when Chrome reported the download interrupted and downloadResume still answered status:'downloaded' - so an expired signed media address or an HTML error body became a resume_file naming a path that is not on disk, which mergeApplicantRecord's keepDownload then protected from ever being corrected. It now returns {interrupted, reason} and the caller answers failed, warns on the record, and sets retryFromPage. (4) THE CREDENTIALED RE-FETCH, which is what the request asked be checked. chrome.downloads uses the browser cookie jar, so the direct download is still tried first every time and costs no memory; when it comes back interrupted the content script fetches the same address with credentials:'include' from the tab that rendered it, refuses an HTML answer outright and anything over 25MB, and hands the bytes to the worker as a data: URL - the worker still owns chrome.downloads and the address is still what every refusal is applied to. Also: state.downloadedResumes became a Map so already_saved names the file it landed as instead of leaving resume_file empty, and logResume() puts one line per applicant in the hiring page's console saying where the address came from, whether the viewer closed, whether the file landed and why not."
+}

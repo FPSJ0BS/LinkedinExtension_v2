@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0054",
+  "name": "Remove the Qualifications column from the applicants table; keep the data in the CSV detail block and the details drawer",
+  "request": "Remove the Qualifications column from the applicants table; keep the data in the CSV detail block and the details drawer",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:12:54.731Z",
+  "completedAt": "2026-08-03T11:16:08.492Z",
+  "startCommit": "3dcd88dbeac94f1566222b652a35978b19580fae",
+  "gitRef": "task/TASK-0054",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "The Qualifications column is gone from the applicants table, on request. Removed: the <th>, the <td> that rendered one <li> per requirement with its verdict mark, the now-unused VERDICT_MARK map and formatQualificationRow import, and the dead .verdict rules in applicants.css. Demoted rather than dropped, exactly as 3.7.4 treated resume_status and its two neighbours: qualifications leaves APPLICANT_TABLE_COLUMNS but stays in APPLICANT_CSV_COLUMNS as the first of the detail columns, so every requirement still exports with its category, verdict, explanation and source, and the details drawer still shows the must-have and preferred lists in full. Nothing about the applicant record, its parsing or its storage changed - only what the table paints. Two tests updated to the new truth: the CSV/table column test now asserts BOTH halves (the column is gone from the table AND the data still exports), and the visual-layer dynamic-class list drops matched/not_matched/unknown, which only the removed verdict mark emitted."
+}

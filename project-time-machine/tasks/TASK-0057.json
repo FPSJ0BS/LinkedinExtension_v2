@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0057",
+  "name": "Returning to the hiring tab starts the run again and says so on the page, instead of the run staying dead until a reload",
+  "request": "Returning to the hiring tab starts the run again and says so on the page, instead of the run staying dead until a reload",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:26:19.792Z",
+  "completedAt": "2026-08-03T11:29:33.356Z",
+  "startCommit": "ecc25e461a7169a67ff02954eda7648eab23edfd",
+  "gitRef": "task/TASK-0057",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 412 tests, validate)"
+  ],
+  "result": "Switching back to the hiring tab now restarts the run and the page says so. THE GAP: every watcher on this page asks 'did we arrive somewhere new', and applicantsViewKey is deliberately built so that opening a row does not count - but a tab switch changes no address at all, so that test could never fire for it, and nothing else was watching. Meanwhile a run interrupted by the tab going hidden gives up for good once VISIBILITY_WAIT_MS (5 min) passes. Together: glance at another window for five minutes, come back, and the surface has quietly decided the run was over - which is 'it automatically stops working', and why reloading was the only cure, a reload being the one thing that re-injects this script with a fresh state. noteReturnToTab() records the current view as a pending arrival when the tab becomes visible with no run in flight, and pumpAutoRun fulfils it through the existing bounded, retryable path. No guard rail moved: the worker is still asked whether this job was armed by the recruiter's own Collect Every Applicant, a Stop still latches disabled and refuses, and a run already in flight is left alone to continue in place rather than being restarted. showPageNotice() puts one inert line on the page - fixed, pointer-events:none so it can never come between the recruiter and a control, role=status with a polite live region, self-removing, styled inline because a content script has no stylesheet on linkedin.com and MV3's script-src CSP does not constrain the style property. It is shown at exactly the two points where work actually resumes: after waitForVisibleAgain returns true inside the run loop, and in startAutoRun after the job is known to be armed - never on a bail, because a banner saying resumed over a surface that then does nothing is worse than none. Re-injection clears the timer and removes the element so a banner is never stranded. It is not a control and nothing clicks it: the budget is still seven."
+}

@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "TASK-0043",
+  "name": "Release 3.7.7: bump the version in all eight places and document the four changes",
+  "request": "Release 3.7.7: bump the version in all eight places and document the four changes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T08:41:14.935Z",
+  "completedAt": "2026-08-03T08:48:59.360Z",
+  "startCommit": "4db52e37ea0792e06999b9f0c5ee17bccc908a31",
+  "gitRef": "task/TASK-0043",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 405 tests, validate)"
+  ],
+  "result": "Release 3.7.7. The version and build id are bumped in all eight places - content.js, connections.js, applicants.js, src/background.ts, src/react/popup.tsx (EXPECTED_BUILD_ID), scripts/build.mjs (both the buildId and the version field), manifest.json and package.json - to 3.7.7 and 2026-08-03-react-v3.7.7, the date component being today rather than the one carried over from the last release. CHANGELOG.md gained a 3.7.7 entry covering all four requests and saying what was actually broken in each rather than only what changed, since two of the four were re-reports of fixes that had already been attempted. CHECKS.md gained a 3.7.7 section listing the nine commands actually run and their real output (the baseline 395, then 396/398/400/405/405 after each task, and the build-file count going 30 to 31 with theme.css), what each of the six new tests asserts, why each of the seven changed tests had to change, and six things only a live run can confirm - led by the two the console line now answers directly. CLAUDE.md's layout block lists theme.css and states the rule that page stylesheets hold only what is unique to them; the 'Coming back to a job' section is retitled '3.7.6, and it took until 3.7.7 to work without a reload' and documents the view key, the record-then-retry arrival with its transient/terminal split, and all four watchers including why pushState cannot be hooked from an isolated world; a new paragraph documents the popup close and its started:true condition; and the resume section documents the four defects behind 'opens a preview, saves no file' with the since floor stated as the safety it is. MEMORY.md gained ten durable entries, PROJECT_STATUS.md leads with the four changes and names the live questions in order, TECH_STACK.md gained five constraints (do not detect an SPA arrival by polling alone, do not consume a trigger before the work succeeds, do not read the resource timeline without a floor, do not answer downloaded on a download id alone, do not put page styling in theme.css), and README.md documents the reload-free return by all three routes and the resume being saved as a file rather than previewed."
+}

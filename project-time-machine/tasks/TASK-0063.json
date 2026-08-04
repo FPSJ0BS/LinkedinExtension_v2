@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0063",
+  "name": "The panel reveal must scroll until it reaches the bottom: quiet has to mean no progress, not merely no new text, and the walk needs an end condition",
+  "request": "The panel reveal must scroll until it reaches the bottom: quiet has to mean no progress, not merely no new text, and the walk needs an end condition",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:43:28.111Z",
+  "completedAt": "2026-08-03T12:46:55.352Z",
+  "startCommit": "38f1f6745419b1ed143860c8b0be7c56cd25aaaa",
+  "gitRef": "task/TASK-0063",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "The panel reveal now scrolls until it actually reaches the bottom. THE ROOT CAUSE, confirmed by tracing the code and corrected by an adversarial verifier away from my first hypothesis: revealPanelContent had NO notion of the bottom at all. Its only exit was the quiet counter, and that counter measures CONTENT, not PROGRESS - 'added' is an accumulator-count delta and 'grown' is the panel's text length, so a pass that steps a full screenful CORRECTLY still counted as quiet whenever the screenful it uncovered was already in the DOM or held nothing new to parse. Three of those plus REVEAL_MIN_PASSES ended the walk at exactly pass four, about four screenfuls down, while the panel was scrolling perfectly the whole time. No timing is involved, which is precisely why stopping and restarting reproduced the same stop point - the reported evidence that ruled out every race-based explanation. Three changes. (1) A pass that MOVED the panel now resets quiet in its own right: movement is measured on the anchor's own getBoundingClientRect in viewport coordinates, so it stays blind to which container scrolled, the same property that makes scrollIntoView the right tool here. (2) The walk gained the end condition it never had: mode 'tail' is what nextRevealStep returns once nothing begins below the fold, which is this function's honest equivalent of atBottom and needs no scroller identification - revealRegion and Core.nextScanStep both already refuse to settle without their own bottom check. Quiet can now only end the walk once the bottom has genuinely been reached. (3) An anchor a pass proved immovable is retired into a WeakSet so it is never re-picked, and a fixed or sticky box is refused outright, since a box positioned against the viewport cannot be moved by scrolling an ancestor - the narrower case that would pin the walk at one element. Also: the walk had no wall-clock bound at all (40 passes x 2.4s, twice per applicant), so REVEAL_BUDGET_MS caps it; and a walk that never reached the tail now reports 'no-movement' or 'incomplete' instead of the initialiser 'settled', which is what let this hide. logReveal() puts one line per applicant in the recruiter's console with passes, pixels moved and whether the bottom was reached, warning when it was not. Seven refuted hypotheses were deliberately NOT acted on: the fold-boundary-for-a-column theory, maxScrollPosition===0, the frozen scroll target, and the high-water size mark were each traced to being neutralised by later passes or to needing a race. No control and no click added: the budget is still seven."
+}

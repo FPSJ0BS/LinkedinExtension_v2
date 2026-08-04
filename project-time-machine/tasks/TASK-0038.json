@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0038",
+  "name": "Give qualifications and education columns of their own, and find the section when only its subheadings are named",
+  "request": "Give qualifications and education columns of their own, and find the section when only its subheadings are named",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T07:10:15.248Z",
+  "completedAt": "2026-08-03T07:14:50.987Z",
+  "startCommit": "be8385443f957c5e7218785e3e718c6c670f4ca0",
+  "gitRef": "task/TASK-0038",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 395 tests, validate)"
+  ],
+  "result": "Qualifications and education were collected all along and both were buried in the CSV's detail block, so the two things a shortlist is actually scanned for were the two the table could not answer. Both are now columns: 'qualifications' is new and carries every requirement the platform judged, category first ('must-have: matched - Bachelor's degree ... [screening_response]'), because a single column has to say which category a requirement is or a matched preferred and a matched must-have read identically; 'education' moved up out of the detail block, which is a deliberate reorder of the same kind 3.7.4 made, and it is not left behind as a second copy. The split must_have_qualifications and preferred_qualifications columns are untouched. In the table both render as a scrolling list inside the cell rather than growing the row, with a tri-state verdict mark - unknown keeps its own mark because 'we could not evaluate this' is not a miss - and the full wording in the title attribute, the drawer and the CSV. The selector: the section is found by its heading through HEADING_SELECTOR and SECTION_PATTERNS, whose qualifications pattern got the same widening Experience got in 3.7.6 (an optional screening/job/candidate/applicant prefix, an optional summary/overview/match suffix, plus sectionKeyFor stripping a count and a colon). The real gap was that plenty of accounts render only 'Must-have qualifications' and 'Preferred qualifications' as headings and never the plain word, so no section key matched and the whole card was invisible with both tallies blank and nothing saying why; collectQualificationSubsections() now resolves the card as the smallest element holding every subheading it recognises with the same qualificationCategoryOf the parser uses, refusing the applicant list and any container that swallows a different section, and it runs last after every other way of naming the section has been tried."
+}

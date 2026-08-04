@@ -1,0 +1,54 @@
+{
+  "schema": 2,
+  "id": "TASK-0024",
+  "name": "Store the resume document itself, never a LinkedIn page route, and refuse to download a page as a resume",
+  "request": "Store the resume document itself, never a LinkedIn page route, and refuse to download a page as a resume",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:36:17.298Z",
+  "completedAt": "2026-08-01T17:40:37.720Z",
+  "startCommit": "7ee31721bcc739771cb7e2b470106f887d31e9e4",
+  "gitRef": "task/TASK-0024",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 373 tests, validate)"
+  ],
+  "result": "Fixed the live defect where the resume link opened the applicants page instead of the resume - and the worse half of it, where the worker fetched that HTML page and saved it as somebody's CV while reporting downloaded. The resume control's href on the hiring surface is a route, not the document, and the host check alone passed it because the host genuinely is LinkedIn. isResumeDocumentUrl() now decides what a file is - a document extension, a licdn.com address, or a /dms/-style storage path - and refuses a linkedin.com hiring/talent/in/jobs address first, exactly as looksLikeCvLink refuses a linkedin.com address before considering anything else. The record splits the two apart: resume.url is the document and resume.viewerUrl is the page that displays it, and normalizeApplicantRecord moves a page arriving on url across to viewerUrl as defence in depth for records already stored. The worker refuses a page route with refused-page-not-a-document before anything is fetched. The table's link now says Open file or View on LinkedIn depending on which it has, the details drawer offers both, and the CSV gained a resume_viewer detail column so the two can never be conflated again."
+}

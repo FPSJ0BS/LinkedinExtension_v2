@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0004",
+  "name": "Restore visibility gating so a hidden collector page never reads as finished",
+  "request": "Restore visibility gating so a hidden collector page never reads as finished",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T07:57:37.828Z",
+  "completedAt": "2026-08-01T07:58:51.017Z",
+  "startCommit": "9c23c24ef47595df41cdcdfcdcc8e23cc2f01ff1",
+  "gitRef": "task/TASK-0004",
+  "files": [
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 197 tests, 0 failures",
+    "npm run validate passed",
+    "source assertions: both scripts gate and listen; every hidden discovery exit reports atBottom:false; the scan abort precedes the profile build; hidden is reported distinctly from an error"
+  ],
+  "result": "Neither content script can now mistake a hidden page for a finished one. Both gate on document.visibilityState === 'visible', listen for visibilitychange, and remember wentHidden. Discovery returns hidden:true with atBottom:false so the worker cannot read it as the end of the list; profile extraction throws hiddenPageError() before the profile is assembled and reports hidden separately from a failure, so nothing partial is ever saved."
+}

@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0046",
+  "name": "Collect every page of the applicants list, not only the first",
+  "request": "Collect every page of the applicants list, not only the first",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T09:49:47.401Z",
+  "completedAt": "2026-08-03T09:53:08.712Z",
+  "startCommit": "9bcf432ed32d83550b45eaf6687d0c43fa3d31ad",
+  "gitRef": "task/TASK-0046",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 410 tests, validate)"
+  ],
+  "result": "Collect Every Applicant now walks every page of the list, not only the first. loadEveryApplicantRow had exactly one action - scroll - and treated 'the scroll container reached its bottom and stopped growing' as 'the list has ended', so the end of page one was indistinguishable from the end of the list and a job with more applicants than fit on a page was collected one page deep and reported complete. classifyApplicantControl had no pagination purpose either, so no such click could have been authorised. CONTROL_PURPOSE gains PAGINATION and rule 9 gains 9h, which is the only way a control may be added to this surface. The policy is the same shape as every other purpose: an allowlist by name (APPLICANT_PAGINATION_PATTERN), the denylist consulted FIRST so a 'Next' that is really 'Next: Message' is refused, and inContainer mandatory - a Next anywhere else on a hiring page belongs to something that is not the applicant list. Connections.PAGINATION_ALLOWLIST is deliberately not reused: its patterns are anchored on whole text labels like ^next$, and a hiring pager is often an icon whose only name is an aria-label. findApplicantPaginationControl enumerates from inside the list so the proof is real, and refuses a disabled or aria-disabled control, because on the last page LinkedIn renders the pager and disables it and clicking it forever is how a walk stops terminating. The stop rule is now the connections list's, which had already solved this: keep going while rows arrive; when the list has genuinely settled at the bottom, page forward and reset the quiet count; and stop when there is no pager or the pager is retired. Three independent bounds keep it finite - growth counts NEW ROWS and never a click, MAX_FRUITLESS_PAGINATION (3) retires a pager revealing nothing, and LIST_MAX_PASSES caps the whole walk. The click budget for applicants.js moves from five to six and CLAUDE.md rule 9 states the sixth. Finally logListWalk() puts one line in the recruiter's own console - rows, pages, and why the walk stopped - because these diagnostics were being written and thrown away: the reply carrying them is discarded by the caller and state.lastListDiagnostics was read by nothing, so 'why only 25?' had no answer from the page."
+}

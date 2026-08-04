@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0058",
+  "name": "Stop the applicant table shifting: order by a key that does not change on update, and cap every cell's content to the row's own height",
+  "request": "Stop the applicant table shifting: order by a key that does not change on update, and cap every cell's content to the row's own height",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:58:24.028Z",
+  "completedAt": "2026-08-03T12:01:52.046Z",
+  "startCommit": "acdda122fce279f7f6608ed9504fc1e35c2e7b08",
+  "gitRef": "task/TASK-0058",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-db.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "theme.css"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 412 tests, validate)"
+  ],
+  "result": "The applicant table stops shifting. Two causes, both found in code rather than guessed at; the two the report suggested (an array-index React key, and an async avatar image) were checked and ruled out - the row key is already the stable record.id and the table renders no images at all. (1) POSITION. getAllApplicants sorted newest-first by updatedAt, and normalizeApplicantRecord restamps updatedAt to now on every single write. A run streams each finished applicant to the store and the page re-reads it every three seconds, so on every poll whoever was saved last jumped to row one and pushed every row below it down, and re-collecting somebody already in the table moved them to the top for the same reason. The key is now collectedAt, which is PRESERVED across writes by both normalizeApplicantRecord and saveApplicant's merge, with id breaking ties so getAll()'s own order never leaks through. Second half: even with a stable key a newcomer still sorts above the rows on screen, so the page now holds its own display order - a row's position is decided by the first poll that sees it and never revised, newcomers are appended where they disturb nothing, deleted ids fall out, and Refresh re-sorts, which makes it a hold rather than a freeze. (2) HEIGHT. height on a td is a MINIMUM - the table algorithm sizes a row to its tallest cell's content and applies height as a floor afterwards - so declaring the row 72px never stopped it growing. Three rules each picked their own number: 11px padding left a 50px content box, the three-line clamp needed 56.25px, and .cell-list was capped at 98px, taller than the row containing it. A row was therefore 72px, 78px or 120px depending on what had loaded, and all three are reachable mid-read during a run. The geometry is now stated once and derived (--pv-row-h 84px, --pv-cell-pad-y, --pv-cell-content-h = calc of the two), the cell padding uses the same token, and one rule caps every cell's contents to the content box - max-height only, never overflow, so .cell-list keeps scrolling inside itself. Saved Profiles was checked and does not sort at all, so it never had cause (1); it gains the height guarantee through the shared layer."
+}

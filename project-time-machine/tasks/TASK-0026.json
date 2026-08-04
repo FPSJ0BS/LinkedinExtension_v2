@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0026",
+  "name": "Scroll the applicant column itself so the whole panel and the whole list are read",
+  "request": "Scroll the applicant column itself so the whole panel and the whole list are read",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T18:07:38.511Z",
+  "completedAt": "2026-08-01T18:11:29.588Z",
+  "startCommit": "0c9e353c1b4f73153019ee37efe081c283835294",
+  "gitRef": "task/TASK-0026",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 376 tests, validate"
+  ],
+  "result": "The applicant panel and the applicant list are each an independently scrolling column on the hiring surface, and Connections.chooseScrollTarget scores the page at +60 and penalises depth - so the moment the hiring page had any range at all it won, the run scrolled the page, the column never moved, the first read was already the bottom and the scan settled on one screenful. Added Applicants.chooseColumnScrollTarget(), the mirror image: it refuses the page outright, requires real range and an overflow that scrolls, requires the candidate to carry the content being read, and prefers the INNERMOST such container; the adapter consults it first and falls back to the tested general chooser when no column qualifies. scrollCandidates() now also offers scroll boxes INSIDE the panel that carry at least 60 percent of its text, because which side of the scroller applicantPanel() lands on is markup's choice, and carriesContent tells the policy what containsList cannot. maxScrollPosition() now reads clientHeight live via viewportOf() rather than from the descriptor captured before the column mounted. The scan re-resolves the panel with livePanel() on every step and re-chooses the target after the first paint, because a detached node keeps answering innerText with what it held when it was unmounted. The expander now runs a second time once the walk has reached the bottom - sections below the fold do not exist for the first pass - sharing one createExpansionBudget() so it is still eight clicks in total."
+}

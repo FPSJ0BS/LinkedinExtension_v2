@@ -1,0 +1,46 @@
+{
+  "schema": 2,
+  "id": "TASK-0008",
+  "name": "Restore the 3.4.0 build id and documentation",
+  "request": "Restore the 3.4.0 build id and documentation",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T08:06:36.779Z",
+  "completedAt": "2026-08-01T08:08:06.378Z",
+  "startCommit": "adadb6e46ad5a9b3932a3a3c5366616c3acaee4e",
+  "gitRef": "task/TASK-0008",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 219 tests, 0 failures",
+    "npm run validate passed",
+    "build id verified identical in all 5 source locations and in dist/build-meta.json"
+  ],
+  "result": "Build id restored to 2026-08-02-react-v3.4.0 in all five places (content.js, connections.js, background.ts, popup.tsx, build.mjs). CLAUDE.md regained the v3.4.0 heading, rule 12a (a hidden collector page is never a finished one), the collection state machine section and the parser field-boundary section. CHECKS.md rewritten with the actual restore results, task by task."
+}

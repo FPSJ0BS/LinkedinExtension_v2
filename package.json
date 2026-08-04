@@ -1,0 +1,33 @@
+{
+  "name": "profile-vault-react-extension",
+  "version": "3.7.8",
+  "private": true,
+  "type": "module",
+  "description": "React and TypeScript Manifest V3 extension for reviewing, storing, importing, and exporting visible LinkedIn profile data.",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.js",
+    "validate": "node scripts/validate-build.mjs",
+    "check": "npm run typecheck && npm run build && npm test && npm run validate",
+    "tm:status": "node project-time-machine/scripts/status.js",
+    "tm:audit": "node project-time-machine/scripts/audit.js",
+    "tm:start": "node project-time-machine/scripts/start-task.js",
+    "tm:complete": "node project-time-machine/scripts/complete-task.js",
+    "tm:abort": "node project-time-machine/scripts/abort-task.js",
+    "tm:list": "node project-time-machine/scripts/list-tasks.js",
+    "tm:rollback": "node project-time-machine/scripts/rollback.js",
+    "tm:recover": "node project-time-machine/scripts/recover.js",
+    "tm:watch": "node project-time-machine/scripts/watch.js",
+    "tm:checkpoints": "node project-time-machine/scripts/watch.js list"
+  },
+  "dependencies": {
+    "react": "16.0.0",
+    "react-dom": "16.0.1"
+  },
+  "devDependencies": {
+    "chokidar": "^4.0.3",
+    "typescript": "5.8.3"
+  }
+}

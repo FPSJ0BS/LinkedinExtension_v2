@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0056",
+  "name": "Stop the run ending at the first screenful: confirm the applicant list has really settled, and grow it without depending on having identified its scroller",
+  "request": "Stop the run ending at the first screenful: confirm the applicant list has really settled, and grow it without depending on having identified its scroller",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:22:14.489Z",
+  "completedAt": "2026-08-03T11:24:44.862Z",
+  "startCommit": "cdba56d498f4ec023e5a5489866d04db41476d68",
+  "gitRef": "task/TASK-0056",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "The run no longer ends at the first screenful. Two independent causes, both in the on-demand list growth that every run actually uses. (1) ONE observation was the whole verdict: a single pass that ended at the bottom having revealed nothing went straight to the pager, and with no pager in sight broke out - after which extractAllApplicants saw no further row and marked the run COMPLETED. A slice still in flight over the network, or a scroll target with no range, therefore finished a 665-applicant job somewhere in the first dozen rows and reported it done. The bottom now has to be confirmed by LIST_QUIET_PASSES consecutive quiet passes before the pager is consulted, which is the rule the full walk has had since 3.7.8; a fruitless pager click resets that counter so the next press earns the same confirmation, and fruitless still retires the control after three. LIST_GROW_PASSES rose 6 to 16 to cover confirm-plus-click for each allowed attempt. (2) The container being driven is a GUESS, and when it is wrong maxScrollPosition answers 0, every pass reads as already-at-the-bottom and no row can ever arrive - silent, exactly like the panel defect. nudgeListToLastRow() drags the last rendered row into view with scrollIntoView, which scrolls whatever scrollable ancestor it needs and so needs no guess; it is a read and presses nothing. Both walks use it, and the list is now re-resolved per pass because a detached container keeps answering with the range it had when it was unmounted. No control and no click was added: the budget is still seven."
+}

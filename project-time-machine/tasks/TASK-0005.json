@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "TASK-0005",
+  "name": "Restore the foreground collector and state-machine wiring in the service worker",
+  "request": "Restore the foreground collector and state-machine wiring in the service worker",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T07:59:08.876Z",
+  "completedAt": "2026-08-01T08:01:59.017Z",
+  "startCommit": "efbd8caef6cfea97f06c0b46a48fd999ffadbc35",
+  "gitRef": "task/TASK-0005",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 197 tests, 0 failures",
+    "npm run validate passed",
+    "built dist/src/background.js audited: 1 windows.create / 0 tabs.create, prepareCollectorStep, pauseForHiddenCollector, collectorIsRenderable, moveCollectionTo, shouldContinueAutoDiscovery, terminalStateFor, collectorDiagnostics all present",
+    "updated the drain-loop test that encoded the retry-forever behaviour, with the reason recorded in the test"
+  ],
+  "result": "The worker now keeps the collector in a state LinkedIn renders and drives the persisted state machine. prepareCollectorStep() makes the tab active and un-minimizes its window before every discovery pass and every profile; a hidden page pauses via pauseForVisibility instead of completing, and the heartbeat resumes once collectorIsRenderable(). The drain loop is bounded and lands in terminalStateFor(); every workflow step and command moves through moveCollectionTo(), whose refusal makes a worker wake-up idempotent. Diagnostics gained the collector surface (window/tab ids, tab active, window state, renderability), the collection state and the transition log."
+}

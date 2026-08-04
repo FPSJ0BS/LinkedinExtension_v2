@@ -1,0 +1,86 @@
+{
+  "schema": 2,
+  "id": "TASK-0015",
+  "name": "Collect job applicants from the recruiter hiring pages: job, applicant, contact, resume, qualifications and screening responses",
+  "request": "Collect job applicants from the recruiter hiring pages: job, applicant, contact, resume, qualifications and screening responses",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T16:07:55.938Z",
+  "completedAt": "2026-08-01T16:28:36.248Z",
+  "startCommit": "9c4e376c7223a7a3093f409ee8cb68002a759583",
+  "gitRef": "task/TASK-0015",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "added",
+      "path": "applicants.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/validate-build.mjs"
+    },
+    {
+      "change": "added",
+      "path": "src/applicant-db.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/applicants-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/db.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "added",
+      "path": "tests/applicants-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-integration.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 337 tests, validate)"
+  ],
+  "result": "Added the recruiter hiring surface as a third, separate surface. src/applicants-core.js is a new pure export-free IIFE (globalThis.ProfileVaultApplicants) holding hiring URL parsing, the click policy classifyApplicantControl({purpose,inContainer}), qualification/screening/experience/education/job/applicant-header parsing, the applicant record shape with null-for-absent, mergeApplicantRecord, a merge-only accumulator and the run state machine; it reuses the profile core lazily rather than duplicating it. applicants.js is the framework-free DOM adapter for /hiring/* and /talent/*: it scans the applicant panel with the tested scroll chooser and scan policy, expands collapsed sections, opens the contact disclosure and the resume behind gated verdicts, streams each finished record to the worker, and can be stopped mid-loop. db.js goes to schema v5 adding the applicants and jobs stores without deleting anything; src/applicant-db.js is the merging adapter. background.ts relays the commands, downloads resumes (LinkedIn hosts only, deduped, no save dialog) and gains stopEverything(). Version and build id bumped to 3.7.0 in all five places plus manifest and package. CLAUDE.md rule 9 amended from 'exactly three controls' to a per-surface named list with the same gating discipline, rule 14 to v5, plus a new applicant-record section."
+}

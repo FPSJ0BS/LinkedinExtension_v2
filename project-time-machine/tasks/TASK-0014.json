@@ -1,0 +1,142 @@
+{
+  "schema": 2,
+  "id": "TASK-0014",
+  "name": "Reduce the record to name, email, mobile, CV, open-to-work, education institutions, skills, profile URL, status and last collected, and match the table and CSV to it",
+  "request": "Reduce the record to name, email, mobile, CV, open-to-work, education institutions, skills, profile URL, status and last collected, and match the table and CSV to it",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T10:45:01.466Z",
+  "completedAt": "2026-08-01T11:11:20.148Z",
+  "startCommit": "1fd933daadd6d0687f018239291c40372b306af7",
+  "gitRef": "task/TASK-0014",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "SKILLS.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/connections-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/db.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/profile-utils.js"
+    },
+    {
+      "change": "deleted",
+      "path": "src/react/components/EducationCards.tsx"
+    },
+    {
+      "change": "deleted",
+      "path": "src/react/components/ExperienceCards.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/types.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-integration.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/lazy-dom-regression.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/profile-utils.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build 3.6.0, 313 tests, validate 23 build files)"
+  ],
+  "result": "The record is now exactly the Saved Profiles table: name, email, mobile, CV (with derived cvFileName and cvAvailable), openToWorkDetails, education institutions, skills, profileUrl, status, lastCollectedAt, notes, tags. experience, yearsOfExperience, currentRole, currentCompany, currentEmploymentDates, totalExperience, websites and profileImageUrl were removed from the schema, CSV, popup, table and editor - experience is still read during the scan so a late section restarts the quiet count, it is just not stored. Open to work became the third and last gated click: findOpenToWorkCard locates the card, classifyOpenToWorkControl refuses a Show details that is not proven inside it, and the panel is polled with the same settle policy as the contact overlay, then parsed into job titles, locations, workplace types, employment types and availability. Education stores institution names only, deduplicated in visible order; skills additionally reject bare counts, section headings and the accessibility duplicate LinkedIn welds on. CSV was replaced so its first twelve columns are the table column for column, with mobile exported as text, formula neutralization extended to TAB and CR, objects refused rather than printed as [object Object], and full_name/all_emails/all_phone_numbers accepted as aliases so a 3.5.0 export still imports. IndexedDB moved to v4 - status and lastCollectedAt indexed, currentCompany and location dropped - and rows migrate through normalizeProfile with repairStoredProfiles persisting them when Saved Profiles mounts. Version and build id bumped to 3.6.0 in all five places plus manifest and package. ExperienceCards and EducationCards deleted along with groupExperienceEntries and parseExperienceCompanyBlock. Docs updated: CLAUDE.md, AGENTS.md, README.md, MEMORY.md, PROJECT_STATUS.md, TECH_STACK.md, SKILLS.md, CHANGELOG.md and CHECKS.md."
+}

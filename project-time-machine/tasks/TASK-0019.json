@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "id": "TASK-0019",
+  "name": "Always open Contact info and take every address and number inside a panel the extension opened itself",
+  "request": "Always open Contact info and take every address and number inside a panel the extension opened itself",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T16:57:46.069Z",
+  "completedAt": "2026-08-01T17:01:03.999Z",
+  "startCommit": "6a662e448fb831488b20f721f548dfd33d6ffa4f",
+  "gitRef": "task/TASK-0019",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 359 tests, validate)"
+  ],
+  "result": "Contact info is now opened on every profile and every applicant, and everything inside it is taken. The 'only when the rendered page did not already yield both an email and a phone number' condition is gone from content.js and the equivalent already-visible skip is gone from applicants.js - a profile whose About showed an address never had its overlay opened, so the number sitting in that overlay was never collected. parseContactPanel gained a trusted option: a panel THIS EXTENSION OPENED on the person being collected yields every address and every number it shows, labelled or not, because such a panel is that person's own contact card by construction - no Interests block, no other member's card. Requiring a recognised heading in there lost the phone number whenever LinkedIn's wording or the account's locale did not match CONTACT_FIELD_LABELS. The relaxation is scoped to that one element: the rendered page still needs a tel: link or a labelled field, and extractPhones' scrubbing plus every normalizePhone rejection still apply inside a trusted panel, so the vanity-URL member id, a follower count and a date range are still refused - asserted by a new test. CLAUDE.md rules 9b, 9d and the contact-provenance section rewritten around which element the text came from. Version and build id bumped to 3.7.1."
+}

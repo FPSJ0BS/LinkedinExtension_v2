@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0061",
+  "name": "Stop the auto-restart loop: a view whose run genuinely finished is not restarted again on every return to the tab",
+  "request": "Stop the auto-restart loop: a view whose run genuinely finished is not restarted again on every return to the tab",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:14:10.466Z",
+  "completedAt": "2026-08-03T12:15:49.648Z",
+  "startCommit": "4cd1edd0afebd4a232560d17c1172a653843c944",
+  "gitRef": "task/TASK-0061",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "The auto-restart loop is closed. THE LOOP: noteReturnToTab (added earlier this session) records an arrival on every return to the tab, deliberately without the 'did the view change' gate every other watcher uses - because a tab switch changes no address, which is the whole point of it. But nothing else bounded it either: the worker keeps a job armed for twelve hours (AUTO_RUN_TTL_MS) and is never told a run finished, and state.running is null the moment one does. So the ordinary way of using this extension - press Collect Every Applicant, switch to the extension's own Applicants page to watch rows arrive, switch back - restarted the entire 665-row walk from the first row, on every glance, for twelve hours. With 'Re-collect already saved' replayed it re-opened every applicant rather than skipping the saved ones. To the recruiter that is a page that will not settle. state.autoRun.ranKey now remembers a view this document has run to COMPLETION, noteReturnToTab refuses it, and startAutoRun records it ONLY on RUN_STATE.COMPLETED - never on STOPPED, because an interrupted run is exactly the one a return to the tab should pick up, and remembering that would delete the feature. This is only safe because of the previous task: until the walk was keyed on identity, a run that merely reached the bottom of page one also reported COMPLETED, so remembering it would have switched the restart off in precisely the failure it exists for. It is per-document, so a reload restores the restart, and a deliberate press clears it so asking again always runs. Also fixed: pumpAutoRun spent an attempt on every 800ms poller tick including the ones that returned immediately at the busy guard, so the eight-attempt budget was exhausted in about six seconds and logged 'the applicant list never appeared' while the run was in fact starting - the cannot-try bails now come before the budget check, and the bound means eight real attempts as its comment always claimed. No control and no click added: the budget is still seven."
+}

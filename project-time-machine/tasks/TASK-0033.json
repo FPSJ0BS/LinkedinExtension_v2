@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0033",
+  "name": "Read the applicant's experience, current role and current company, and report what the section search saw",
+  "request": "Read the applicant's experience, current role and current company, and report what the section search saw",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T06:33:43.824Z",
+  "completedAt": "2026-08-03T06:38:34.332Z",
+  "startCommit": "9b33d236359f1270a2fb1d3bdd317523d0ae94d2",
+  "gitRef": "task/TASK-0033",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 389 tests, validate)"
+  ],
+  "result": "Experience, current role and current company came back empty on every collected row. All three derive from the Experience section and nothing else, so an empty column means no experience card was ever read. Four causes, all in how a section is found. SECTION_PATTERNS matched '^experiences?$' only, so 'Experience (5)', 'Work experience' or 'Experience:' named no section at all - sectionKeyFor now strips an inline count in or out of brackets and a trailing colon, and the patterns accept work/professional/employment/career and 'Top skills'. sectionRootFor bounded a heading's container by the NEXT heading only, so the root could reach back over the section above it - and the page-wide pass refuses exactly that, a root swallowing a second section, which is why the widened search found nothing for the one section most often outside the resolved panel. It is now bounded by every other heading, which also makes the blocks read out of a root only that section's. readExperience and readEducation returned 0 whenever the section had list items that parsed to nothing, never reaching the text fallback; they now fall through on added === 0. And sectionLabelsIn() finds a section LinkedIn titled with something that is not a heading element - a short leaf whose own text is the section name, matched on rendered text and never on a class name, asked only for keys nothing else produced, with textContent measured before layout. The map is now built once per snapshot and handed to all seven readers instead of each rebuilding it. Every extraction records diagnostics.sectionScan - the selector targeted, the patterns matched against, every visible heading in the panel and the page with the key each resolved to, where each section was found (panel/page/panel-label/page-label), its root, its block count and a text sample, and the sections nothing named - and logs one grouped line per applicant to the page console, a warning when experience is empty or a section is missing."
+}

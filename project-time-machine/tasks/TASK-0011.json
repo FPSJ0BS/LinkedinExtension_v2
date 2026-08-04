@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0011",
+  "name": "Let the Contact info overlay finish loading before it is read",
+  "request": "Let the Contact info overlay finish loading before it is read",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T09:28:46.674Z",
+  "completedAt": "2026-08-01T10:21:34.377Z",
+  "startCommit": "8302ee9d92360fbd90163ef0e7fe3f279bab58d4",
+  "gitRef": "task/TASK-0011",
+  "files": [
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    }
+  ],
+  "checks": [
+    "npm test - 276 tests, 0 failures (7 new tests for the overlay settle policy and its content.js wiring)",
+    "npm run typecheck - tsc --noEmit clean",
+    "git diff reviewed - content.js, src/extraction-core.js, tests/contact-extraction.test.js only; no secrets or keys",
+    "NOT verified against live LinkedIn - fixtures and unit tests do not prove live DOM behaviour (rule 17)"
+  ],
+  "result": "The Contact info overlay is now waited for instead of sampled. It is fetched - LinkedIn mounts an empty modal shell and fills the values in afterwards - so reading it on the frame it appeared on read a skeleton, which is why the click opened the overlay and still collected no email or phone number. findContactDialog() now recognises the modal from its markup (CONTACT_DIALOG_MARKER, aria-labelledby) instead of waiting for the words Contact info to appear in innerText, so the shell frame is no longer skipped; the wait for it to mount went from a fixed 12x250ms to a 10s poll that aborts if the page stops being painted; and the panel is re-read and merged on every 250ms poll until it settles. When it settles is the new pure policy Core.nextContactOverlayStep() in extraction-core.js: no placeholders visible, three agreeing reads, and either a value already parsed or MIN_LOAD_MS elapsed, capped by a 12s timeout - so a two-stage hydration is not read as finished after stage one, and a genuinely empty overlay costs ~1.5s rather than the whole timeout. Diagnostics gained waitedToOpenMs, waitedToLoadMs, reads, loadedFully and a specific reason. Still exactly two clicks in content.js. Also set core.autocrlf=false locally: the repository stores LF blobs but the stat cache held CRLF sizes, which had converted the working tree to CRLF and broke a source-regex test."
+}

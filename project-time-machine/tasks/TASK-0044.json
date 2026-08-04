@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0044",
+  "name": "Resolve the Experience and Education sections properly, reveal every scroller, and log the DOM",
+  "request": "Resolve the Experience and Education sections properly, reveal every scroller, and log the DOM",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T09:38:15.337Z",
+  "completedAt": "2026-08-03T09:43:30.642Z",
+  "startCommit": "2c19941d22285e2593512a7dc15620bd5ec055e7",
+  "gitRef": "task/TASK-0044",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 408 tests, validate)"
+  ],
+  "result": "current_role, current_company and education were empty for the fourth time. Traced rather than patched, and the cause was never the parser: every entry in the reported screenshot ('Specialist, Talent Solution Delivery' / 'Randstad - 2026-Present' / 'Experience verified') parses correctly character for character through parseExperienceBlock, splitCompanyAndDates and normalizeDateRange. The section root was the bug. (1) sectionRootFor seeded best with heading.element.parentElement and walked only upwards, breaking at the first ancestor holding another heading. LinkedIn renders the applicant's section title in its own header row - the word plus a collapse chevron - with the entries in a SIBLING container, so on that markup it returned the header row: a root whose entire text is 'Experience'. blocksIn found nothing, the text fallback parsed the single word, EXPERIENCE_NOISE_PATTERN correctly discarded it, and the applicant was saved with no experience at all. Education failed identically, which is what made the shape obvious. carriesSectionContent() now decides: an ancestor is this section's root only if it holds more than the heading plus ten characters and has either a list item or a text-bearing child that is not the heading. When no ancestor qualifies, siblingSectionFor() takes the heading's following siblings up to the next keyed heading and returns a DETACHED wrapper referencing the live nodes (never appending them, which would move them out of the page); blocksIn and carriesSectionContent both understand __pvSectionNodes. (2) The amplifier, and why three releases of widening the search changed nothing: collectSections refused to replace a key already in the map, so one degenerate panel root permanently blocked the page-wide pass of 3.7.4, the label pass of 3.7.6 and everything else. sectionIsUseful() now decides - a stored section blocks a later pass only if it yields blocks or carries content, and a useless candidate never displaces a useful one. (3) The user's own hypothesis, which was correct and is a separate mechanism: the applicant's profile preview is its own NESTED scroller inside the panel, and scrollCandidates refuses any descendant carrying under COLUMN_TEXT_SHARE (60%) of the panel's text - right for choosing the one column the position walk drives, wrong for revealing. revealPanelContent only calls scrollIntoView on the panel's last element, which moves that element's ANCESTORS, so nothing ever scrolled that region: only its first screenful rendered and both sections sat below its fold, while Qualifications, outside it, came through fine. scrollableRegions() + revealRegion() + revealNestedRegions() now drive every scrollable region innermost-first to its bottom with quiet waits, bounded at 8 regions and 25 passes each, restoring every position in a finally, stoppable at every step, and excluding the applicant list because walking that is loadEveryApplicantRow's job. (4) The text fallback was gated on \u0007dded, which counts only newly-stored records, so every snapshot after the first re-ran it over the whole section text - on a root spanning Experience and Education that manufactures jobs out of school names. It is now gated on whether a record PARSED, and EXPERIENCE_NOISE_PATTERN was widened to every sibling section name so a swept-in heading can never become a job title. (5) Requested explicitly: sectionMarkup() captures the real outerHTML of each resolved section, bounded to 1500 characters, onto diagnostics.sectionScan, and logSectionScan now prints it for experience and education whenever they produced no entries - distinguishing 'no section resolved, here are the headings seen' from 'resolved but empty, here is the markup it was read from'."
+}

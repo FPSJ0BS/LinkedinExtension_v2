@@ -1,0 +1,90 @@
+{
+  "schema": 2,
+  "id": "TASK-0032",
+  "name": "Take the recruiter to their hiring tab when an applicant command is pressed",
+  "request": "Take the recruiter to their hiring tab when an applicant command is pressed",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T06:11:48.003Z",
+  "completedAt": "2026-08-03T06:18:57.428Z",
+  "startCommit": "b04f0e3d4f7f27169caf0ddaa3383a0ef088add7",
+  "gitRef": "task/TASK-0032",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/collector-tabs-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-tabs.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 387 tests, validate"
+  ],
+  "result": "Pressing an applicant button now takes the recruiter to their hiring page. Activating a tab is not showing it to anyone: both commands are pressed on the extension's own Applicants page, a different tab and usually a different window, and Tabs.activate deliberately does not focus the window - so the hiring tab became active somewhere the recruiter could not see and the button looked dead. activate(tabId, {focusWindow}) is new and defaults to the old behaviour; revealApplicantTab passes true, making exactly two places allowed to take focus, both a direct user command - the sign-in page and an applicant command. Heartbeat-driven work still never does, which is now rule 12c. With no hiring tab open at all, resolveApplicantTab no longer raises 'Open your job's Applicants page, then try again': it reopens the last hiring page the extension was actually on, through the new Tabs.ensureApplicantTab, in the window the command came from - rememberOrigin(sender) runs first on both commands, exactly as the import workflow's step 1, and the sender is now passed through to handleApplicantCommand. Only a remembered address is ever used: rememberHiringUrl accepts a resolved hiring tab's URL or a collected record's extraction.sourceUrl and nothing else, because welding a job id into a guessed path is the same class of mistake as guessing a resume link, so with nothing remembered it still refuses and says the next press will work. KEYS.APPLICANT_TAB tracks the tab so a second command reuses it rather than opening another, a tab already on the applicants page is never navigated, and closeCollectorTabs never touches it because it is the recruiter's own working page rather than a collector this extension owns. Version and build id bumped to 3.7.5 in all five places plus manifest.json and package.json, with CHANGELOG, CHECKS, CLAUDE (rules 12 and 12c plus the Collecting every applicant section), MEMORY, PROJECT_STATUS, TECH_STACK and README updated."
+}

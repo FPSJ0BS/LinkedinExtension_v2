@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0007",
+  "name": "Restore the live-defect regression suite",
+  "request": "Restore the live-defect regression suite",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T08:04:51.073Z",
+  "completedAt": "2026-08-01T08:06:27.427Z",
+  "startCommit": "1836b097f1b609300cc03521d6cc5563eab5c26c",
+  "gitRef": "task/TASK-0007",
+  "files": [
+    {
+      "change": "added",
+      "path": "tests/live-regressions.test.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 219 tests, 0 failures (196 before this task, +23)",
+    "npm run validate passed"
+  ],
+  "result": "Restored tests/live-regressions.test.js: 23 tests covering all ten live defects - parser field boundaries (8), the 67-vs-66 gap and terminal state (3), bounded discovery (3), the collection state machine (5), and visibility (4). Suite is now 219 tests."
+}

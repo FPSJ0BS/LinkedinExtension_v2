@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0049",
+  "name": "Stop the applicant table shifting: stable row heights and a reserved message slot",
+  "request": "Stop the applicant table shifting: stable row heights and a reserved message slot",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T10:00:41.301Z",
+  "completedAt": "2026-08-03T10:03:06.837Z",
+  "startCommit": "f25f6a3b39aa7a29740f291d50854aca6cbda3b8",
+  "gitRef": "task/TASK-0049",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "theme.css"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "The applicant table stopped shifting. Two causes, both found in the code rather than guessed at. (1) The Job Applicants page re-reads the store every three seconds (POLL_MS) so the table fills in while a run walks the list - which means a cell goes from an em dash to a value, a qualifications list goes from empty to ten entries, and a resume path appears, and every one of those changes that row's natural height while a row that grows shoves every row below it down. Above the card breakpoint a row is now a fixed 72px, each cell clips, long text truncates with a three-line clamp instead of pushing the row, and the two cells that legitimately hold a list keep scrolling inside themselves as .cell-list already did. Below 861px nothing changes: a card row is as tall as its content by design. (2) The status banner was rendered conditionally on both table pages, so every message that arrived or cleared moved everything beneath it including the whole table - and during a run that happens on the same three-second poll, which is precisely 'it keeps shifting during use'. A .pv-slot with a reserved min-height now holds the place whether or not there is anything to say. A new test asserts both, and adds a third guard: no stylesheet may animate a layout property (height, padding, margin, font-size, top, left, inset, gap), because a transition on geometry is jitter by design. width is deliberately excluded - the two progress bars animate their fill, which is the one place a growing box is the point."
+}

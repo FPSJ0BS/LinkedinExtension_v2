@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "TASK-0025",
+  "name": "Record the 3.7.2 fixes in the companion docs",
+  "request": "Record the 3.7.2 fixes in the companion docs",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:40:51.372Z",
+  "completedAt": "2026-08-01T17:43:32.825Z",
+  "startCommit": "1c9cd6b6232628b7e695e2c4d5abbf90d6fd5087",
+  "gitRef": "task/TASK-0025",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 373 tests, validate)"
+  ],
+  "result": "Documentation only, no code touched. Bumped version and build id to 3.7.2 in all five places plus manifest and package. CHANGELOG.md gained a 3.7.2 entry describing all three live defects and their causes: the panel resolving to a container that held the applicant list so the first line of its text became every record's name, the row click waiting on signals that do not mean the panel re-rendered, and the resume route being stored and downloaded as a document. CHECKS.md gained a 3.7.2 section with the four commands actually run, the nine new tests and what each asserts, and a plain statement that the 3.7.1 suite passed 364 tests while all three defects were happening - which is what the standing phase-30 warning is for - plus four things only a live run can confirm about the fixes. MEMORY.md gained three durable entries (never take the first line as a name, a row click is not a rendered panel, a LinkedIn page is not a resume file), PROJECT_STATUS.md leads with the three defects, and TECH_STACK.md gained two constraints and the new test count."
+}

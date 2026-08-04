@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0023",
+  "name": "Find the applicant's real name, keep the list out of the detail panel, and wait for the panel to change before collecting the next applicant",
+  "request": "Find the applicant's real name, keep the list out of the detail panel, and wait for the panel to change before collecting the next applicant",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:30:42.550Z",
+  "completedAt": "2026-08-01T17:36:01.374Z",
+  "startCommit": "339964aadc003b901c895e83d8640c616b465e81",
+  "gitRef": "task/TASK-0023",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 371 tests, validate)"
+  ],
+  "result": "Fixed the live defect that saved every applicant as 'Applicants'. Three causes, all three fixed. applicantPanel() could resolve to a container that also held the applicant list - it satisfies 'two sections' - and readApplicantHeader took the first line of that container's text as the name, which is the list's own heading; the panel now refuses any candidate holding more than one applicant-row link, and its fallback is the widest non-list main rather than document.body. The name is now chosen by policy: findApplicantName offers the selected list row (matched on the applicationId in the address bar), the profile link, the portrait alt, non-section headings and only then the first line, and Applicants.chooseApplicantName arbitrates using nameFromExplanations - the words LinkedIn's own verdict sentences share at the front, which is the name stated in prose where no markup change can move it. isApplicantNameCandidate refuses page chrome, addresses, counts and sentences outright, and parseApplicantHeader no longer trusts the first line. The accumulator gained addName, the one header field a later, corroborated read may replace, and snapshotPanel now reads qualifications before the header so the arbiter exists on the first snapshot. Separately, selectApplicantRow waited for the address to change and the DOM to go quiet, neither of which means the panel re-rendered, so every applicant after the first was scanned on the previous panel or an empty one; it now waits on a panelIdentity() fingerprint change and a row that never opens is skipped rather than saved as a duplicate."
+}

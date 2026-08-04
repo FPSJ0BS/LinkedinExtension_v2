@@ -1,0 +1,28 @@
+{
+  "schema": 2,
+  "id": "TASK-0052",
+  "name": "Spec the complete-extraction target: collect the record the page holds, not only what is painted",
+  "request": "Spec the complete-extraction target: collect the record the page holds, not only what is painted",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T10:17:47.343Z",
+  "completedAt": "2026-08-03T10:21:08.608Z",
+  "startCommit": "55863a4d76ab6c188319860ee4cbee7adb0b607e",
+  "gitRef": "task/TASK-0052",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "added",
+      "path": "COMPLETE_EXTRACTION_SPEC.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm test passed - 411 tests, 0 failing",
+    "git status and git diff reviewed - only CLAUDE.md, COMPLETE_EXTRACTION_SPEC.md and the task record changed; no secrets, no unrelated files"
+  ],
+  "result": "Added COMPLETE_EXTRACTION_SPEC.md, a target-state proposal for collecting the record the page already holds rather than only what it painted, and one clearly-labelled non-binding pointer to it from CLAUDE.md's companion-docs section.\n\nThe spec is grounded in the four-release history rather than in intuition: 3.7.3, 3.7.4, 3.7.6 and 3.7.8 each found a real and different cause of current_role/current_company/education being empty on every live row, and all four were in the same layer - how a RENDERED section is found and revealed. It names the five hazards a value must survive today (found, revealed, expanded, visible via isVisible at applicants.js:220 which gates 25 read sites, and read as innerText which returns nothing for a display:none subtree), and inventories the machinery that exists solely to win that fight: revealPanelContent with its 40/3 bounds, four scroll-chooser functions, the twice-run 8-click expander budget, the settle policy, rule 12a in full, and five of the six clicks in rule 9.\n\nIt proposes a four-rank source hierarchy - embedded payload, fetched responses, full DOM textContent, rendered innerText - and four independently reversible layers L0-L4, noting that nothing in the extraction path parses an embedded payload today (verified by grep across content.js, connections.js, applicants.js and src/), so rank 1 does not exist rather than needing refinement.\n\nTwo things are stated flatly because they are the most likely misreadings. First, the restriction lifted is on the SOURCE, not the standard: rule 6 is strengthened, every source gets its own provenance verdict in the shape of isResumeDocumentUrl(), an absent value stays null, and every stored field records which rank it came from. Second, the safety floor does not move - the outreach denylist, contact provenance, LinkedIn-only host permissions, no credential, no backend, the universal Stop, and every run still starting from a direct user action.\n\nSection 5 lists the rules that must be amended by number (preamble, 6, 9, 10, 11, 12a, and manifest/README), and records that rule 9's click list SHRINKS rather than grows. Section 7 names four risks with mitigations drawn from this project's own scars: a payload fails silently and totally so it is never the only path; reading hidden DOM can pick up a template or another member, which is the Interests-block and every"
+}

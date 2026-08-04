@@ -1,0 +1,50 @@
+{
+  "schema": 2,
+  "id": "TASK-0048",
+  "name": "Always show the popup's applicant controls, and remove the explanatory prose from every surface",
+  "request": "Always show the popup's applicant controls, and remove the explanatory prose from every surface",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T09:55:48.839Z",
+  "completedAt": "2026-08-03T09:59:54.506Z",
+  "startCommit": "214d90b367ade40ef01930cb06763cc9b1e9ee02",
+  "gitRef": "task/TASK-0048",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "popup.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/universal-stop.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 410 tests, validate)"
+  ],
+  "result": "Two display changes. (1) The popup's Job applicants section is always shown. renderApplicantPanel returned null unless the active tab was already a hiring page, so the section the recruiter opened the popup for was absent most of the time - and the gate bought nothing, because the worker does not depend on the popup's tab: resolveApplicantTab() finds a live hiring tab in any window and, failing that, re-opens the last hiring page the extension was actually on, saying so plainly when it has neither. refreshApplicants() is now called unconditionally on mount so the saved count beside it is right whatever tab the popup was opened over; detectSurface still runs, because the PROFILE controls are still surface-appropriate. (2) The explanatory prose is gone from all four surfaces: the popup's Stop reassurance, its 'nothing queued yet' line and the applicant panel's description of what it will not do; the Job Applicants page's 'collected from your own hiring pages' line and the page-note describing the restart-on-return; and the Connections Collector's one-click description, completion-policy sentence, challenge instructions, sign-in explanation and hidden-tab reassurance. What STAYS is everything that reports live state rather than explaining behaviour - pause reasons, auth messages, the current profile, stop reasons, the saved/shown counts, the reconciliation panel, headlines, notes and saved-as paths - because those are data the screen is for. The now-dead .page-note and .stop-all-hint rules were removed from applicants.css and popup.css. Six tests asserted the presence of prose that no longer exists; each was rewritten to assert the BEHAVIOUR where it is actually enforced instead - the completion policy against collector-tabs, 'Stop discards nothing' against the worker, and 'it never shortlists or messages' against FORBIDDEN_APPLICANT_CONTROL_PATTERN - which is a stronger claim than the sentence was. One thing deliberately kept: the build id under the popup's title. It reads as a subtitle but it is a fact about which build is loaded, and it is what makes a bug report answerable across versions."
+}

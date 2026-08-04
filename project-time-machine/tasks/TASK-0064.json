@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0064",
+  "name": "Skip already-collected applicants cheaply: retire them in bulk from one list scan per turn, and stop reading innerText for every rendered row",
+  "request": "Skip already-collected applicants cheaply: retire them in bulk from one list scan per turn, and stop reading innerText for every rendered row",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:47:07.809Z",
+  "completedAt": "2026-08-03T12:51:45.889Z",
+  "startCommit": "45eaca5772d77c2d3eaeb4d372f95bf44864ef3b",
+  "gitRef": "task/TASK-0064",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "A resumed run now skips already-collected applicants cheaply instead of paying a full list scan for each one. Two costs removed, both measured from the code rather than guessed. (1) BULK RETIREMENT. The loop took one turn per already-saved row, and each turn scanned the whole list twice - once in nextRow() and once in the 'known' bookkeeping line, with no await between them, so the DOM could not have changed and the second scan was pure waste. The turn now takes ONE scan into 'pending' and retires every already-saved row from it in a single pass. The verdict needs only the row's own href, so it is decidable in bulk without opening anything and without any assumption about position - which is what the report asked for. A page whose rows are all already saved now costs one turn and one scan rather than 25 turns and 50 scans. (2) NO EAGER innerText. applicantRows() took row.innerText for EVERY rendered row on EVERY call - a forced synchronous layout per row - to build a name the walk never uses (rowKey keys on href, and the collected check prefers the applicationId from href) plus a 'text' field that nothing in the codebase reads at all. The name is now a lazy memoized getter and the dead field is gone, so a layout is forced only for the one row actually being opened. The bulk check is written to preserve that: createCollectedIndex.has() consults the name ONLY when the row carries no id, so the id path never touches the getter - passing both, as the old per-row call did, would have reintroduced exactly the reflow this removes. Semantics are unchanged: still keyed on applicationId and never on row position, the per-row guard remains as the mid-run check because a row can become collected during the run, no click is added (the budget is still seven), and no class name is matched (rule 11)."
+}

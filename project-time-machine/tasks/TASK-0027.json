@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0027",
+  "name": "Let a stopped applicant run be started again without a reload, and resume instead of re-collecting",
+  "request": "Let a stopped applicant run be started again without a reload, and resume instead of re-collecting",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T18:11:43.185Z",
+  "completedAt": "2026-08-01T18:16:47.173Z",
+  "startCommit": "5e739525f3a27530699f19ef2cfa9102ded8bd2a",
+  "gitRef": "task/TASK-0027",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 380 tests, validate"
+  ],
+  "result": "Two live defects in Collect Every Applicant. First, a run stopped half way could not be started again until the page was reloaded: state.wentHidden is latched by the visibilitychange listener the instant the recruiter switches tab - which is how they reach the extension's own Applicants page - and was only ever cleared several steps inside extractApplicant, so the next run threw 'the applicants page is hidden' out of loadEveryApplicantRow before reading a single row, and only re-injecting the content script cleared it. beginRun() now clears the stop flag AND re-derives the hidden flag from what the page actually is, and it is called by both the single and the whole-list entry points. The other half: the hiring tab is a different tab from the page the button is pressed on, so it is hidden the moment it is clicked; revealApplicantTab() now activates it through Tabs.activate before either command, per rules 12 and 12a. A second press while a run is genuinely in flight is answered at once with alreadyRunning rather than left hanging on the first run's promise. Second, a restarted run went back to the first applicant and collected everyone again. Added Applicants.isCollectedApplicant() - one substantive field, so a name-only row from a failed pass is still retried - and Applicants.createCollectedIndex(), keyed on the applicationId in the row's own href because that is all a row knows before it is opened, scoped to the job, with the name as a stand-in only for a row carrying no id. The new PV_APPLICANT_COLLECTED message returns one lean entry per stored applicant with the verdict already made by the core. The run walks past those rows without opening them, adds each one it collects to the index so a virtualized re-render is not collected twice, and an unreachable worker skips nobody rather than everybody. The applicants page gained a 'Re-collect already saved' checkbox that passes recollect:true."
+}

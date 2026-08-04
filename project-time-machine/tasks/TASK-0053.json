@@ -1,0 +1,54 @@
+{
+  "schema": 2,
+  "id": "TASK-0053",
+  "name": "Recover unlogged 3.7.9 work: real resume file rather than the viewer descriptor, and the applicant table cells back in the grid",
+  "request": "Recover unlogged 3.7.9 work: real resume file rather than the viewer descriptor, and the applicant table cells back in the grid",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:08:36.344Z",
+  "completedAt": "2026-08-03T11:09:35.258Z",
+  "startCommit": "bd2247e69d8cd67d310f6d054c0c616944ad5c35",
+  "gitRef": "task/TASK-0053",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "theme.css"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "Recovered work that had been made outside a task (CLAUDE.md rule 5 violation, reported rather than absorbed). Two changes, both pre-existing in the working tree and unmodified by this task. (1) 3.7.9 resume download: rule 9i adds the opened viewer's own Download control (RESUME_DOWNLOAD_CONTROL_PATTERN, whole-label, proven inside the viewer the extension opened), because a recruiter account's viewer address answers with a JSON descriptor naming the asset rather than the file, and that blob was being written to disk under the applicant's name and reported as downloaded; documentUrlFromDescriptor reads the real address out of the descriptor's own fields and still puts it through isResumeDocumentUrl, and readOpenDocumentAsDataUrl now refuses a JSON content type as firmly as an HTML one. applicants.js click budget is six gated opens plus one shared dismiss, with the pager kept to one call site. (2) Table layout: display:-webkit-box was set on the td itself, so six cells stopped being table cells and dropped out of the column grid; the clamp moved to a .cell-clip wrapper inside each cell, and the grid gained a --pv-grid column rule."
+}

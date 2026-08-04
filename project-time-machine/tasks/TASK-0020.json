@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0020",
+  "name": "Open the resume viewer and read its details, and scroll the applicant list so every row loads before a run",
+  "request": "Open the resume viewer and read its details, and scroll the applicant list so every row loads before a run",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:01:18.552Z",
+  "completedAt": "2026-08-01T17:04:30.348Z",
+  "startCommit": "09ad9536bc15459a91e944f9c53a12398b887ba0",
+  "gitRef": "task/TASK-0020",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 361 tests, validate)"
+  ],
+  "result": "The resume viewer is now opened, scrolled and read instead of only linked. collectResume clicks the control every time rather than only when it carries no href - the href on this surface is usually a route, not the document, and the applicant's real file name exists only inside the viewer. findResumeViewer locates the mounted viewer, scrollResumeViewer walks it to the bottom so a lazily rendered PDF shows more than page one and restores its position in a finally, and readResumeViewerDetails reads the file name, file type and page count from the viewer's own chrome, preferring them over anything derived from the opaque media URL. The record gained resume.pages, null when the viewer showed no count. A viewer that opens but exposes no document URL now still records the name it showed, as link_only, rather than losing it. loadEveryApplicantRow scrolls the applicant list to the bottom before Collect Every Applicant starts: the list is virtualized, so reading it once gave a screenful and a run over a 665-applicant job would have collected ten people and reported itself complete. It uses discovery's own stop rule - growth means new rows and never a scroll that happened, three quiet passes, a 200-pass ceiling, a DOM-quiet wait for the network slice, Stop honoured, and the scroll position restored."
+}

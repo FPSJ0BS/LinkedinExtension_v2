@@ -1,0 +1,43 @@
+{
+  "schema": 2,
+  "id": "TASK-0017",
+  "name": "Universal Stop button in the popup that ends every kind of work, plus the applicant controls and Job Applicants navigation",
+  "request": "Universal Stop button in the popup that ends every kind of work, plus the applicant controls and Job Applicants navigation",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T16:35:10.290Z",
+  "completedAt": "2026-08-01T16:40:35.130Z",
+  "startCommit": "b3cc9e2bf062077568590f43d73b0b1ecf20eb42",
+  "gitRef": "task/TASK-0017",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "popup.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "added",
+      "path": "tests/universal-stop.test.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 357 tests, validate)"
+  ],
+  "result": "Added the universal Stop. STOP_ALL is one shared literal in messages.ts; the popup renders Stop Everything unconditionally, full width above every panel and disabled only while a stop is itself in flight, replacing the old Stop that only appeared when the extension already knew it was busy. background.ts matches STOP_ALL before every other message branch and stopEverything() bumps the generation token, broadcasts PV_STOP_ALL to every LinkedIn tab, stops the queue session, clears the heartbeat and closes the collector tabs - and calls nothing destructive, so nothing already collected is lost. content.js and connections.js gained the same state.aborted flag applicants.js already had, checked inside their walking loops before each step rather than between items, and both report a stop as an interruption (stopped: true, atBottom: false) so a stopped pass can never read as a failed profile or a finished list. The popup also gained the hiring-page panel (Collect This Applicant, Collect Every Applicant, Review and Export) shown only when the active tab is a hiring page, and a Job Applicants nav button. CLAUDE.md gained rule 13a."
+}

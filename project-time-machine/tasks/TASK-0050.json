@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "TASK-0050",
+  "name": "Release 3.7.8: bump the version everywhere and document the eight changes",
+  "request": "Release 3.7.8: bump the version everywhere and document the eight changes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T10:03:30.084Z",
+  "completedAt": "2026-08-03T10:06:55.217Z",
+  "startCommit": "7b349a2cbfc0eda283e5225afa098d9007008c0b",
+  "gitRef": "task/TASK-0050",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "Release 3.7.8. The version and build id are bumped in all eight code places plus CLAUDE.md, PROJECT_STATUS.md and MEMORY.md, to 3.7.8 and 2026-08-03-react-v3.7.8. CHANGELOG.md gained a 3.7.8 entry covering all eight requests and saying what was actually broken rather than only what changed, since two of the eight were re-reports of fixes that had already been attempted - most importantly that the experience parser was never the bug and that the two halves of the real cause were a section root holding only its heading and a useless stored root blocking every later rescue pass, plus the nested scroller nothing ever scrolled. CHECKS.md gained a 3.7.8 section with the eight commands actually run and their real output (408, 409, 410, 410, 410, 411, 411 across the tasks), the three intermediate FAILURES worth recording because each caught a real mistake rather than a stale assertion (chrome.tabs.create in the worker breaking rule 12, a comment containing the literal .click() that the worker's no-click assertion greps for, and a ternary left without an else branch after a paragraph was removed), what each of the six new tests asserts, why each changed test had to change, and six things only a live run can confirm led by the two the new console lines answer directly. CLAUDE.md gained rule 9h for the pagination control and its click budget moved from five to six. MEMORY.md gained eleven durable entries, led by the three that would have saved four releases: a section root holding only the heading is not a section, two fields failing together names the layer rather than the parser, and a stored answer that is not useful must not block a better one. PROJECT_STATUS.md leads with the eight changes and names the live questions in order. TECH_STACK.md gained five constraints (do not accept a heading-only section root, do not reveal content with the rule that chooses the scroll target, do not click a control that may open a tab, do not treat a hidden page as the end of a run, do not treat a settled scroll container as the end of a paginated list). README.md documents collecting every page, the background resume cycle, and the ten-column applicant CSV."
+}

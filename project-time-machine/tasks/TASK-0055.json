@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0055",
+  "name": "Walk the applicant detail panel down in steps to its bottom instead of jumping to the tail once, with a minimum of four passes",
+  "request": "Walk the applicant detail panel down in steps to its bottom instead of jumping to the tail once, with a minimum of four passes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T11:18:14.305Z",
+  "completedAt": "2026-08-03T11:20:56.548Z",
+  "startCommit": "e3020d2efd02ae0fa3c5b4b372eb05b73f30614c",
+  "gitRef": "task/TASK-0055",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "The applicant detail panel is now walked DOWN in steps instead of jumped to its end once. The defect: revealPanelContent called scrollIntoView on the last rendered element on every pass, so pass one landed at the bottom of whatever markup existed and passes two and three had nowhere left to go - three passes ran but the panel moved once, which is the report 'you are scrolling the profile side only once'. A jump is also the worst way to ask a lazily-rendered panel for content, because it requests nothing between the top and wherever the first screenful's markup ends. nextRevealStep() replaces lastRenderedElement (now removed, it had no other caller): each pass targets the first box that STARTS below the fold and aligns it to the TOP of the view, which advances about one screenful and leaves the page to mount what that uncovers; only when nothing begins below the fold does it fall back to the tail aligned to the bottom, to confirm the end by actually reaching it. It measures with getBoundingClientRect - viewport coordinates - so it stays blind to which container scrolls, the same property that makes scrollIntoView the right tool on this surface. REVEAL_MIN_PASSES (4) is a floor under the quiet rule in both the panel walk and the nested-region walk, because the quiet rule cannot tell 'there is nothing below this' from 'nothing has mounted below this yet', and a panel rebuilt in place for every applicant makes the second the common case. The reveal ledger now counts stepped vs toTail passes, so a reveal that is jumping again is visible in the diagnostics rather than only in empty columns. No control was added and no click added: the budget is still seven."
+}

@@ -1,0 +1,31 @@
+Activate the Project Time Machine in this repository.
+
+Read these files first (<tm> is the Time Machine folder's name -- do not assume
+it, read it from the path you were given):
+
+  <tm>/docs/AGENTS.md      mandatory workflow rules
+  <tm>/docs/checks.md      checks to run before completing a task
+  <tm>/docs/COMMANDS.md    the exact commands
+  <tm>/docs/SKILLS.md      capabilities to apply per task
+  <tm>/docs/README.md      design overview
+
+Then run the installer and verify the state:
+
+  node <tm>/setup.js
+  node <tm>/scripts/status.js
+  node <tm>/scripts/audit.js
+
+From now on:
+
+- Run status.js and audit.js at the start of every session, before touching any
+  file, and act on what they report.
+- Track every project-changing request -- including one-word and one-line edits
+  -- as one separate task: one task record, one Git commit, one annotated tag.
+- Start the task BEFORE the first edit. Complete it IMMEDIATELY after the checks
+  pass, in the same turn. Never leave a task open.
+- Never create, edit, rename, move or delete any file outside an active task.
+- Never run git commit, git reset --hard, git checkout -f, git clean -fd,
+  git rebase, git commit --amend, or delete any tag or tm-backup/* branch.
+- Handle rollback and recovery from natural language. Always preview first, show
+  the user what will change, then apply with --execute.
+- Never report a check as passed unless it actually ran and passed.

@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0062",
+  "name": "A re-injection must retire the previous copy's run, so two loops never walk and click one list at the same time",
+  "request": "A re-injection must retire the previous copy's run, so two loops never walk and click one list at the same time",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:16:06.506Z",
+  "completedAt": "2026-08-03T12:17:07.144Z",
+  "startCommit": "b9b04bc83f207af7f1654f7cae7bee067b2c4d59",
+  "gitRef": "task/TASK-0062",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "A re-injection now retires the copy it replaces. The defect: re-injecting applicants.js replaced the listeners and the state object and nothing else, but a run already in flight is a promise held by the OLD closure and it keeps going - still walking the list, still pressing rows, still holding its own idea of which applicant is open. Two loops then drive one list against each other, each undoing the other's navigation, which is a page that will not sit still. And the old loop was unstoppable from outside, because Stop sets aborted on the NEW state while the old loop reads its own. This is not a rare path: the worker re-injects on any build-id mismatch and after a single 2.5s ping timeout, so a page that answers slowly under load is enough to produce two runs. The fix uses the mechanism the old copy already honours - previous.aborted, previous.run.stopRequested, previous.autoRun.disabled - so its next assertRunnable() throws stoppedError, its error?.stopped branch marks the run STOPPED and breaks, and it unwinds cleanly. Nothing is discarded (rule 13a): every applicant it had finished was already persisted by the streamed PV_APPLICANT_SAVE. No control and no click added: the budget is still seven."
+}

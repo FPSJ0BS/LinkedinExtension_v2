@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0030",
+  "name": "Carry both the resume document link and the saved file in the applicant table and CSV",
+  "request": "Carry both the resume document link and the saved file in the applicant table and CSV",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T18:37:19.507Z",
+  "completedAt": "2026-08-01T18:39:24.952Z",
+  "startCommit": "5125000b8950446dfac32f2348c4f3749f57bbf1",
+  "gitRef": "task/TASK-0030",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 383 tests, validate"
+  ],
+  "result": "The resume is now five columns in both the applicants table and the CSV: resume_file (the name), resume_status, resume_link (the document address, empty unless a real file URL was found), resume_viewer (the LinkedIn page that displays it) and resume_saved_as (where the downloaded copy is on disk). resume_viewer and resume_saved_as were moved up from the detail block into APPLICANT_TABLE_COLUMNS, which is a deliberate reorder of the applicant export and is stated as one in the file header - the two questions 'did we get the CV' and 'where do I click to read it' are different, and the viewer link exists on almost every applicant even when the document address does not. The table's resume link cell used to show whichever of the two existed, so the viewer link disappeared the moment a file was found and the file link was never visible alongside it; each now has its own column and its own em dash when absent. The table header gained Resume Viewer and Resume Saved As, and the row gained the two cells, so the exported column list and the rendered header stay in step as their test requires."
+}

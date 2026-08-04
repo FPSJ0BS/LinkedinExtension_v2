@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0047",
+  "name": "Remove the two tally columns, application status and collected at from the applicant table and CSV",
+  "request": "Remove the two tally columns, application status and collected at from the applicant table and CSV",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T09:53:41.455Z",
+  "completedAt": "2026-08-03T09:55:23.396Z",
+  "startCommit": "f199c98e7f5b6ed28958c452e8eeec8e5e8f11fe",
+  "gitRef": "task/TASK-0047",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 410 tests, validate)"
+  ],
+  "result": "The four columns are gone from the applicant table and from the CSV's table block. must_have_met and preferred_met ('0 of 10', '0 of 2') are removed OUTRIGHT, from the column list, the CSV row builder, the <th>/<td> and the now-dead tally() helper and its qualificationTally import - they were computed from the qualifications array, which is itself a column, so each was a summary of the cell beside it and nothing stored is lost. application_status ('-' on every row of the reference account) and collected_at (the timestamp) are removed from the TABLE and demoted to the CSV's detail block rather than deleted from the record, following the precedent 3.7.6 set when it cut five resume columns to two: consolidating columns is not dropping fields. That distinction is load-bearing here rather than conservative - applicant.applicationStatus is an IndexedDB INDEX on the applicants store (db.js creates it in the v5 upgrade, and CLAUDE.md rule 14 names it), so deleting the field would be a v6 schema change that drops an index; it also backs the page's own status filter and the statuses() list that populates it, and both are controls the request did not ask to remove. collectedAt is preserved across merges by normalizeApplicantRecord and is what the details drawer reports. APPLICANT_TABLE_COLUMNS is now ten entries ending with qualifications and education - the two things a shortlist is actually scanned for - and the tests that pinned the old order and the old data-labels were updated to assert the new one."
+}

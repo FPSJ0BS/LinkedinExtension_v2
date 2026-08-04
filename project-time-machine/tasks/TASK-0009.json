@@ -1,0 +1,163 @@
+{
+  "schema": 2,
+  "id": "TASK-0009",
+  "name": "Record the uncommitted v3.5.0 contact and CV release work",
+  "request": "Record the uncommitted v3.5.0 contact and CV release work",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T09:24:12.543Z",
+  "completedAt": "2026-08-01T09:24:52.659Z",
+  "startCommit": "cdb98b8de8a4d9a807d878346094771d664f5ddc",
+  "gitRef": "task/TASK-0009",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/validate-build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "added",
+      "path": "src/collector-tabs-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "src/connections-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/import-queue-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/profile-utils.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/types.ts"
+    },
+    {
+      "change": "added",
+      "path": "tests/collector-tabs.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-workflow.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/connections-core.test.js"
+    },
+    {
+      "change": "added",
+      "path": "tests/contact-extraction.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-integration.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/lazy-dom-regression.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/live-regressions.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/profile-utils.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm test - 269 tests, 0 failures",
+    "npm run typecheck - tsc --noEmit clean",
+    "git status reviewed; no secrets, .env files or keys in the change"
+  ],
+  "result": "Recorded the previously uncommitted v3.5.0 release work as its own recoverable task: the reachability-led record (CV, name, email, mobile, skills, education, years), the Contact info overlay click, the two-tab collector, the collection state machine and the rewritten CSV columns. No behaviour was changed by this task - it only puts the existing working tree under Time Machine control so later fixes are separately reversible."
+}

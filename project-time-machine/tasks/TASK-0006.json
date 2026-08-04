@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0006",
+  "name": "Restore the simplified importer UI, session component and navigation labels",
+  "request": "Restore the simplified importer UI, session component and navigation labels",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T08:02:15.437Z",
+  "completedAt": "2026-08-01T08:04:37.465Z",
+  "startCommit": "65182746a050ae0a1f7a18e8540670739118b3a2",
+  "gitRef": "task/TASK-0006",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/lazy-dom-regression.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 196 tests, 0 failures",
+    "npm run validate passed",
+    "updated the two control-list tests that encoded the old button set, with the new required set recorded in them"
+  ],
+  "result": "The importer toolbar is now Start Full Collection / Discover Connections Only / Start Profile Extraction / Stop / Clear Queue / Saved Profiles / Download CSV, with Retry Failed, Download Diagnostics and Recheck Login moved into an Advanced area. The three competing session controls collapsed into one renderSession component (LinkedIn connected / Login required / LinkedIn verification required with a small Recheck). The live collection state, any unresolved count gap, and a hidden-collector pause notice are shown. Navigation renamed: Import to Connections Collector, Table to Saved Profiles."
+}

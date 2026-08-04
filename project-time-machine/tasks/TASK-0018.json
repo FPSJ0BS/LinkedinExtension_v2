@@ -1,0 +1,50 @@
+{
+  "schema": 2,
+  "id": "TASK-0018",
+  "name": "Bring the companion docs up to 3.7.0 for the applicant collector, the applicant CSV and the universal Stop",
+  "request": "Bring the companion docs up to 3.7.0 for the applicant collector, the applicant CSV and the universal Stop",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T16:40:54.818Z",
+  "completedAt": "2026-08-01T16:46:06.268Z",
+  "startCommit": "9b1c8ab03d954e28e2e32faba362e3850e71c18a",
+  "gitRef": "task/TASK-0018",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "SKILLS.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 357 tests, validate)"
+  ],
+  "result": "Documentation only, no code touched. CHANGELOG.md gained a 3.7.0 entry covering the third surface, the four new gated controls and why rule 9 changed shape rather than loosening, the null-for-absent record, worker-side resume downloads and their three refusals, the streamed per-applicant save, the applicant CSV and its shared escaping, the universal Stop and its per-step checks, and schema v5 deleting nothing. CHECKS.md gained a 3.7.0 section listing the four commands actually run with their real output (357 tests, 30 build files, 4 React entry points) and a Not-run-here list that says plainly the hiring adapter was written against two screenshots and has never been seen live - naming the six specific things only a real recruiter account can confirm. PROJECT_STATUS.md, MEMORY.md, AGENTS.md, README.md, TECH_STACK.md and SKILLS.md were brought to 3.7.0: version and build id, the third surface and its separate record, the per-surface control list, the resume rules, the universal Stop, DB v5, the new files, a new Applicant collector specialist agent, and the note that 3.7.0 requested no new permission."
+}

@@ -1,0 +1,46 @@
+{
+  "schema": 2,
+  "id": "TASK-0022",
+  "name": "Bring the companion docs to 3.7.1 for the contact relaxation, the resume viewer and the restructured export",
+  "request": "Bring the companion docs to 3.7.1 for the contact relaxation, the resume viewer and the restructured export",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:11:43.456Z",
+  "completedAt": "2026-08-01T17:14:45.749Z",
+  "startCommit": "66f3063e9a61fea41295aedf2efab3a9a7222a80",
+  "gitRef": "task/TASK-0022",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 364 tests, validate)"
+  ],
+  "result": "Documentation only, no code touched. CHANGELOG.md gained a 3.7.1 entry covering the two rules that were removed (the overlay skip and the labelled-heading requirement inside our own panel), why the relaxation is scoped to the one element the extension opened, the resume viewer now being opened, scrolled and read, the applicant list being loaded before a run, the applicant-first export, and the total-experience defect - plus a short section naming the three restrictions that stay and why. PROJECT_STATUS.md, CHECKS.md, MEMORY.md, AGENTS.md, README.md and TECH_STACK.md brought to 3.7.1: version and build id, the scoped contact rule, the resume viewer, the list scroll, the new column list, the 364-test count, and two more entries on the Not-run-here list - whether a live overlay and disclosure really carry both values as plain text, and whether the live resume viewer exposes a file name and page count at all. TECH_STACK constraints now state that the outreach denylist is permanent and that trusted must never be widened past a panel the extension opened itself."
+}

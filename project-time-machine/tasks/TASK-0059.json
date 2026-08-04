@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0059",
+  "name": "Walk the applicant list by row identity instead of by position, so pagination and virtualization cannot end the run early or repeat a row forever",
+  "request": "Walk the applicant list by row identity instead of by position, so pagination and virtualization cannot end the run early or repeat a row forever",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:03:49.832Z",
+  "completedAt": "2026-08-03T12:10:42.610Z",
+  "startCommit": "9e9d47964fc0d66f938e4aaa18a225b0b89d3f5b",
+  "gitRef": "task/TASK-0059",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "The run now walks the applicant list by ROW IDENTITY instead of by position. Two confirmed critical defects, both found by tracing the code rather than guessed, and both of which alone explain 'it is not working for all the list of applicants'. (1) The walk was for (let index = 0; ; index += 1) over a freshly re-queried applicantRows(), reading live[index] as 'applicant number index'. Position means nothing on this list in either regime it can be in: PAGINATED (rule 9h) - page two renders 25 DIFFERENT people at positions 0-24, so index 25 addresses nobody and the run reports COMPLETED, and had page two rendered 26 rows, live[25] would have been applicant #51 with #26-#50 never opened; VIRTUALIZED - rows are recycled out of the DOM so applicantRows() is a moving window of about a dozen, the index runs off the end after a dozen people, no scrolling can make length exceed it, and 665 applicants finish as twelve. A processed Set keyed by rowKey() replaces it: 'which row next' is now 'the first rendered row I have not finished with', and 'the run is over' is now 'no unprocessed row can be produced'. rowKey is the applicationId in the row's own href - the only identifier a row carries before it is opened and exactly what createCollectedIndex keys on, so the run ledger and the store index share one vocabulary - falling back to href then name. A key is recorded on every terminal outcome (collected, already saved, could-not-open, failed) and deliberately not on a pause. (2) Growth was measured by COUNT in three places (growApplicantList twice, loadEveryApplicantRow twice). A paginated list does not grow, it REPLACES, so 25 > 25 is false and a successful page-forward scored as 'revealed nothing' - the pager was pressed until MAX_FRUITLESS_PAGINATION retired it and the walk returned having silently passed pages two, three and four. The count is equally blind under recycling, where it is a constant window size. growApplicantList now takes the caller's own question (hasWork) and both walks count identities; a grow call that produced work clears fruitless, so three slow slices spread over a long run no longer condemn a working pager. Also: nextRunStep is now given total: processed.size + 1 so a rendered-row count can no longer declare the queue complete at the end of page one; state.run.index reports processed.size; and the 'index > 0' test - which assumed the open panel was row zero - became a comparison of the address bar's applicationId with the row's own, which is true whoever the recruiter had open first. Third defect fixed here because the rewrite deletes the mechanism it lived on: the hidden-page catch did index -= 1 with no counter anywhere, so any reproducible cause of a hidden page re-ran the same applicant forever - the reported 'at some profile keeps refreshing the page'. MAX_HIDDEN_RETRIES (2) now bounds it per row; past that the row is recorded as failed and the walk moves on. No control and no click was added: the budget is still seven."
+}

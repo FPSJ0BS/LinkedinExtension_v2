@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0060",
+  "name": "A transient hidden page must not destroy an applicant already read: downgrade a hidden disclosure to a warning, and make the hidden latch clear-only",
+  "request": "A transient hidden page must not destroy an applicant already read: downgrade a hidden disclosure to a warning, and make the hidden latch clear-only",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T12:11:16.671Z",
+  "completedAt": "2026-08-03T12:13:36.508Z",
+  "startCommit": "dfdbf7a96da74b11c5cf942b2522dc63a8271dcb",
+  "gitRef": "task/TASK-0060",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 413 tests, validate)"
+  ],
+  "result": "A transient hidden page no longer destroys an applicant that was already read. Two changes. (1) extractApplicant re-threw error?.hidden from both disclosure steps, which discarded the ENTIRE record - including the panel scan that had already completed while the page was plainly visible - so the run loop saw the applicant as unfinished and did the whole thing again, re-opening the same disclosure that had hidden the page. One line producing all three reported symptoms: data lost, run stalled, one profile re-opened over and over. A hidden disclosure is now a warning on the record ('contact/resume: the page was hidden while the disclosure/viewer was open') and the person, their history and their verdicts are saved. Rule 12a is untouched - nothing reads a hidden page, the disclosure simply stops and what was read while visible is kept - and error?.stopped is still re-thrown at both sites, because rule 13a means a Stop must end work rather than become a warning on a saved row. The scan itself still propagates hidden, because that is where 12a actually bites: its completion signal is 'nothing changed', which a hidden page satisfies instantly. (2) The wentHidden latch is now clear-only, via clearHiddenLatchIfVisible(). assertRunnable tests '!isPageVisible() || state.wentHidden', a disjunction whose first half is self-clearing and whose second is not, so sampling the live question into the latch writes a permanent answer to a temporary one. The worst site was the resume cycle's finally, which samples across a process boundary it cannot win - whether the worker's re-activation of the hiring tab has landed yet is a race - and a lost race poisoned that applicant permanently. All three sample sites (beginRun, the resume finally, the bfcache pageshow handler) now only ever clear; a genuinely hidden page is still refused by the half of the disjunction that asks live. No control and no click added: the budget is still seven."
+}

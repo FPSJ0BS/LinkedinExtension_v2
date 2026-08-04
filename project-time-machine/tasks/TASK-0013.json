@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0013",
+  "name": "Take email and mobile only from a tel/mailto link or a labelled contact field of this profile, and clean contaminated numbers already saved",
+  "request": "Take email and mobile only from a tel/mailto link or a labelled contact field of this profile, and clean contaminated numbers already saved",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T10:37:14.142Z",
+  "completedAt": "2026-08-01T10:44:00.488Z",
+  "startCommit": "d978fe1831ecdf578a1e5c3f994a2bce55478cab",
+  "gitRef": "task/TASK-0013",
+  "files": [
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/db.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/profile-utils.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 295 tests, validate)"
+  ],
+  "result": "Email and mobile now need provenance. A number is taken only from a tel: link or a labelled Phone/Mobile field; an address only from a mailto: link or a labelled Email field. extraction-core scrubs URLs, addresses and word-welded identifiers before PHONE_PATTERN ever runs and normalizePhone rejects anything containing a path, an @ or a host, which is what stops a vanity URL's member id (linkedin.com/in/paarth-khandelwal-264954380 -> 264954380) becoming a mobile number. scanLabelledContacts replaced the whole-page sweep, so the Interests block's Top Voices no longer put a stranger's email and phone on the record; content.js also rejects any link inside a foreign section or a card that links to a different member. Records already saved self-heal: normalizeProfile drops a phone contained in its own profile URL's digits, db.repairStoredProfiles writes those rows back on dashboard load, and a Clean shared contacts button removes any value found on three or more different people."
+}

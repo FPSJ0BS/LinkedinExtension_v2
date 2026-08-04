@@ -1,0 +1,88 @@
+{
+  "schema": 2,
+  "id": "TASK-0042",
+  "name": "Redesign the visual layer across all four extension surfaces",
+  "request": "Redesign the visual layer across all four extension surfaces",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T08:05:09.147Z",
+  "completedAt": "2026-08-03T08:40:48.851Z",
+  "startCommit": "15a3f2c09f4e321bf561edb5c85716b9f8087f7d",
+  "gitRef": "task/TASK-0042",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.html"
+    },
+    {
+      "change": "modified",
+      "path": "dashboard.css"
+    },
+    {
+      "change": "modified",
+      "path": "dashboard.html"
+    },
+    {
+      "change": "modified",
+      "path": "import.css"
+    },
+    {
+      "change": "modified",
+      "path": "import.html"
+    },
+    {
+      "change": "modified",
+      "path": "popup.css"
+    },
+    {
+      "change": "modified",
+      "path": "popup.html"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/validate-build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/universal-stop.test.js"
+    },
+    {
+      "change": "added",
+      "path": "tests/visual-layer.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "theme.css",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 405 tests, validate)"
+  ],
+  "result": "A full visual redesign of the popup, Saved Profiles, Job Applicants and Connections Collector, with no functional change. The four stylesheets each carried their own copy of the same primitives and disagreed about all of them - four page backgrounds, three inks, two font stacks, and two files defining the SAME custom property names with different values (--muted was #5b6472 in one and #687386 in the other, --good #0a7d4a vs #17633a); .danger was a solid fill on three surfaces and a white outline button on the fourth; only one file gave buttons a hover, only one declared color-scheme. Four screens of one product cannot be redesigned as one thing while that is true, so a new theme.css holds the tokens, reset, type scale and every shared primitive, is loaded FIRST by all four pages, and each page file now holds only what is genuinely its own. THE LOOK: warm off-white surfaces rather than the cold blue-grey that reads as a bootstrap default; depth from low-alpha shadows and 8-14% ink hairlines rather than 1px mid-grey borders; a GRAPHITE primary button so the single indigo accent is spent on focus, links, progress and the current page instead of on every control; type carrying the hierarchy with small tracked-out uppercase labels against normally-set data with tabular figures; 130-240ms transitions with a prefers-reduced-motion guard. TABLES, which was the specific complaint: sticky header, the checkbox and the person PINNED to the left so scrolling right never leaves anonymous cells, scroll shadows painted background-attachment:local so they appear only on the side still hiding content, and below 860px the table becomes one card per row - data-label on every cell, written from the same words as the header so a renamed column cannot leave a stale label behind. Also fixed: a literal </content> tag that had sat in import.css since 3.7.x, which CSS error recovery swallowed together with the .notice.info rule after it, so the informational notice had been rendering unstyled; and ~120 lines of experience/education card CSS in two slightly different copies that no React file has rendered since 3.6.0 removed those fields. A three-lens adversarial review of the new CSS against the real JSX found nine confirmed collisions, all fixed: the shared .status notice primitive painting every Status CELL in the connections table as a grey ringed box; .empty losing text-align and padding to .table-wrap td on specificity; the name column's <th> missing the class that pins it, so its header scrolled off the column it names; three specificity inversions where the 860px card-mode resets lost to the pinning rules; the page files' unguarded max-height beating theme's max-height:none in card mode; --pv-ink-3 at #78747f failing 4.5:1 on both --pv-bg and the table-header fill (now #6e6a77, which clears it on all three surfaces); input rings at 1.3:1 (now a real --pv-field-line at 3.3:1); and a focus ring that changed every control's corner radius on focus. .actions-cell no longer sets display:flex on a <td>. A new tests/visual-layer.test.js holds five guards: every class the UI emits has a rule on the page that loads it, all four pages load one shared layer first, no stylesheet reaches for a remote resource (MV3 CSP), no stylesheet contains a stray tag, and a wide table stays navigable."
+}

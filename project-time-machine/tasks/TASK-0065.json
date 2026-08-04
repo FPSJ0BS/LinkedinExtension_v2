@@ -1,0 +1,47 @@
+{
+  "schema": 2,
+  "id": "TASK-0065",
+  "name": "Prevent applicant jump-back and duplicate restarts",
+  "request": "Prevent applicant jump-back and duplicate restarts",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T13:55:54.790Z",
+  "completedAt": "2026-08-03T14:06:55.557Z",
+  "startCommit": "2ab1b249b30ec2e756231750e16e432a3b862507",
+  "gitRef": "task/TASK-0065",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 415 tests, and validation of 31 build files",
+    "git diff --check passed; scope, secrets, and unrelated-file review passed"
+  ],
+  "result": "Persisted applicant run lifecycle with run and attempt tokens, rejected duplicate tab drivers and stale loop reports, kept completed runs final across returns, and moved next-row selection to tested application-id policy."
+}

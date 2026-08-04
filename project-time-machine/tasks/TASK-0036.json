@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "TASK-0036",
+  "name": "Bump to 3.7.6 and document the section search, the two resume columns and the restart on return",
+  "request": "Bump to 3.7.6 and document the section search, the two resume columns and the restart on return",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T06:46:50.491Z",
+  "completedAt": "2026-08-03T06:52:51.209Z",
+  "startCommit": "dcb84ad28787e49b7ab791f6e9c051b94fb77885",
+  "gitRef": "task/TASK-0036",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 390 tests, validate)"
+  ],
+  "result": "Version and build id bumped to 3.7.6 in all five places plus manifest.json, package.json and build.mjs's version field, which the comments written during TASK-0033 and TASK-0035 already referred to. CHANGELOG.md gained a 3.7.6 entry covering all three requests: the four causes of the empty Experience columns and the report that now makes the next one answerable, the resume reduced from five columns to two, and the restart on returning to a job. CHECKS.md gained a 3.7.6 section with the four commands actually run, the three new and three changed tests and what each asserts, the plain statement that the 3.7.5 suite passed 387 tests while all three columns were empty live for the third release running, and six things only a live run can confirm - led by the one that matters, whether the hiring page renders an Experience heading at all, which sectionScan.headings now answers directly. CLAUDE.md's 'Collecting every applicant' section is retitled 3.7.3, amended in 3.7.4 and 3.7.6 and documents the section scan and its console line, the widened title matching, the root bounded by every other heading, the fall-through on added === 0 and one map per snapshot; the applicant record's column list is the twelve-column table with the resume in two columns and states the removal as deliberate; a new paragraph documents the restart on return with its four disciplines; PV_APPLICANT_AUTO_RUN was added to the message list. MEMORY.md gained six durable entries (a section is not found by its bare word, bound a root by every other heading, a failed parse is not a read, make a silently-failing search report itself, five columns for one question, only the worker outlives a navigation), PROJECT_STATUS.md leads with the four changes and names the live question, TECH_STACK.md gained six constraints, and README.md documents the two resume columns, the widened Experience search with its console line, the twelve-column CSV and the restart on return."
+}

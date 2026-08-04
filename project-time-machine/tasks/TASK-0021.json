@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0021",
+  "name": "Restructure the applicant table and CSV: applicant name first, resume in the table, job title and location dropped",
+  "request": "Restructure the applicant table and CSV: applicant name first, resume in the table, job title and location dropped",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T17:04:45.505Z",
+  "completedAt": "2026-08-01T17:11:29.407Z",
+  "startCommit": "0ee86ec01a9301c00336d23656bd406a441b9579",
+  "gitRef": "task/TASK-0021",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 364 tests, validate)"
+  ],
+  "result": "Restructured the applicant table and CSV around what they are read for. APPLICANT_TABLE_COLUMNS is now applicant_name, email, mobile, resume_file, resume_status, resume_link, current_role, current_company, total_experience, must_have_met, preferred_met, application_status, collected_at - the person first, then both ways to reach them, then the resume in three columns of its own. job_title and the applicant's location were dropped as columns as requested; both still show in the details drawer and job_id stays in the detail columns so the association survives. The detail columns gained all_emails and all_phone_numbers, which export every value rather than only the primary two, with each number marked as text per entry because a cell-level marker protects only the first line and 04423456789 would lose its leading zero. Also fixed a real defect found while restructuring: totalExperienceFrom handed calculateTotalExperience a {dates} object, which matches neither key it reads, so total_experience was always empty; it now passes {title, dateRange} and normalizeDateRange restores the separator in the applicant card's spaceless 2026-Present form, which parseDateRange deliberately refuses to split. The stored dateRange keeps LinkedIn's own wording and only a hyphen after a four-digit year is touched, so 3-5 years is still not a range. resume.pages added to the record and to the ApplicantRecord type."
+}

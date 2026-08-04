@@ -1,0 +1,59 @@
+{
+  "schema": 2,
+  "id": "TASK-0016",
+  "name": "Applicants review page and applicant CSV export with named columns and formula-safe formatting",
+  "request": "Applicants review page and applicant CSV export with named columns and formula-safe formatting",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T16:28:50.803Z",
+  "completedAt": "2026-08-01T16:34:54.244Z",
+  "startCommit": "6177613fa54b054bfdccadbf64aff71262671bed",
+  "gitRef": "task/TASK-0016",
+  "files": [
+    {
+      "change": "added",
+      "path": "applicants.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "applicants.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/validate-build.mjs"
+    },
+    {
+      "change": "added",
+      "path": "src/applicant-csv.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "src/csv.js"
+    },
+    {
+      "change": "added",
+      "path": "src/react/applicants-dashboard.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "added",
+      "path": "tests/applicant-csv.test.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 348 tests, validate)"
+  ],
+  "result": "Added the Job Applicants review page and the applicant CSV export. csv.js now exports its primitives - neutralizeFormula, serializeValue, escapeCell, buildCsvFile and downloadCsvText - so src/applicant-csv.js inherits the UTF-8 BOM, CRLF endings, quoted cells, formula neutralization and the leading-apostrophe text guard on mobile rather than copying any of them. APPLICANT_CSV_COLUMNS leads with APPLICANT_TABLE_COLUMNS column for column (job title, name, email, mobile, location, current role, current company, total experience, must-have met, preferred met, resume, application status, collected at) and a test holds the exported list and the rendered table header in step; the structured detail follows, one value per line, with qualifications printed as verdict, requirement, explanation and source. applicants.html, applicants.css and src/react/applicants-dashboard.tsx are a new React 16 class-component page with search, job/status/resume filters, 25/50 pagination, per-row selection, a details drawer holding the full verdicts and the extraction warnings, Download CSV and Download Selected. build.mjs and validate-build.mjs cover the new page and its four React entry points, and the Saved Profiles page links to it."
+}

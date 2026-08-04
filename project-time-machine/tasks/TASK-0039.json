@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0039",
+  "name": "Close the popup once Collect Every Applicant has actually started",
+  "request": "Close the popup once Collect Every Applicant has actually started",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T07:45:58.207Z",
+  "completedAt": "2026-08-03T07:48:18.829Z",
+  "startCommit": "e042f11920e8d344249d9f7da9dfbf929dd17442",
+  "gitRef": "task/TASK-0039",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 396 tests, validate)"
+  ],
+  "result": "Collect Every Applicant in the popup now dismisses the popup itself, and only once the worker has proved the run started. The command no longer shares runImport with Start Collecting and Collect This Applicant - neither of those may take the window away - so it has its own handler that awaits the reply, throws on ok:false, and closes only on started:true, which the worker returns after it has resolved the hiring tab, revealed it, confirmed a matching-build content script answered PV_APPLICANT_PING, armed the standing auto-run instruction and dispatched PV_APPLICANT_EXTRACT_ALL. A failure keeps the popup open and shows the error, because a window that vanishes on failure is a button that silently did nothing. closePopup() clears the 2s import poller before calling window.close() and latches a closing flag that setStatus, refreshImport and refreshApplicants all check, because window.close() does not tear the document down synchronously and every setState queued behind an in-flight promise would otherwise run against a component Chrome is dismantling. The full-page Job Applicants dashboard is a different component and is unaffected; a test asserts it contains no window.close."
+}

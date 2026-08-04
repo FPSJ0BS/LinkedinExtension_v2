@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0040",
+  "name": "Make returning to a job's Applicants page restart the run without a page reload",
+  "request": "Make returning to a job's Applicants page restart the run without a page reload",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T07:50:14.496Z",
+  "completedAt": "2026-08-03T07:54:21.736Z",
+  "startCommit": "debcd2667bd13e49ef9e852a6578b192a9136369",
+  "gitRef": "task/TASK-0040",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 398 tests, validate)"
+  ],
+  "result": "Returning to a job's Applicants page restarted the run only after a manual reload. Two causes, both confirmed in the source before anything was changed. (1) checkAutoRunArrival() wrote state.autoRun.lastKey BEFORE calling the async, fire-and-forget startAutoRun(), which has several silent bails - a list that had not mounted yet after an in-app route, a worker that was asleep, busy, a run in flight - and the poller only ever acts on a CHANGE, so one lost race lost the restart permanently. A reload rebuilds state with lastKey:'' and gets a clean attempt, which is exactly why F5 worked. An arrival is now RECORDED as pendingKey and fulfilled by a separate, repeatable pumpAutoRun(); transient bails keep it pending and it is retried on every watcher tick, bounded by AUTO_RUN_MAX_ATTEMPTS (8), while a Stop, a run already in flight, an unarmed job or a page that moved on call abandonAutoRun(reason) and say why in the console. (2) The key was the job alone, so /hiring/jobs/<id>/manage, /hiring/jobs/<id>/applicants and /hiring/applicants/?jobId=<id> were all 'job:<id>' and moving between a job's own views and back was never an arrival. Applicants.applicantsViewKey() is new, pure and tested: job id plus the pathname with its ids stripped, so it is identical when a row is opened (the only thing that must not count, whether the id lands in the query or the path) and differs for a different view of the same job. A poller only samples, so three watchers were added alongside it, none needing a permission or a click: popstate and hashchange for back/forward, a debounced MutationObserver for pushState (a content script's isolated world has its own history object, so patching pushState here would never see LinkedIn's own call - the re-render that follows it is what is observable), and pageshow with event.persisted for a bfcache restore, which is the reported back-button case: the same document comes back still holding the key it was frozen on, so the return read as 'already here', and the freeze had latched wentHidden so assertRunnable() would have thrown 'the page is hidden' before a row was read. Both are re-derived on restore. Re-injection now disconnects the observer and removes all three listeners."
+}

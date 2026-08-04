@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0035",
+  "name": "Restart the applicant run when the recruiter comes back to a job's applicants page",
+  "request": "Restart the applicant run when the recruiter comes back to a job's applicants page",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T06:41:46.298Z",
+  "completedAt": "2026-08-03T06:46:42.261Z",
+  "startCommit": "8408b97f76c371cb4406dda663bdc41f24305a21",
+  "gitRef": "task/TASK-0035",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 390 tests, validate)"
+  ],
+  "result": "Navigating away from a job's applicants page and back left the surface idle: the navigation destroys the content script and with it the run, the state and everything it had been asked to do, so the recruiter had to go and press the button again. The worker is the only thing that outlives a navigation, so it now holds the standing instruction. PV_APPLICANT_AUTO_RUN: Collect Every Applicant arms the job it was pressed on, storing the jobId and the options it was pressed with (so Re-collect already saved is honoured on the restart too); the applicants page asks on every arrival and starts a fresh run when the answer is yes. Collecting a single applicant never arms anything, an entry expires after twelve hours so a job collected last week does not restart itself, and Clear Applicants disarms because there is then nothing to come back to. Both Stops - the universal one and the page's own - call disarmAutoRuns before anything else that can fail, because a Stop a navigation could undo is not a Stop (rule 13a); the content script also latches autoRun.disabled so an arrival already in flight cannot start after one. An arrival is keyed on the JOB, never the URL: opening a row is how a run advances and every one of those changes the address bar, so keying on the URL would restart the run on every row it opened. Both routes are covered - the 800ms poller for the SPA, and one check at injection because a full page load leaves no history to compare against. It waits for the list to actually have rows, refuses to start on a hidden tab and defers to visibilitychange instead (rule 12a), never starts on top of a run in flight, and adds no new click - it replays extractAllApplicants, which builds a fresh run state and walks from the first row rather than picking up a stale index. The applicants page states the behaviour above the toolbar."
+}

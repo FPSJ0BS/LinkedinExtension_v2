@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0045",
+  "name": "Open the resume in a tab, save it, and return without the recruiter touching anything",
+  "request": "Open the resume in a tab, save it, and return without the recruiter touching anything",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T09:44:39.951Z",
+  "completedAt": "2026-08-03T09:49:12.935Z",
+  "startCommit": "7d039f0e997fb75c338365f0f964b7841ca0dd9c",
+  "gitRef": "task/TASK-0045",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/collector-tabs-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 409 tests, validate)"
+  ],
+  "result": "The resume is now opened in a tab, saved from it, and the tab closed with focus handed back - all in the worker, and all without the recruiter touching anything. THE DEFECT, confirmed before changing anything: collectResume pressed the resume control with a bare click and nothing anywhere handled the tab it might open. A repo-wide search found no chrome.tabs.onCreated, no windows.onCreated, no openerTabId and no window.open shim; the only tab-lifecycle listener is onRemoved, and forgetClosedTab does not even know APPLICANT_TAB. So when the control was an <a target=_blank> LinkedIn opened a real foreground tab, the applicants tab went hidden, every waitFor poll calls assertRunnable which throws hiddenPageError, and extractAllApplicants BROKE out of its row loop - the run was not stuck, it was dead, and closing the tab by hand did not bring it back because nothing restarts a run mid-list. That is exactly the reported behaviour. THE FIX, in three parts. (1) The cycle moved to the worker: PV_APPLICANT_OPEN_AND_SAVE_RESUME opens the document through Tabs.openDocumentTab() - added to collector-tabs-core.js because rule 12 says that file is the only place a tab may be created, and the first attempt at this put chrome.tabs.create in the worker and three tests correctly refused it - opened INACTIVE so nothing is taken from the recruiter, waited to completion because the load is what makes the session and referrer right for a signed media address, then downloaded under the applicant's own sanitized name, with an in-tab credentialed read via chrome.scripting.executeScript as the fallback when the direct download comes back interrupted. The tab is closed and the hiring tab re-activated in a finally, so every failure path also cleans up. openDocumentTab is deliberately untracked: it is not a collector tab and closeCollectorTabs must never know about it. (2) The page no longer treats those seconds as hidden: state.resumeCycle suspends only the visibility guard in assertRunnable, is cleared in a finally, and wentHidden is re-derived from what the page is right now rather than left latched by the visibilitychange the resume tab fired. Rule 12a still holds everywhere else - it exists because LinkedIn does not render a hidden page and 'nothing changed' would settle instantly, and neither applies to a step that is only waiting on the worker. (3) A hidden page is now a PAUSE rather than the end of the list: waitForVisibleAgain() holds up to five minutes, a Stop ends it at once, and the run then re-reads the applicant it was on rather than skipping them, since nothing partial was saved."
+}

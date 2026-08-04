@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "id": "TASK-0051",
+  "name": "Document the working method: tasks, checks and how work is saved",
+  "request": "Document the working method: tasks, checks and how work is saved",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T10:08:36.629Z",
+  "completedAt": "2026-08-03T10:10:15.631Z",
+  "startCommit": "19c4b9df922123a117b2923acdef97654f260194",
+  "gitRef": "task/TASK-0051",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "added",
+      "path": "WORKFLOW.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 411 tests, validate)"
+  ],
+  "result": "WORKFLOW.md is new: the working method the Time Machine rules produce, written out so it can be followed or audited without reading CLAUDE.md's READ FIRST section and project-time-machine/docs/AGENTS.md. Eight sections. The one-line version; why every change is a task with no 'small enough' exception and how task granularity is decided (one request one task, unrelated requests never combined, closed in the same turn); the full sequence from status.js and audit.js through investigate, start-task, change, check, complete-task, including what to do about an active task, a stale lock, unlogged changes or an audit error before any other work; the checks, why typecheck runs before build (build.mjs deletes dist/ before compiling and there is no git history for dist/ to restore from, so a failed build leaves no extension), when they run, and the real per-task test counts from this session from the 395 baseline to 411; how work is saved, that complete-task.js is what writes the commit, the annotated verified tag and the task record, and the list of git commands that are never run; the plain-language rollback table; the recovery procedure for work made outside a task; what is never claimed, with the concrete scar - the suite passed 387 tests while three columns were empty on every row for three releases; and what is reported back. Two things are documented as method rather than as rules because they are what actually decided the outcomes this session: investigate before editing, illustrated with current_role being empty for four releases because each round patched the parser without first proving the parser was wrong, and the fact that a failing check is information, with the three real failures this session that each caught a genuine mistake (chrome.tabs.create breaking rule 12, a comment containing the literal .click(), and a ternary left without an else branch). CLAUDE.md's companion-docs list now names it first."
+}

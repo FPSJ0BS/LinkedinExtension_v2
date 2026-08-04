@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "TASK-0003",
+  "name": "Restore the collection state machine, bounded discovery and the coverage gap",
+  "request": "Restore the collection state machine, bounded discovery and the coverage gap",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T07:54:06.028Z",
+  "completedAt": "2026-08-01T07:57:19.294Z",
+  "startCommit": "003c0bd9b8833944cca76e555a3de1fcceecfd46",
+  "gitRef": "task/TASK-0003",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/import-queue-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-queue-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 197 tests, 0 failures",
+    "npm run validate passed",
+    "behavioural spot-check: 67 reported/66 usable/1 unusable gives accountedFor 67, coverageConfirmed true, exhausted true, gap 1, terminal completed_with_gap; dead pagination exhausts; drain bounded to 3 attempts; repeat and skip transitions refused; visibility pause claims nothing",
+    "updated the pagination-click test that encoded the infinite-loop behaviour, with the reason recorded in the test"
+  ],
+  "result": "Discovery now always terminates and hands over. Added COLLECTION_STATE with guarded, idempotent transitions (transitionCollection returns {changed}); coverage now settles on unique URLs + cards with no usable URL so 66 usable of 67 advertised is complete rather than an endless hunt, with the exact gap recorded; a pagination click no longer counts as growth and a control that reveals nothing 3 times is retired; the drain loop is bounded by MAX_FRUITLESS_DISCOVERY; added pauseForVisibility/canResumeFromVisibility and the collector-hidden stop reason. messages.ts carries the matching types."
+}

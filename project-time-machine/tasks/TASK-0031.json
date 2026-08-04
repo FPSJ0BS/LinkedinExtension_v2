@@ -1,0 +1,78 @@
+{
+  "schema": 2,
+  "id": "TASK-0031",
+  "name": "Release 3.7.4 and record the applicant capture and resume-column work in the docs",
+  "request": "Release 3.7.4 and record the applicant capture and resume-column work in the docs",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-03T03:24:58.032Z",
+  "completedAt": "2026-08-03T03:28:38.949Z",
+  "startCommit": "3cd437f5f77143fae9fb96eba5c2039b2b656d57",
+  "gitRef": "task/TASK-0031",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "MEMORY.md"
+    },
+    {
+      "change": "modified",
+      "path": "PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "TECH_STACK.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 383 tests, validate"
+  ],
+  "result": "Version and build id bumped to 3.7.4 in all five places plus manifest.json and package.json, which the code comments written during TASK-0029 and TASK-0030 already referred to. CHANGELOG.md gained a 3.7.4 entry covering the three causes that survived 3.7.3: a position walk that is only as good as its guess at the scrolling container, a section search scoped to a panel that can resolve to a sub-container of the real detail column, and a resume URL search with its own local idea of what a file is. CHECKS.md gained a 3.7.4 section with the four commands actually run, the four new or changed tests and what each asserts, the plain statement that 3.7.3 fixed the scroll target and the columns were still empty afterwards, and five things only a live run can confirm - including whether scrollIntoView actually causes LinkedIn to mount the sections below the fold, and whether the viewer exposes a document address in any searched attribute at all. CLAUDE.md's 'Collecting every applicant' section is now titled 3.7.3, amended in 3.7.4 and documents revealPanelContent, the page-wide section fallback with both its refusals, and the widened document search that still decides with isResumeDocumentUrl; the applicant record's column list is now the fifteen-column table with the resume in five columns and states the reorder as deliberate. MEMORY.md gained three durable entries (identifying the scroller is a guess, a container-scoped search is only as good as the container, one rule decides what a resume file is), PROJECT_STATUS.md leads with the four changes and restates that phase 30 is open, TECH_STACK.md gained four constraints, and README.md documents the second container-agnostic walk, the five resume columns and the fifteen-column CSV."
+}

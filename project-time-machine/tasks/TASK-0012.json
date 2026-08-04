@@ -1,0 +1,43 @@
+{
+  "schema": 2,
+  "id": "TASK-0012",
+  "name": "Keep only real CV and resume links in the CV field and store the profile link separately",
+  "request": "Keep only real CV and resume links in the CV field and store the profile link separately",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T10:21:58.473Z",
+  "completedAt": "2026-08-01T10:27:24.190Z",
+  "startCommit": "aae2028cfbadb16cab314fba7bb92b68411a975a",
+  "gitRef": "task/TASK-0012",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "content.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/profile-utils.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    }
+  ],
+  "checks": [
+    "npm test - 283 tests, 0 failures (12 new tests: the LinkedIn page is never a CV, a bare Drive link is not a resume, a portfolio is a website, section text does not claim every link in it, the redirector is unwrapped, the overlay URL canonicalizes back to the member page)",
+    "npm run typecheck - tsc --noEmit clean",
+    "npm run build - built 3.5.0 into dist/",
+    "npm run validate - 23 build files, 3 React entry points, service-worker imports OK",
+    "git diff reviewed - CLAUDE.md, content.js, src/extraction-core.js, src/profile-utils.js, tests/contact-extraction.test.js; no secrets or keys",
+    "NOT verified against live LinkedIn - unit tests do not prove live DOM behaviour (rule 17)"
+  ],
+  "result": "The CV field now holds CVs and resumes only, and the profile link is stored once, on its own field. looksLikeCvLink() rejects every linkedin.com address outright and is checked BEFORE the CV test in classifyContactLink(), so the member's own page can never be offered as their CV; portfolio was dropped from the CV vocabulary (a portfolio is a website); a general document host (Drive, Dropbox, OneDrive, Box, Notion) now needs the word cv/resume as corroboration instead of qualifying on the host alone; surrounding section text no longer promotes a link by itself, only corroborates a document host; and dedicated resume hosts got their own pattern. LinkedIn's redir/redirect wrapper is unwrapped first, so a real CV behind it is found and the unwrapped document URL is what gets stored. canonicalizeProfileUrl() (both copies) truncates a LinkedIn member URL to /in/<slug>, and extractProfile() captures the profile URL BEFORE the Contact info overlay is opened - that click routes LinkedIn to /in/slug/overlay/contact-info/, which was being saved as the profile URL and hashing to an id matching no queue row. normalizeProfile() drops any linkedin.com address from cvUrl/cvLinks as defence in depth for CSV imports and hand edits. CLAUDE.md updated to the new rule."
+}

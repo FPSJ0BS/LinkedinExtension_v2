@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "id": "TASK-0010",
+  "name": "Record the Time Machine READ FIRST preamble added to CLAUDE.md",
+  "request": "Record the Time Machine READ FIRST preamble added to CLAUDE.md",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-01T09:28:22.672Z",
+  "completedAt": "2026-08-01T09:28:36.506Z",
+  "startCommit": "d3956f24c55938e56e57d2dbddb80a5f2cee5466",
+  "gitRef": "task/TASK-0010",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    }
+  ],
+  "checks": [
+    "git diff reviewed - CLAUDE.md only, documentation text",
+    "npm test - 269 tests, 0 failures (unchanged by a docs edit)"
+  ],
+  "result": "CLAUDE.md gained a READ FIRST Time Machine section at the top (session-start commands, the wrap-every-change-in-a-task rule, the forbidden Git commands, plain-language rollback, and what to do when work was made outside a task); the old trailing Project Time Machine block now points at it. This edit was made outside this session - it is recorded here so it is separately reversible rather than absorbed into the next code change. Documentation only, no code touched."
+}
