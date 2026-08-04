@@ -2209,6 +2209,57 @@ test("PERMANENT: the opened resume is downloaded by pressing Download, and its l
     "the saved file and its status land on the record with the link");
 });
 
+/**
+ * PERMANENT. Requested outright: "I want to download the resume without opening
+ * the resume — both link and download on disk."
+ *
+ * The viewer is a fallback, never the first move. When the document's address is
+ * already available — on the resume control's own `href`, or rendered anywhere on
+ * the page — the file is fetched and the link recorded with **nothing opened and
+ * nothing clicked**. Opening only happens when the page names no document address
+ * at all, which on this surface means LinkedIn gave a route and the address does
+ * not exist anywhere until its own viewer resolves it.
+ *
+ * Do not delete or weaken this test, and do not let the click escape the `!url`
+ * guard: that guard IS the feature.
+ */
+test("PERMANENT: the resume is downloaded without opening it whenever the address is already known", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
+
+  // The address is looked for BEFORE anything is opened: the control's own href
+  // when it really is a document, then the whole page.
+  assert.match(step, /const linkedUrl = Applicants\.isResumeDocumentUrl\(controlHref\) \? controlHref : "";/,
+    "the control's own href counts only when it is a document, never a route");
+  assert.match(step, /const rendered = linkedUrl \|\| findResumeDocumentUrl\(null\);/,
+    "and the page is swept for the address before any click");
+  assert.match(step, /diagnostics\.resume\.foundWithoutOpening = Boolean\(rendered\);/,
+    "and the surface records that it did not need to open anything");
+  assert.match(step, /let url = rendered;/, "the found address is the one the rest of the step uses");
+
+  // THE GUARD. Opening is inside `if (!url)`, so an address that was already
+  // known means the viewer is never opened and the resume control never clicked.
+  assert.match(step, /if \(!url\) \{[\s\S]{0,600}?control\.element\.click\(\);/,
+    "the resume is opened ONLY when no address was found");
+  assert.ok(
+    step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
+    "the address is looked for before the control is ever pressed"
+  );
+  assert.equal((step.match(/\.click\(\)/g) || []).length, 1,
+    "exactly one click in this step, and it is the guarded fallback open");
+
+  // Both halves still happen on the no-open path, because they live after the
+  // guarded block: the address is proven, kept as the link, and saved to disk.
+  assert.ok(
+    step.indexOf("url = await resolveResumeDocumentUrl(url, diagnostics)") > step.indexOf("if (!url) {"),
+    "the descriptor resolve is outside the open-only block, so it runs either way"
+  );
+  assert.ok(
+    step.indexOf('type: "PV_APPLICANT_DOWNLOAD_RESUME"') > step.indexOf("if (!url) {"),
+    "and so is the download, so not opening never means not saving"
+  );
+});
+
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));

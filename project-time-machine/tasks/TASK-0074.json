@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0074",
+  "name": "Lock downloading the resume without opening it when the address is already available",
+  "request": "Lock downloading the resume without opening it when the address is already available",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:02:33.823Z",
+  "completedAt": "2026-08-04T13:04:01.240Z",
+  "startCommit": "0ebb14e0c7615adcab482a3c4e5172e572026f09",
+  "gitRef": "task/TASK-0074",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 419/419 tests (up from 418, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "both PERMANENT locks pass together: the open-and-press-Download chain and the download-without-opening guard",
+    "git diff --check passed; scope is the test file and the CLAUDE.md rule only, no production code touched; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): this locks the code path; which of the two paths a real applicant takes is reported by diagnostics.resume.foundWithoutOpening and has not been read from a live run"
+  ],
+  "result": "Downloading the resume without opening it was already implemented and unprotected: the address is sought on the control's own href and then page-wide before anything is clicked, and the open-and-press-Download chain runs only inside the resulting if (!url) guard, with the descriptor resolve, the link save and the worker download all outside it so the no-open path still yields both link and file. Added a PERMANENT lock test pinning that guard, the pre-click sweep, the single click call site and the fact that the resolve and download sit outside the open-only block, and recorded it as a binding clause under rule 9i. No production code changed - this makes existing behaviour permanent."
+}

@@ -226,6 +226,21 @@ commands are unrecoverable.
       itself not to be deleted or weakened. If this behaviour ever genuinely has to change, **this
       rule changes first, in its own task**, and the test changes with it — never the other way
       round.
+
+      **⚠ PERMANENT — the viewer is a fallback, never the first move.** Also requested outright:
+      *download the resume without opening it — both the link and the file on disk.* So before
+      anything is clicked, the document's address is looked for on the resume control's own `href`
+      (only when `isResumeDocumentUrl` says it is a document — a `/hiring/…` route never counts) and
+      then across the whole page (`findResumeDocumentUrl(null)`, seven attributes over nine element
+      shapes). **If that finds an address, nothing is opened and nothing is clicked**: the descriptor
+      resolve, the link and the worker download all live *after* the guarded block, so not opening
+      never means not saving. The open-and-press-Download chain above runs **only** inside
+      `if (!url)`, and that guard is the feature — a click that escapes it silently reverts this.
+      Opening remains necessary in exactly one case, and it is LinkedIn's doing rather than a choice:
+      when the control carries only a route, the file's address does not exist anywhere on the page
+      until LinkedIn's own viewer resolves it. `diagnostics.resume.foundWithoutOpening` records which
+      of the two paths each applicant took. Locked by
+      `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
       `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a
