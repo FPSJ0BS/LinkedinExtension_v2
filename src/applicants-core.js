@@ -1721,6 +1721,37 @@
   }
 
   /**
+   * Why a list walk stopped, and whether that answer is worth believing.
+   *
+   * **Only a walk that reached the end of the list may complete a run**, and that
+   * is what makes "keep collecting as long as I am on this tab, even if the page
+   * reloads" possible at all. `claimAutoRun` refuses to re-arm a job whose
+   * execution reported `COMPLETED` — deliberately, so a finished job is not
+   * walked again forever — so a run that claims completion it has not earned does
+   * not merely stop, it **permanently disables its own restart**. A reload then
+   * does nothing, which is precisely the reported behaviour.
+   *
+   * The growth walk stops for six reasons and they are not the same kind of fact.
+   * `settled` and `pagination-retired` are *verdicts*: the container reached its
+   * bottom, stayed quiet for `LIST_QUIET_PASSES`, and either offered no pager or
+   * offered one that revealed nobody three times. Everything else is an *excuse* —
+   * the pass budget ran out mid-scroll, the list was momentarily unmounted, the
+   * pager was refused by the click policy — and means only "I could not tell yet".
+   * A 16-pass budget covers roughly 8000px of scrolling, so on any longer list a
+   * walk that was working simply ran out of passes and the run declared itself
+   * finished somewhere in the middle.
+   *
+   * An inconclusive stop must leave the run restartable instead — the same
+   * distinction `revealPanelContent` already draws when it reports
+   * `complete: stoppedBy === "settled"` rather than trusting any stop at all.
+   */
+  const LIST_STOP_CONCLUSIVE = Object.freeze(["settled", "pagination-retired"]);
+
+  function isConclusiveListStop(stoppedBy = "") {
+    return LIST_STOP_CONCLUSIVE.includes(cleanText(stoppedBy));
+  }
+
+  /**
    * What the runner should do next.
    *
    * The stop flag is checked before anything else and before every single row,
@@ -1764,6 +1795,7 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     applicantRowKey, unprocessedApplicantRows,
+    LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement
     cleanText, uniqueText, toLines

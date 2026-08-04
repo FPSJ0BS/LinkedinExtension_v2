@@ -680,6 +680,23 @@ viewer mounts its shell before it fetches the file.
 
 
 
+**⚠ PERMANENT — a started run keeps going, including across a reload.** Requested outright: *keep
+going once I start, as long as I am on that tab, even if the page reloads.* The worker holds the
+standing instruction and `claimAutoRun()` refuses to re-arm a job whose execution reported
+`COMPLETED` — deliberately, so a finished job is not walked forever. **That makes a false completion
+far worse than a stop: it permanently disables the reload-resume.** So only a walk that actually
+reached the end of the list may complete a run. `Applicants.isConclusiveListStop()` names the two
+verdicts that qualify — `settled` and `pagination-retired` — and everything else
+(`grow-budget`, `no-list`, `pagination-refused`, `list-exhausted`) is an excuse meaning "I could not
+tell yet", retried up to `MAX_INCONCLUSIVE_GROWTHS` (3) and reset by any growth that produces a row.
+Exhausting the retries is `RUN_STATE.STOPPED`, never `COMPLETED`, which reaches the worker as
+`AUTO_RUN_STATE.INTERRUPTED` and leaves the job restartable. `walk.stoppedBy` is reset to `running`
+at the **start of every growth call**, because the ledger is shared across calls so `fruitless` can
+retire a pager over a whole run, and a verdict read more than once must describe the call that just
+ran. `LIST_GROW_PASSES` (16) covers roughly 8000px of scrolling, so treating budget exhaustion as
+the end of the list finished long jobs in the middle *and* stopped them ever resuming. Locked by
+`PERMANENT: only a walk that reached the list end may complete a run`.
+
 **⚠ PERMANENT — the required flow, and the page never moves.** Stated by the user and binding:
 `click applicant in left list → wait for right panel → scroll right panel completely → extract →
 save → click next applicant`. Every clause of it is load-bearing.

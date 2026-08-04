@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "id": "TASK-0076",
+  "name": "Only a walk that reached the list end may complete a run, so a reload resumes",
+  "request": "Only a walk that reached the list end may complete a run, so a reload resumes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-04T13:15:50.469Z",
+  "completedAt": "2026-08-04T13:18:54.480Z",
+  "startCommit": "9b120d801fd968630107b23a034e686f88490534",
+  "gitRef": "task/TASK-0076",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 421/421 tests (up from 420, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "the new PERMANENT test proves the consequence rather than asserting it in prose: claimAutoRun({state: COMPLETED}) is not armed and {state: INTERRUPTED} is, alongside the conclusive/inconclusive split, the bounded retry, the STOPPED-not-COMPLETED outcome and the per-call verdict reset",
+    "git diff --check passed; scope is applicants.js, applicants-core.js, the test file and the CLAUDE.md rule; dist/applicants.js rebuilt and verified to match source; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): the restart chain is proven in unit tests, but that a real run now crosses the whole list on the user's account is not"
+  ],
+  "result": "Delivers keep-going-across-reloads. claimAutoRun refuses to re-arm a job whose execution reported COMPLETED, so a run that claims a completion it has not earned does not merely stop - it permanently disables the reload-resume, which is exactly why reloading did nothing. Added Applicants.isConclusiveListStop(): only settled and pagination-retired may complete a run; grow-budget, no-list, pagination-refused and list-exhausted are retried up to MAX_INCONCLUSIVE_GROWTHS (3), reset by any growth that produces a row, and exhausting them ends the run as STOPPED, which reaches the worker as INTERRUPTED and stays restartable. growApplicantList clears walk.stoppedBy at the start of each call because the shared ledger made that verdict sticky and it is now read twice. This restores the behaviour of TASK-0069, which the user rolled back believing it broke resume downloads; that was afterwards shown to be impossible - TASK-0069 touched only the completion policy, never extractApplicant, the section scan or chrome.downloads."
+}

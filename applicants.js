@@ -3501,6 +3501,14 @@
    */
   async function growApplicantList(diagnostics, hasWork) {
     const walk = diagnostics.listScroll || createListWalk(diagnostics);
+    // The verdict must describe THIS call. `walk` is deliberately shared across
+    // calls so `fruitless` can retire a pager over a whole run, but that made
+    // `stoppedBy` sticky: a call that returned early on success never cleared it,
+    // so the caller could read a "settled" left behind by an earlier attempt and
+    // complete a run on a verdict nothing had just reached. It only ever ended
+    // the run before, so staleness could not show; now that an inconclusive stop
+    // is retried, the value has to mean what it says.
+    walk.stoppedBy = "running";
     const list = applicantList();
     if (!list) {
       walk.stoppedBy = "no-list";
@@ -3773,6 +3781,20 @@
     let retryingKey = "";
     let hiddenRetries = 0;
 
+    /**
+     * How many growth attempts in a row may end without telling us where the
+     * list ends.
+     *
+     * Each attempt costs `LIST_GROW_PASSES` and leaves the list further down than
+     * it found it, so consecutive attempts genuinely advance rather than
+     * repeating — this retries a walk that was working, not one that failed.
+     * Bounded because a list that has stopped responding must still end the run,
+     * and reset by any attempt that produces a row, so a long run is never
+     * condemned by three slow slices spread across it.
+     */
+    const MAX_INCONCLUSIVE_GROWTHS = 3;
+    let inconclusive = 0;
+
     for (;;) {
       // The one moment the applicant list is scrolled: the run has run out of
       // rows it has not done and needs more. `growApplicantList` is asked the
@@ -3840,9 +3862,36 @@
           if (listDiagnostics.listScroll.stoppedBy === "running") {
             listDiagnostics.listScroll.stoppedBy = "list-exhausted";
           }
-          state.run.state = Applicants.RUN_STATE.COMPLETED;
+          const stoppedBy = listDiagnostics.listScroll.stoppedBy;
+          // "No new row" is not "no more applicants", and the difference decides
+          // whether this job can ever restart: `claimAutoRun` will not re-arm a
+          // job whose execution reported COMPLETED, so claiming it here without
+          // having reached the end of the list disables the reload-resume too.
+          //
+          // `list-exhausted` is inconclusive despite the name it is recorded
+          // under. Growth only leaves `stoppedBy` at "running" when it returned
+          // early because `wanted()` was true — it had found an unprocessed row —
+          // so arriving here means that row was recycled out of the DOM between
+          // its check and this re-scan. That is a race on a virtualized list, not
+          // the end of one, and the retry resolves it on the next pass.
+          if (Applicants.isConclusiveListStop(stoppedBy)) {
+            state.run.state = Applicants.RUN_STATE.COMPLETED;
+            break;
+          }
+          inconclusive += 1;
+          if (inconclusive < MAX_INCONCLUSIVE_GROWTHS) continue;
+          // Out of retries and still unable to see the end of the list. This must
+          // NOT be COMPLETED: stopping leaves the standing instruction armed, so
+          // staying on the tab or reloading picks the run up again.
+          state.run.state = Applicants.RUN_STATE.STOPPED;
+          state.run.lastError =
+            `Stopped after ${processed.size} applicant(s): the list would not reveal more rows (${stoppedBy}). `
+            + "The run is not complete — it will continue when this page is reloaded or reopened.";
           break;
         }
+        // A growth that produced work starts the allowance over: three slow or
+        // budget-bound attempts spread across a long run are not a stuck list.
+        inconclusive = 0;
       }
 
       // Retire EVERY already-saved row on this one scan rather than spending a

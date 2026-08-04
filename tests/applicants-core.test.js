@@ -1266,10 +1266,15 @@ test("the run walks the list by identity, so a position can never address the wr
   const terminal = [...run.matchAll(/processed\.add\(key\)/g)].length;
   assert.ok(terminal >= 4, `every terminal outcome must record the row (found ${terminal}: collected, already-saved, could-not-open, failed)`);
 
-  // Completion means "no unprocessed row can be produced", never "the mounted
-  // window ran out".
-  assert.match(run, /if \(!pending\.length\) \{[\s\S]{0,400}state\.run\.state = Applicants\.RUN_STATE\.COMPLETED;/,
-    "the run ends only when growing the list still yields nothing to do");
+  // Completion means "no unprocessed row can be produced AND the walk reached the
+  // end of the list" — never "the mounted window ran out", and never "the scroll
+  // budget ran out". Growing the list and finding nothing is necessary, not
+  // sufficient: see the PERMANENT conclusive-stop test.
+  assert.match(
+    run,
+    /if \(!pending\.length\) \{[\s\S]{0,1800}?if \(Applicants\.isConclusiveListStop\(stoppedBy\)\) \{\s*\n\s*state\.run\.state = Applicants\.RUN_STATE\.COMPLETED;/,
+    "the run ends only when growing the list yields nothing AND the walk reached the list's end"
+  );
   // And the total handed to nextRunStep cannot itself declare the queue complete
   // at the end of page one — the old `total: known` was a rendered-row count.
   assert.match(run, /Applicants\.nextRunStep\(state\.run, \{ total: processed\.size \+ 1 \}\)/,
@@ -2327,6 +2332,55 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
     extract.indexOf("scanApplicantPanel") < extract.indexOf("buildApplicantRecord"),
     "the panel is scrolled and read before the record is built"
   );
+});
+
+/**
+ * PERMANENT. Requested outright: "keep going once I start, as long as I am on
+ * that tab, even if the page reloads."
+ *
+ * That is only possible if a run never claims a completion it has not earned.
+ * `claimAutoRun` refuses to re-arm a job whose execution reported COMPLETED — on
+ * purpose, so a finished job is not walked forever — so a false completion does
+ * not merely stop the run, it permanently disables the reload-resume.
+ */
+test("PERMANENT: only a walk that reached the list end may complete a run", async () => {
+  const { isConclusiveListStop, LIST_STOP_CONCLUSIVE, RUN_STATE, AUTO_RUN_STATE, claimAutoRun } = Applicants;
+
+  // A verdict: the container reached its bottom, stayed quiet, and had no working pager.
+  assert.equal(isConclusiveListStop("settled"), true);
+  assert.equal(isConclusiveListStop("pagination-retired"), true);
+  assert.deepEqual([...LIST_STOP_CONCLUSIVE], ["settled", "pagination-retired"]);
+
+  // An excuse. Every one of these used to finish the run — and with it the job.
+  for (const excuse of ["grow-budget", "no-list", "pagination-refused", "list-exhausted", "running", ""]) {
+    assert.equal(isConclusiveListStop(excuse), false, `${excuse || "(empty)"} must not complete a run`);
+  }
+
+  // The consequence this protects, proven rather than asserted in prose: a
+  // completed execution cannot be re-armed, an unfinished one can.
+  const base = { runId: "r1", options: {}, tabId: 7, attempt: 1 };
+  assert.equal(claimAutoRun({ ...base, state: AUTO_RUN_STATE.COMPLETED }, { tabId: 7 }).armed, false,
+    "a completed job never restarts — which is why completion must be earned");
+  assert.equal(claimAutoRun({ ...base, state: AUTO_RUN_STATE.INTERRUPTED }, { tabId: 7 }).armed, true,
+    "an interrupted one does, which is what a reload picks up");
+
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const loop = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
+
+  assert.match(loop, /if \(Applicants\.isConclusiveListStop\(stoppedBy\)\) \{\s*\n\s*state\.run\.state = Applicants\.RUN_STATE\.COMPLETED;/,
+    "only a conclusive stop may complete the run");
+  assert.match(loop, /inconclusive \+= 1;\s*\n\s*if \(inconclusive < MAX_INCONCLUSIVE_GROWTHS\) continue;/,
+    "an inconclusive stop is retried, from the position the walk reached");
+  assert.match(source, /const MAX_INCONCLUSIVE_GROWTHS = 3;/, "and the retry is bounded");
+  assert.match(loop, /inconclusive = 0;/, "a growth that produced work starts the allowance over");
+  assert.match(loop, /state\.run\.state = Applicants\.RUN_STATE\.STOPPED;/,
+    "exhausting the retries stops the run, leaving it restartable");
+  assert.match(loop, /The run is not complete/, "and says so, rather than reporting a finished list");
+
+  // The verdict must describe the call that just ran, now that it is read twice.
+  const grow = source.slice(source.indexOf("async function growApplicantList"), source.indexOf("function logListWalk"));
+  assert.match(grow, /walk\.stoppedBy = "running";/, "each growth call clears the previous call's verdict");
+  void RUN_STATE;
 });
 
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
