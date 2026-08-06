@@ -4040,24 +4040,31 @@
       }
       if (!atBottom) continue;
 
-      // At the bottom, and this pass revealed nothing. THE DEFECT THIS FIXES:
-      // that single observation used to be the whole verdict — one pass at the
-      // bottom with no pager in sight ended the walk, `extractAllApplicants` saw
-      // no further row and marked the run COMPLETED. A slow slice, or a scroll
-      // target with no range, therefore finished a 665-applicant job somewhere
-      // in the first dozen and reported it as done. The full walk has required
-      // `LIST_QUIET_PASSES` consecutive quiet passes since 3.7.8; this is the
-      // same rule on the on-demand path, which is the one a run actually uses.
-      quiet += 1;
-      if (quiet < LIST_QUIET_PASSES) continue;
-
-      // Genuinely settled at the bottom of this page. Is there another one?
-      // Without this the end of page one is indistinguishable from the end of
-      // the list.
+      // AT THE BOTTOM OF THE LIST, WITH NOTHING NEW. Asked for outright: "I
+      // prefer no scrolling and then go to next page" — so the pager is offered
+      // HERE, before any further scrolling or waiting, rather than after
+      // `LIST_QUIET_PASSES` confirmations.
+      //
+      // The order matters and it is not merely a preference. This list is
+      // PAGINATED: page one holds its own rows and the rest are on page two, so
+      // once the run has finished every row in the DOM and the column is at its
+      // end, more scrolling cannot produce anybody — only the pager can. The
+      // quiet passes were written for the other arrangement, an infinite-scroll
+      // list whose next slice arrives late, where "nothing new yet" genuinely is
+      // not "nothing more". Spending three of them plus a nudge on every page
+      // boundary is the scrolling the recruiter is watching and does not want.
+      //
+      // So: when a pager exists, use it. When one does not, this may still be an
+      // infinite-scroll list, and the quiet confirmation below still applies in
+      // full — which is what keeps a slow slice from ending the walk early.
       const pager = walk.fruitless < MAX_FRUITLESS_PAGINATION
         ? findApplicantPaginationControl(live)
         : null;
       if (!pager) {
+        // No page to turn. Confirm the bottom the patient way before believing
+        // it, exactly as before.
+        quiet += 1;
+        if (quiet < LIST_QUIET_PASSES) continue;
         walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
         break;
       }

@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0089",
+  "name": "Page forward before scrolling once the applicant list is at its end",
+  "request": "Page forward before scrolling once the applicant list is at its end",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T07:17:49.530Z",
+  "completedAt": "2026-08-06T07:21:16.300Z",
+  "startCommit": "294c3700cf45e49c4df464b6bce138ceacb634f0",
+  "gitRef": "task/TASK-0089",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 428/428 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "the one assertion that pinned the old ordering was inverted deliberately and records why; a new assertion was ADDED pinning that the quiet confirmation still guards the no-pager path, so the slow-slice protection it was written for is not lost",
+    "git diff --check passed; click budget unchanged at seven - no control added, only the order in which the existing pager is consulted; scope is applicants.js, its test and the rule",
+    "NOT verified against live LinkedIn (rule 17): that the run now turns the page instead of scrolling has not been observed on the user's account"
+  ],
+  "result": "On request - 'I prefer no scrolling and then go to next page'. growApplicantList already scrolled only when the run had finished every row in the DOM, never preemptively, but once at the end of the column it then spent LIST_QUIET_PASSES confirmations plus a nudge before it would even look for the pager. On a paginated list that confirmation buys nothing: the remaining applicants are on page two by construction, so more scrolling cannot produce anybody, and those passes are exactly the list scrolling the recruiter is watching. The pager is now offered first when the column is at its end, and the quiet confirmation guards the NO-PAGER path only - which is where it was always doing its work, since it exists for an infinite-scroll list whose next slice arrives late. MAX_FRUITLESS_PAGINATION still retires a pager that reveals nobody and a fruitless click still earns its confirmation again, so both bounds that keep the walk terminating are intact."
+}

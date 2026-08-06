@@ -738,6 +738,18 @@ ran. `LIST_GROW_PASSES` (16) covers roughly 8000px of scrolling, so treating bud
 the end of the list finished long jobs in the middle *and* stopped them ever resuming. Locked by
 `PERMANENT: only a walk that reached the list end may complete a run`.
 
+**The list is paged forward before it is scrolled again** (3.7.9). Asked for outright: *"I prefer no
+scrolling and then go to next page."* `growApplicantList` is still only called when the run has
+finished every row in the DOM — it never scrolls preemptively — but once the column is at its end
+with nothing new, the **pager is offered first**, before any further scrolling or waiting. The order
+is not merely a preference: this list is paginated, so the remaining applicants are on page two by
+construction and more scrolling cannot produce anybody. `LIST_QUIET_PASSES` was written for the
+opposite arrangement — an infinite-scroll list whose next slice arrives late, where "nothing new yet"
+is genuinely not "nothing more" — so it now guards the **no-pager** path only, in full, which is
+where it was always doing the work. Spending three quiet passes and a nudge on every page boundary is
+the scrolling the recruiter watches and does not want. `MAX_FRUITLESS_PAGINATION` still retires a
+pager that reveals nobody, and a fruitless click still earns its confirmation over again.
+
 **⚠ PERMANENT — the required flow, and the page never moves.** Stated by the user and binding:
 `click applicant in left list → wait for right panel → scroll right panel completely → extract →
 save → click next applicant`. Every clause of it is load-bearing.

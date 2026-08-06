@@ -1536,10 +1536,21 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   // a 665-applicant job in the first dozen rows and called it done.
   assert.match(grow, /quiet \+= 1;\s*\n\s*if \(quiet < LIST_QUIET_PASSES\) continue;/,
     "the bottom has to be confirmed, not believed on sight");
+
+  // 3.7.9 INVERTS THE ORDER, on request: "I prefer no scrolling and then go to
+  // next page." The confirmation now guards the NO-PAGER path only, and that is
+  // where it was always doing the work — it exists for an infinite-scroll list
+  // whose next slice arrives late, where "nothing new yet" is not "nothing
+  // more". On a PAGINATED list the rest of the applicants are on page two by
+  // construction, so once the column is at its end more scrolling cannot produce
+  // anybody and three quiet passes plus a nudge per page boundary is exactly the
+  // scrolling being complained about.
   assert.ok(
-    grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;") < grow.indexOf("const pager ="),
-    "and confirmed BEFORE the pager is consulted, or the confirmation buys nothing"
+    grow.indexOf("const pager =") < grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;"),
+    "the pager is offered first, so a paginated list turns the page instead of scrolling"
   );
+  assert.match(grow, /if \(!pager\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*quiet \+= 1;/,
+    "and the patient confirmation still guards the case with no pager — a slow slice must not end the walk");
   assert.match(grow, /quiet = 0;/, "a fruitless page click earns the same confirmation over again");
   assert.match(grow, /const live = applicantList\(\) \|\| list;/,
     "the list is re-resolved per pass — a detached container reports the range it had when it was unmounted");
