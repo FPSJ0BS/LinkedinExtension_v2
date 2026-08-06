@@ -1683,6 +1683,59 @@
     });
   }
 
+  // ----------------------------------------------------------- the list pass
+  /**
+   * One applicant, from their list row alone — no panel, no click, no opening.
+   *
+   * The connections surface has always had two separate commands, and the
+   * hiring surface now has the same pair for the same reason: **Find All
+   * Connections** enumerates the list and saves rows without extracting
+   * anything, and **Start Profile Extraction** reads what was found. Reading
+   * 665 applicants' panels takes hours; reading 665 rows takes a walk down the
+   * list. Wanting the second without paying for the first is not a shortcut, it
+   * is a different question — *who applied* rather than *what is on their
+   * profile*.
+   *
+   * **The name and the two ids, and deliberately nothing else.** The row also
+   * renders a headline and a location, and taking them would mean deciding that
+   * line two is the headline and line three is the location — positional
+   * guessing on generated markup, which rule 11 refuses and rule 6 makes worse
+   * than an empty field. `cleanApplicantName` still applies, so LinkedIn's
+   * `· 2nd` degree badge is stripped exactly as it is everywhere else.
+   *
+   * **A blank field here can never erase a full one.** `mergeApplicantRecord`
+   * protects every scalar field by field (3.7.10), and `saveApplicant`
+   * reconciles on `job.id + applicationId` (3.7.9), so a later pass that opens
+   * this person's panel enriches *this* record rather than creating a second one
+   * under a different hash. Those two together are what make it safe to run the
+   * list pass first; neither is incidental to it.
+   */
+  function buildApplicantListRecord({ name = "", href = "", job = null, context = {}, sourceUrl = "", buildId = "" } = {}) {
+    const row = parseHiringContext(href);
+    const applicationId = row.applicationId || context.applicationId || null;
+    const jobId = cleanText(job?.id) || context.jobId || null;
+    return normalizeApplicantRecord({
+      applicationId,
+      // Carried when the page header supplied one, so the table shows which job
+      // these people applied to rather than a bare id. Never assembled.
+      job: { ...(job || {}), id: jobId },
+      applicant: { name: cleanApplicantName(name) },
+      extraction: {
+        timestamp: new Date().toISOString(),
+        sourceUrl,
+        buildId,
+        warnings: [],
+        // Provenance, in the field that exists for exactly this: `rawData` keeps
+        // the verbatim text each section was parsed from, and here the section
+        // IS the list row. Without it a name-only record is indistinguishable
+        // from a full extraction that found nothing — and the two call for
+        // opposite responses. `normalizeApplicantRecord` keeps `rawData`
+        // verbatim, so this needs no change to the record's own schema.
+        rawData: { list_row: cleanApplicantName(name) }
+      }
+    });
+  }
+
   // ------------------------------------------------------------ the run queue
   // Collecting every applicant on a job is the same shape of problem as the
   // connections queue but small enough to live in memory: a list of rows, an
@@ -1961,7 +2014,7 @@
     // naming the saved file
     sanitizeFileName, resumeFileExtension, resumeFileName,
     applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,
-    createApplicantAccumulator, buildApplicantRecord,
+    createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     applicantRowKey, unprocessedApplicantRows,

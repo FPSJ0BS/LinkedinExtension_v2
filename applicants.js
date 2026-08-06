@@ -3806,6 +3806,21 @@
       : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
+    // The job header, read ONCE for a list pass and attached to every row.
+    //
+    // It sits above both columns and does not change as the list is walked, so
+    // reading it per row would be hundreds of forced layouts for one unchanging
+    // answer — the same reason `applicantRows()` made its name a lazy getter.
+    // Without it every name would land under a bare job id; with it the table
+    // says which job these people applied to. Read through the same `readJob`
+    // the full extraction uses, so there is one rule for what a job header is,
+    // and left null if it says nothing rather than assembled (rule 6).
+    let listJob = null;
+    if (options.listOnly === true) {
+      const jobAccumulator = Applicants.createApplicantAccumulator();
+      listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
+    }
+
     state.run = Applicants.createRunState({
       state: Applicants.RUN_STATE.RUNNING,
       total: known,
@@ -4025,6 +4040,54 @@
       // own href is all a row knows about who it leads to, and opening every
       // applicant to find out they may be skipped is the cost this avoids.
       const rowId = Applicants.parseHiringContext(row.href).applicationId || "";
+
+      // ---------------------------------------------------------- list pass
+      // "Collect all the applicants like we did in connections": the whole
+      // list, across every page, one at a time, saving each person's name —
+      // and opening nobody.
+      //
+      // Every clause below the panel is deliberately not reached. Nothing is
+      // clicked but the pager (rule 9h), which the growth walk already owns, so
+      // this pass presses FEWER controls than the full one rather than more.
+      // `extractApplicant` and everything it drives is untouched and still the
+      // only path for the full collection — it is simply not called here.
+      //
+      // The already-collected skip is deliberately NOT consulted: a name-only
+      // record is not `isCollectedApplicant`, so it would never match anyway,
+      // and re-saving is one merge that cannot lose anything. A list pass over
+      // a job already listed is therefore cheap and idempotent rather than
+      // clever.
+      if (options.listOnly === true) {
+        // Rule 12a and rule 13a inside the loop, not between items: a hidden
+        // tab renders nothing, so its rows are not worth reading, and a Stop
+        // must land within one row.
+        assertRunnable();
+        const record = Applicants.buildApplicantListRecord({
+          name: row.name,
+          href: row.href,
+          job: listJob,
+          context: Applicants.parseHiringContext(location.href),
+          sourceUrl: location.href,
+          buildId: BUILD_ID
+        });
+        state.run.currentName = record.applicant.name;
+        // Saved one at a time, as it is read — the same streaming the full run
+        // uses, and for the same reason: a pass the recruiter walks away from
+        // keeps every name it had already reached.
+        try {
+          await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
+          results.push(record);
+          state.run.collected += 1;
+        } catch (error) {
+          state.run.failed += 1;
+          state.run.lastError = error instanceof Error ? error.message : String(error);
+        }
+        processed.add(key);
+        state.run.index = processed.size;
+        state.run.updatedAt = new Date().toISOString();
+        continue;
+      }
+
       if (collected.has({ applicationId: rowId, name: row.name })) {
         processed.add(key);
         state.run.skipped += 1;

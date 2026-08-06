@@ -1134,6 +1134,87 @@ test("the next applicant is only scanned once the panel is showing them", async 
   assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
 });
 
+test("the list pass collects every applicant's name across every page, opening nobody", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+
+  // The record: the name and the two ids, and deliberately nothing else. The row
+  // also renders a headline and a location, and taking them would mean deciding
+  // that line two is the headline and line three is the location — positional
+  // guessing on generated markup, which rule 11 refuses.
+  const record = Applicants.buildApplicantListRecord({
+    name: "Neeshu Kalkhanday · 2nd",
+    href: "https://www.linkedin.com/hiring/applicants/?applicationId=35141729733&jobId=4277798308",
+    job: { id: "4277798308", title: "Human Resources Executive" },
+    sourceUrl: APPLICANTS_URL,
+    buildId: "test"
+  });
+  assert.equal(record.applicant.name, "Neeshu Kalkhanday", "the degree badge is stripped as it is everywhere else");
+  assert.equal(record.applicationId, "35141729733", "keyed on the application the row leads to");
+  assert.equal(record.job.id, "4277798308");
+  assert.equal(record.job.title, "Human Resources Executive", "the job header read once is carried");
+  assert.equal(record.applicant.profileUrl, null, "a row shows no profile URL, so none is invented");
+  assert.equal(record.applicant.currentRole, null);
+  assert.equal(record.applicant.resume.available, false);
+  assert.deepEqual(record.applicant.experience, []);
+  // Provenance, so a name-only record is distinguishable from a full extraction
+  // that found nothing — the two call for opposite responses.
+  assert.equal(record.extraction.rawData.list_row, "Neeshu Kalkhanday");
+
+  // A name-only record is NOT collected, deliberately: `isCollectedApplicant`
+  // needs one substantive field, so a later full run still visits this person
+  // rather than walking past them forever.
+  assert.equal(Applicants.isCollectedApplicant(record), false,
+    "a listed applicant is not a collected one — the full pass must still open them");
+
+  // And a blank field can never erase a full one, which is what makes running
+  // the list pass first safe. (Locked in its own right by "a thinner later read
+  // never erases a fuller stored one"; asserted here because this feature is
+  // what would otherwise trigger it on every row.)
+  const enriched = Applicants.mergeApplicantRecord(
+    Applicants.normalizeApplicantRecord({
+      ...record,
+      applicant: { ...record.applicant, currentRole: "HR Executive" }
+    }),
+    record
+  );
+  assert.equal(enriched.applicant.currentRole, "HR Executive", "a later blank must not wipe what is stored");
+
+  // The walk: same loop, same pagination, the panel step not taken.
+  const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("async function runEveryApplicant"));
+  assert.match(run, /if \(options\.listOnly === true\) \{/, "the list pass is a branch of the one walk");
+  // The LAST of the two `listOnly` branches — the first reads the job header
+  // once, this one is the per-row work.
+  const pass = run.slice(run.lastIndexOf("if (options.listOnly === true) {"), run.indexOf("if (collected.has({ applicationId: rowId"));
+  assert.ok(pass.length > 200, "the list-pass branch must be found, not an empty slice");
+  assert.ok(!/selectApplicantRow/.test(pass), "no row is clicked");
+  assert.ok(!/extractApplicant\(/.test(pass), "and no panel is read");
+  assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
+  assert.match(pass, /type: "PV_APPLICANT_SAVE", record/, "each name is saved as it is read");
+  assert.match(pass, /processed\.add\(key\)/, "and the row is retired by identity, like every other outcome");
+
+  // The profile extraction is STOPPED, never removed: `extractApplicant` and
+  // everything it drives is still here and still the only path for a full run.
+  assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
+  assert.match(run, /const \{ record \} = await extractApplicant\(options\);/, "and still be what a full run calls");
+
+  // The job header is read ONCE. It sits above both columns and does not change
+  // as the list is walked, so reading it per row would be hundreds of forced
+  // layouts for one unchanging answer.
+  assert.match(run, /let listJob = null;\s*if \(options\.listOnly === true\) \{/, "the job is read once per run");
+  assert.equal((run.match(/readJob\(jobAccumulator\)/g) || []).length, 1, "exactly once");
+
+  // Its own button, exactly as the connections surface has always had "Find All
+  // Connections" beside "Start Profile Extraction".
+  assert.match(ui, /Collect Applicant List/, "the list pass needs its own control");
+  assert.match(ui, /collectList = \(\) => this\.command\([\s\S]{0,400}?\{ options: \{ listOnly: true \} \}/,
+    "which asks for a list pass and nothing else");
+  // `listOnly` travels with the armed options, so returning to the tab resumes a
+  // list pass as a list pass rather than starting to open people.
+  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading the applicant list/,
+    "and rides the same command, so the auto-run remembers it");
+});
+
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));

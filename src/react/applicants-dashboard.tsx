@@ -205,6 +205,21 @@ class ApplicantsApp extends React.Component {
     { options: { recollect: this.state.recollect } }
   );
 
+  /**
+   * Every applicant's NAME, across every page, opening nobody.
+   *
+   * The same command and the same walk as Collect Every Applicant — including
+   * the pagination and the resume-after-a-reload — with the panel step not
+   * taken. `listOnly` travels with the armed options, so returning to the tab
+   * resumes a list pass as a list pass rather than starting to open people.
+   */
+  collectList = () => this.command(
+    APPLICANT_MESSAGES.COLLECT_ALL,
+    "Reading the applicant list, page by page…",
+    "Running. Each name is saved as it is read — you can close this page.",
+    { options: { listOnly: true } }
+  );
+
   stopEverything = () => this.command(
     STOP_ALL,
     "Stopping…",
@@ -304,6 +319,17 @@ class ApplicantsApp extends React.Component {
         <section className="toolbar primary-actions">
           <button className="primary" type="button" disabled={busy} onClick={this.collectCurrent}>
             Collect This Applicant
+          </button>
+          {/*
+            The list pass, and its own button on purpose — the connections
+            surface has always had "Find All Connections" beside "Start Profile
+            Extraction" for exactly this reason. Reading 665 applicants' panels
+            takes hours; reading their rows takes a walk down the list, and
+            "who applied" is a different question from "what is on their
+            profile". Nothing is opened, so nothing is clicked but the pager.
+          */}
+          <button className="primary" type="button" disabled={busy} onClick={this.collectList}>
+            Collect Applicant List
           </button>
           <button className="primary" type="button" disabled={busy} onClick={this.collectAll}>
             Collect Every Applicant

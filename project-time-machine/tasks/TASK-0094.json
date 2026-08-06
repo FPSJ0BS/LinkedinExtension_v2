@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0094",
+  "name": "Collect the applicant list across every page, saving each name without opening anybody",
+  "request": "Collect the applicant list across every page, saving each name without opening anybody",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:16:11.755Z",
+  "completedAt": "2026-08-06T08:19:02.500Z",
+  "startCommit": "894775f492ba79eb925a8c087bcd912bfa26e3c0",
+  "gitRef": "task/TASK-0094",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 426 tests, validate)"
+  ],
+  "result": "Requested outright: collect all applications across multiple pages in sequence, one at a time, save the applicant's name, then the next; page ends, then next page - like we did in connections. The connections surface has always had two commands for exactly this reason: Find All Connections enumerates the list without extracting anything, Start Profile Extraction reads what was found. Who applied and what is on their profile are different questions, and the second costs hours where the first costs a walk down the list. options.listOnly is a BRANCH of the one walk, not a second walk: same row loop, same identity ledger, same growApplicantList, same pagination (rule 9h), same conclusive-stop rule, same resume-after-a-reload. The only difference is what happens to a row - Applicants.buildApplicantListRecord() is built from the row itself and streamed with PV_APPLICANT_SAVE one at a time as it is read. Nothing is opened, so nothing is clicked but the pager: the list pass presses FEWER controls than the full run, so rule 9's budget is unchanged and no control was added. The name and the two ids and deliberately nothing else - the row also renders a headline and a location, and taking them would mean deciding that line two is the headline and line three the location, which is positional guessing on generated markup (rule 11) and worse than an empty field (rule 6). extraction.rawData.list_row records the provenance, because a name-only record and a full extraction that found nothing call for opposite responses. The job header is read once per run rather than per row, for the same forced-layout reason applicantRows() made its name lazy. A listed applicant is deliberately not a collected one, so a later full run still opens them. The profile extraction is STOPPED, not removed: extractApplicant and everything it drives is untouched and still the only path a full run takes, and a test asserts both halves. Its own button, Collect Applicant List, riding PV_APPLICANT_COLLECT_ALL so listOnly travels with the armed options and returning to the tab resumes a list pass as a list pass."
+}

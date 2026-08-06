@@ -658,6 +658,47 @@ on disk.
   puts one line per applicant in the console: where the address came from, whether the viewer closed,
   whether the file landed, and why not — the same discipline `logSectionScan` was written under.
 
+## The list pass — every applicant's name, across every page (3.7.10)
+
+**Requested outright: "collect all applications across multiple pages in sequence, one at a time,
+save the applicant's name, then the next one; page ends, then next page — like we did in
+connections."** The connections surface has always had two separate commands for exactly this reason:
+**Find All Connections** enumerates the list and saves rows without extracting anything, and **Start
+Profile Extraction** reads what was found. *Who applied* and *what is on their profile* are different
+questions, and the second costs hours where the first costs a walk down the list.
+
+- **`options.listOnly` is a branch of the one walk**, not a second walk. Same row loop, same identity
+  ledger, same `growApplicantList`, same pagination (rule 9h), same conclusive-stop rule, same
+  resume-after-a-reload. The only difference is what happens to a row: `Applicants.buildApplicantListRecord()`
+  is built from the row itself and streamed to the store with `PV_APPLICANT_SAVE`, one at a time as
+  it is read, exactly as the full run streams a finished applicant.
+- **Nothing is opened, so nothing is clicked but the pager.** `selectApplicantRow` and
+  `extractApplicant` are not reached. The list pass presses **fewer** controls than the full run, so
+  rule 9's budget is unchanged and no control is added.
+- **The name and the two ids, and deliberately nothing else.** The row also renders a headline and a
+  location; taking them would mean deciding that line two is the headline and line three is the
+  location — positional guessing on generated markup, which rule 11 refuses and rule 6 makes worse
+  than an empty field. `cleanApplicantName` still strips the `· 2nd` degree badge.
+  `extraction.rawData.list_row` records the provenance, because a name-only record and a full
+  extraction that found nothing call for opposite responses.
+- **The job header is read once per run**, not per row: it sits above both columns and does not
+  change as the list is walked, so reading it per row would be hundreds of forced layouts for one
+  unchanging answer — the same reason `applicantRows()` made its name a lazy getter.
+- **A listed applicant is not a collected one.** `isCollectedApplicant` needs one substantive field,
+  so a later full run still opens these people rather than walking past them forever. That is also
+  why the already-collected skip is not consulted during a list pass: it could never match, and
+  re-saving is one merge that cannot lose anything.
+- **Two earlier changes are what make running it first safe**, and neither is incidental:
+  `saveApplicant` reconciles on `job.id + applicationId` (rule 14, v6) so the later full pass enriches
+  *this* record instead of creating a second one under a different hash, and `mergeApplicantRecord`
+  protects every scalar field by field (3.7.10) so a blank never erases a stored value.
+- **The profile extraction is stopped, never removed.** `extractApplicant` and everything it drives
+  is untouched and is still the only path a full run takes; the list pass simply does not call it. A
+  test asserts both halves.
+- Its own button, **Collect Applicant List**, beside Collect Every Applicant. It rides
+  `PV_APPLICANT_COLLECT_ALL`, so `listOnly` travels with the armed options and returning to the tab
+  resumes a list pass *as a list pass* rather than starting to open people.
+
 ## Collecting every applicant (3.7.3, amended in 3.7.4 and 3.7.6)
 
 **A section that is not found produces no warning, only zeros — so the search has to report itself.**
