@@ -831,6 +831,26 @@
   const NAME_WORD_PATTERN = /^[A-ZÀ-ɏ][\w''À-ɏ.-]*$/u;
 
   /**
+   * An imperative control label — a thing to press, not a person.
+   *
+   * THE LIVE DEFECT: applicants were saved as **"Edit qualifications"**.
+   * `NAME_CHROME_PATTERN` is anchored at the start and does list `qualifications`,
+   * but the label leads with `Edit`, so it never reached that term; two
+   * capitalised words then satisfied every remaining test and the panel heading
+   * became the person. Exactly the failure that once saved six people as
+   * "Applicants", one verb further along.
+   *
+   * Matched as **verb + at least one more word**, which is what makes it a
+   * control phrase rather than a name. A bare `Edit` is deliberately still
+   * allowed: it is a real given name in Hungarian, and refusing it outright
+   * would trade a wrong name for a missing one on a real person. The verbs are
+   * only those that are not themselves given names — `Mark`, `Grant`, `Will`,
+   * `Rose` and `Art` are deliberately absent.
+   */
+  const NAME_CONTROL_PHRASE_PATTERN =
+    /^(?:edit|add|view|manage|download|upload|remove|delete|send|share|save|open|close|show|hide|see|filter|sort|select|deselect|expand|collapse|apply|invite|message|report|block|dismiss|refresh|update|create|copy|print|export|import|schedule|rate|compare|assign|archive|shortlist|reject|withdraw|advertise|post|browse|explore|discover|learn|start|continue|skip|back|next|previous|cancel|confirm|submit|search)\s+\S/i;
+
+  /**
    * Could this text be the applicant's name?
    *
    * Deliberately conservative. A wrong name is worse than an empty one: it is
@@ -841,6 +861,9 @@
     const text = cleanApplicantName(value);
     if (!text || text.length > 80) return false;
     if (NAME_CHROME_PATTERN.test(text)) return false;
+    // A control phrase is a thing to press, not a person: "Edit qualifications"
+    // led with a verb the chrome list could not see and became six people's name.
+    if (NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
     // An address, a count, a date or a duration is not a name.
     if (/@/.test(text) || /\d{3,}/.test(text)) return false;
     if (!/[A-Za-zÀ-ɏ]/.test(text)) return false;

@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0082",
+  "name": "Refuse an action control label such as Edit qualifications as an applicant name",
+  "request": "Refuse an action control label such as Edit qualifications as an applicant name",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T06:06:55.550Z",
+  "completedAt": "2026-08-06T06:08:40.175Z",
+  "startCommit": "0655a96d9233fc0df9f4bfeb9cfcf89174787a33",
+  "gitRef": "task/TASK-0082",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 423/423 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "verified against 25 cases directly: eleven control phrases refused, and every applicant name visible in the user's own screenshots accepted (Mahak Ayani, Aanchal Sharma, Gargi Kumari, Vandana Singh, Sufia Najeeb, Kumari Ashu, Sumika Tiwari, Aman Sharma, Sachindra N. Roy, Akash Srivastaava, Ajit Kumar Giri, Anil Kumar Yadav, Neeshu Kalkhanday, Kaushal)",
+    "verb-name collisions checked and kept working: Mark Zuckerberg, Grant Mitchell, Will Smith, Rose Byrne, Art Garfunkel all still names; the known trade-off is that 'Edit Kovacs' would be refused, and it is recorded in the code comment",
+    "NOT verified against live LinkedIn (rule 17): the label was read from the user's saved table, and that the correct name is now chosen on their live panel is unproven"
+  ],
+  "result": "Applicants were being saved as 'Edit qualifications'. NAME_CHROME_PATTERN is anchored at the start and does list 'qualifications', but the label leads with the verb Edit so it never reached that term; two capitalised words then satisfied every remaining test, and with no list-row name, no /in/ profile link and fewer than two qualification explanations to corroborate against, chooseApplicantName fell through to the first usable candidate - a panel heading. Exactly the failure that once saved six people as 'Applicants', one verb further along. Added NAME_CONTROL_PHRASE_PATTERN, matched as verb + at least one more word so it names a control phrase rather than a word, consulted inside isApplicantNameCandidate. The verb list deliberately excludes words that are themselves given names (Mark, Grant, Will, Rose, Art), and a bare 'Edit' is still accepted because it is a real Hungarian given name - refusing it would trade a wrong name for a missing one on a real person. The resume filename is derived from the same name, so it is corrected by the same change."
+}

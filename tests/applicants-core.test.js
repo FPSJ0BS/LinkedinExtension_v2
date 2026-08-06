@@ -335,9 +335,35 @@ test("page chrome is never saved as somebody's name", () => {
     assert.equal(Applicants.isApplicantNameCandidate(chrome), false, `"${chrome}" must never be a name`);
   }
 
-  // Real names still pass.
-  for (const name of ["Mahak Ayani", "Aanchal Sharma", "Gargi Kumari", "Jean-Luc Picard", "Ana María López"]) {
+  // The SECOND live defect of the same shape, reported from the saved table:
+  // every applicant came back named "Edit qualifications". The chrome list is
+  // anchored at the start and does contain `qualifications`, but the label leads
+  // with a verb, so it never reached that term — and two capitalised words then
+  // passed every remaining test. A control phrase is a thing to press.
+  for (const control of [
+    "Edit qualifications", "Edit screening questions", "Add note", "Download resume",
+    "Send message", "Manage coworkers", "Rate this candidate", "Schedule interview",
+    "Export applicants", "Search candidates", "Next page"
+  ]) {
+    assert.equal(Applicants.isApplicantNameCandidate(control), false, `"${control}" is a control, not a person`);
+  }
+
+  // Real names still pass — including every one from the reference account.
+  for (const name of [
+    "Mahak Ayani", "Aanchal Sharma", "Gargi Kumari", "Jean-Luc Picard", "Ana María López",
+    "Vandana Singh", "Sufia Najeeb", "Kumari Ashu", "Sumika Tiwari", "Aman Sharma",
+    "Sachindra N. Roy", "Akash Srivastaava", "Ajit Kumar Giri", "Anil Kumar Yadav",
+    "Neeshu Kalkhanday"
+  ]) {
     assert.equal(Applicants.isApplicantNameCandidate(name), true, `"${name}" is a name`);
+  }
+
+  // The verb list holds only words that are not themselves given names, and the
+  // phrase needs a SECOND word — so a bare "Edit", a real Hungarian given name,
+  // is still accepted rather than trading a wrong name for a missing one.
+  assert.equal(Applicants.isApplicantNameCandidate("Edit"), true, "a bare given name survives");
+  for (const given of ["Mark Zuckerberg", "Grant Mitchell", "Will Smith", "Rose Byrne", "Art Garfunkel"]) {
+    assert.equal(Applicants.isApplicantNameCandidate(given), true, `"${given}" is a person`);
   }
 
   // Neither is an address, a count, a date, or a sentence.
