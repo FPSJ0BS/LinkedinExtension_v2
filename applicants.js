@@ -2355,6 +2355,33 @@
     // link needs no click (rule 9e), and the recruiter asked for the file, not
     // for a preview. `isResumeDocumentUrl` still decides, so a route can never
     // be taken for a file here either.
+    /**
+     * Would pressing this control open a NEW TAB? Then it is never pressed.
+     *
+     * THE RUN-KILLER, and this repo already named it — `openAndSaveResume` in
+     * the worker was written for exactly this and says so: "when that control
+     * was an `<a target='_blank'>` LinkedIn opened a real tab, the applicants tab
+     * went hidden, `assertRunnable()` threw `hiddenPageError`, and
+     * `extractAllApplicants` broke out of its row loop". That worker path was
+     * later abandoned for the direct download, which left the CLICK unguarded —
+     * there is no `target` check anywhere on this surface.
+     *
+     * What the recruiter sees when it fires: the tab loses focus, extraction of
+     * that applicant throws `hidden`, the row is retried, and it is retried again
+     * — `MAX_HIDDEN_RETRIES` visits to the SAME person before it is recorded as
+     * failed and the walk moves on. "It goes to the same profile again and again
+     * before doing anything", exactly.
+     *
+     * Declining costs nothing that was being had: a control that navigates away
+     * never showed us a viewer to read in the first place. Its `href` is kept as
+     * the viewer address, and the no-open path above has already had its chance
+     * at the document. This is rule 9e's "a link needs no click" applied to the
+     * one control that cannot be clicked safely.
+     */
+    const controlTarget = cleanText(control.element.getAttribute?.("target"));
+    const opensNewTab = Boolean(controlTarget) && !/^_self$/i.test(controlTarget);
+    diagnostics.resume.opensNewTab = opensNewTab;
+
     const rendered = linkedUrl || findResumeDocumentUrl(null);
     diagnostics.resume.foundWithoutOpening = Boolean(rendered);
     // Observation only, and only worth the DOM walk when the viewer is about to
@@ -2365,7 +2392,7 @@
     let details = { filename: "", fileType: "", pages: null, text: "" };
     let url = rendered;
 
-    if (!url) {
+    if (!url && !opensNewTab) {
       // The page did not render it, so the viewer is the only place it exists.
       // Opened, read, and closed — never left open, never a new tab.
       assertRunnable();
@@ -2457,7 +2484,11 @@
         viewerUrl: viewerUrl || location.href,
         downloadStatus: Applicants.RESUME_STATUS.LINK_ONLY
       });
-      diagnostics.resume.reason = "no-document-url";
+      // Named apart, because the two are different problems: a viewer that
+      // showed no address is a markup question, while a control that would have
+      // opened a tab was never pressed at all — deliberately, and that is the
+      // one the recruiter would otherwise see as the run revisiting a profile.
+      diagnostics.resume.reason = opensNewTab ? "control-opens-new-tab" : "no-document-url";
       diagnostics.resume.status = Applicants.RESUME_STATUS.LINK_ONLY;
       await dismissResumeViewer(overlay, accumulator, diagnostics);
       return;

@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0084",
+  "name": "Never press a resume control that opens its own tab",
+  "request": "Never press a resume control that opens its own tab",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T06:30:34.631Z",
+  "completedAt": "2026-08-06T06:33:22.859Z",
+  "startCommit": "cb18b947c6e9e6899c4fed0d8e3af46f350ef087",
+  "gitRef": "task/TASK-0084",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 424/424 tests (up from 423, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "rule discipline followed: CLAUDE.md rule 9i's second PERMANENT clause was amended FIRST to name the new guard, then the two tests pinning the old if (!url) literal were updated; the guard is strictly stronger than the one it replaces, never looser, and the single-click assertion in that step still holds",
+    "git diff --check passed; scope is applicants.js, its test and the rule; click budget unchanged at seven; no secrets, no unrelated files",
+    "NOT verified against live LinkedIn (rule 17): whether the user's resume control actually carries target=_blank is exactly what diagnostics.resume.opensNewTab now reports, and it has not been read from a live run"
+  ],
+  "result": "The resume control was pressed without ever checking its target. This repo already named the consequence - openAndSaveResume() in background.ts was written for it and says verbatim that an <a target=_blank> resume control opens a real tab, the applicants tab goes hidden, assertRunnable() throws hiddenPageError and the row loop unwinds - but that worker path was abandoned for the direct download and left the click unguarded, with no target check anywhere on the surface. What the recruiter sees when it fires is the reported symptom exactly: the tab loses focus, extraction throws hidden, and the SAME applicant is retried MAX_HIDDEN_RETRIES times before being failed, so the run appears to visit one profile again and again before doing anything. The guard is now if (!url && !opensNewTab): any target other than _self means the control is never pressed, its href is still kept as viewerUrl, and diagnostics.resume.reason reports control-opens-new-tab distinctly from no-document-url because a viewer that showed no address and a control never pressed are different problems. Declining costs nothing that was being had - a control that navigates away never showed a viewer to read."
+}
