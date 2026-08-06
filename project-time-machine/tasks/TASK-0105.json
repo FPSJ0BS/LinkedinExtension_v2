@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "TASK-0105",
+  "name": "Rollback of TASK-0102 (Page forward instead of scrolling the applicant list to find rows)",
+  "request": "Rollback of TASK-0102 (Page forward instead of scrolling the applicant list to find rows)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-06T11:00:53.820Z",
+  "completedAt": "2026-08-06T11:00:56.134Z",
+  "startCommit": "9104943a09aee93d8a3774e37ff3728f36101b97",
+  "commit": null,
+  "gitRef": "task/TASK-0105",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-06T11-00-53-177Z created and verified"
+  ],
+  "result": "Reversed TASK-0102 — Page forward instead of scrolling the applicant list to find rows",
+  "target": {
+    "taskId": "TASK-0102",
+    "taskName": "Page forward instead of scrolling the applicant list to find rows",
+    "commit": "76979224cacd044b1bf9c1bfb59d86a330fbe9f1"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-06T11-00-53-177Z",
+    "commit": "9104943a09aee93d8a3774e37ff3728f36101b97"
+  }
+}
