@@ -291,9 +291,23 @@ commands are unrecoverable.
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
-      `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a
-      navigation and the DOM is briefly quiet between tearing the old applicant down and mounting the
-      new one, so both of those signals fire while the panel still shows the previous person. A row
+      the applicant that row leads to to be *mounted*, never for the address bar and never for the
+      panel's text to differ** (amended in 3.7.10) — LinkedIn routes without a navigation and the DOM
+      is briefly quiet between tearing the old applicant down and mounting the new one, so both of
+      those signals fire while the panel still shows the previous person. A text fingerprint is no
+      better and was the live defect: **the teardown alone satisfies it.** The moment the previous
+      panel is torn out the text changes, the wait returns, and the scan starts on an empty or
+      half-built column — where "the content stopped growing" is trivially true, so it settles at
+      once and moves on. That is the reported *"it moved to the next profile without even letting it
+      load"*, and it looks like a fixed timer while being nothing of the kind.
+      `selectApplicantRow` therefore waits in three steps —
+      **teardown** (best-effort and short, so arrival cannot be satisfied by the panel already on
+      screen), **arrival**, then **settle and confirm again** — and arrival is decided by
+      `Applicants.describePanelArrival()` from **identifiers only**: the application id on the panel's
+      own link (the address bar second, because it moves ahead of the render) and the member's `/in/`
+      slug, plus at least `PANEL_MIN_SECTIONS` (2) hydrated sections. `mountedApplicantPanel()` is the
+      strict resolver that may answer **null**, which is what makes "nothing is mounted" expressible
+      at all; `applicantPanel()` keeps the loose fallback for a scan already in flight. A row
       that never opens is **skipped**, not scanned; scanning anyway saved the previous applicant a
       second time under this row's identity. Since 3.7.3 a row whose applicant is **already saved for
       this job is walked past without being clicked at all** — see "Collecting every applicant" below.
@@ -867,11 +881,15 @@ save → click next applicant`. Every clause of it is load-bearing.
   and LinkedIn swaps only the right panel underneath.
 - **One click per applicant, and only a row of the left list** — `selectApplicantRow`, gated by
   `classifyApplicantControl` and proven inside the list (rule 9g), with exactly one `.click()`.
-- **Then it waits for the right panel**, on `panelIdentity()` changing rather than on the address bar,
-  and then for the DOM to go quiet so the shell has finished mounting. **Nothing may click again
+- **Then it waits for the right panel** — for *that applicant* to be **mounted**, decided by
+  `Applicants.describePanelArrival()` from identifiers rather than from the address bar or the
+  panel's text (rule 9g, amended in 3.7.10), then for the DOM to go quiet so the shell has finished
+  mounting, and then it **asks again**, because a re-mount during that quiet wait is exactly what
+  this clause exists to survive. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
   already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
-  rather than scanned as somebody else.
+  rather than scanned as somebody else — with the arrival verdict's own reason on `state.lastArrival`,
+  so "would not open" and "opened somebody else" are distinguishable.
 - **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
   `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
   document position and putting it back on the same frame. `scrollIntoView` stays the mechanism

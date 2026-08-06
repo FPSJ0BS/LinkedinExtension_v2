@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0103",
+  "name": "Wait for the applicant that row leads to to be mounted, never for the panel's text to differ",
+  "request": "Wait for the applicant that row leads to to be mounted, never for the panel's text to differ",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T10:27:27.317Z",
+  "completedAt": "2026-08-06T10:34:15.691Z",
+  "startCommit": "76979224cacd044b1bf9c1bfb59d86a330fbe9f1",
+  "gitRef": "task/TASK-0103",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 429 tests, validate)"
+  ],
+  "result": "The 'you moved to the next profile without even letting it load' half of the report, and it was never a fixed timer. selectApplicantRow waited for panelIdentity() - applicationId|text.length|first 300 chars - to DIFFER from the value taken before the click, and the teardown alone satisfies that: the moment LinkedIn tears the previous applicant's panel out the text changes, the wait returns, and the scan starts on an empty or half-built column, where 'the content stopped growing' is trivially true so it settles at once and moves on. Replaced with the question actually being asked: is the panel showing the application THIS ROW leads to, and has it finished mounting? Added Applicants.describePanelArrival() (pure, tested) returning torn-down / mounting / previous / other / arrived, decided from identifiers only - the application id on the panel's own link, the address bar second because it moves ahead of the render, the member's /in/ slug as the fallback for a row with no parseable id, and at least PANEL_MIN_SECTIONS hydrated sections. Split mountedApplicantPanel() out of applicantPanel(): the strict resolver may answer null, which is what makes 'nothing is mounted' expressible at all, while the loose fallback stays for a scan already in flight - without the split, everything asking WHO the panel shows had to accept a container holding the applicant list. selectApplicantRow now waits in three steps: teardown (best-effort and short, so arrival cannot be satisfied by the panel already on screen), arrival, then settle-and-confirm-again because a re-mount during the quiet wait is exactly what this surface keeps producing. A row that opens somebody else is now distinguishable from one that never opened, via state.lastArrival. Rule 9g and the PERMANENT flow clause were amended FIRST; the PERMANENT test asserts the same guarantee - wait for the right panel - against the stronger rule."
+}
