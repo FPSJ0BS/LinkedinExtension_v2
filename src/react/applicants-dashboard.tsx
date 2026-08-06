@@ -382,13 +382,14 @@ class ApplicantsApp extends React.Component {
     );
   }
 
-  renderRow(record: ApplicantRecord) {
+  renderRow(record: ApplicantRecord, position: number) {
     const checked = this.state.selectedIds.includes(record.id);
     return (
       <tr key={record.id} className={checked ? "selected" : ""}>
         <td className="select-cell">
           <input type="checkbox" checked={checked} onChange={() => this.toggleSelected(record.id)} aria-label={`Select ${record.applicant.name}`} />
         </td>
+        <td className="row-number" data-label="#">{position}</td>
         <td className="name-cell">
           {record.applicant.profileUrl
             ? <a href={record.applicant.profileUrl} target="_blank" rel="noreferrer">{show(record.applicant.name)}</a>
@@ -570,6 +571,12 @@ class ApplicantsApp extends React.Component {
                     aria-label="Select every applicant on this page"
                   />
                 </th>
+                {/* Position in the filtered list, counted from `start` so it
+                    runs continuously across pages rather than restarting at 1 on
+                    every page. It is a row number, never stored and never
+                    exported: the record's identity is its `id`, and a number
+                    that changes when a filter changes must not look like one. */}
+                <th className="row-number">#</th>
                 {/* The same class as the body cell, because the two are pinned
                     to the left as a pair — a header that scrolls away from the
                     column it names is worse than no pinning at all. */}
@@ -586,10 +593,12 @@ class ApplicantsApp extends React.Component {
             </thead>
             <tbody>
               {rows.length
-                ? rows.map((record) => this.renderRow(record))
+                ? rows.map((record, index) => this.renderRow(record, start + index + 1))
                 : (
                   <tr>
-                    <td className="empty" colSpan={APPLICANT_TABLE_COLUMNS.length + 2}>
+                    {/* +3: the select box, the row number and the actions cell
+                        are not table COLUMNS in the export sense. */}
+                    <td className="empty" colSpan={APPLICANT_TABLE_COLUMNS.length + 3}>
                       No applicants yet. Open your job's Applicants page on LinkedIn, then press Collect This Applicant.
                     </td>
                   </tr>

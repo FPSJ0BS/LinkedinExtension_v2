@@ -171,7 +171,12 @@ test("a wide table is navigable, not merely scrollable", async () => {
   const table = theme.slice(theme.indexOf(".table-wrap {"), theme.indexOf("/* Pagination"));
 
   assert.match(table, /position: sticky;\s*\n\s*top: 0;/, "the header stays, so a column is always named");
-  assert.match(table, /\.table-wrap \.name-cell \{[\s\S]{0,200}?position: sticky;\s*\n\s*left: var\(--pv-pin-1\)/,
+  // The pinned group is three wide since 3.7.9 — checkbox, row number, name —
+  // so the name's offset is the sum of the two before it. Expressed as a calc of
+  // the same variables the cells are sized by, so they cannot drift apart.
+  assert.match(table, /\.table-wrap \.row-number \{[\s\S]{0,240}?position: sticky;\s*\n\s*left: var\(--pv-pin-1\)/,
+    "the row number pins beside the checkbox");
+  assert.match(table, /\.table-wrap \.name-cell \{[\s\S]{0,200}?position: sticky;\s*\n\s*left: calc\(var\(--pv-pin-1\) \+ var\(--pv-pin-2\)\)/,
     "and the person pins to the left, so scrolling right never leaves anonymous cells");
   assert.match(table, /background-attachment: local, local, scroll, scroll;/,
     "with a shadow that says there is more to the right, and goes at the end");

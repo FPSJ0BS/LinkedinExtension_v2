@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "id": "TASK-0083",
+  "name": "Number the rows of the applicants table",
+  "request": "Number the rows of the applicants table",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T06:08:54.549Z",
+  "completedAt": "2026-08-06T06:12:08.179Z",
+  "startCommit": "b83209665c025a93b26cf1e083e3a6986125410d",
+  "gitRef": "task/TASK-0083",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "theme.css"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 423/423 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "the two guards that caught the change were updated deliberately and each records why: the CSV/header parity test now excludes '#' as a non-export column alongside 'Actions', and the pinned-column test asserts the new three-wide group rather than being relaxed",
+    "the empty-state colSpan was corrected from APPLICANT_TABLE_COLUMNS.length + 2 to + 3, since the row number is a third non-export cell",
+    "NOT verified in a browser (rule 17 in spirit): the sticky offsets are correct by construction and asserted in CSS, but the rendered table was not opened"
+  ],
+  "result": "Added a row-number column to the applicants table. It counts from the page offset so numbering runs continuously across pages instead of restarting at 1 on each, and it is pinned alongside the checkbox and the name because a number that scrolls away from the row it counts is worse than none. It is display only - never stored, never exported: the position depends on the current search, job, status and resume filters, so a number meaning something different per view must not reach the CSV, and the record's identity is still its id. The pinned group is now three wide, so the name column's sticky offset became calc(--pv-pin-1 + --pv-pin-2) using the same variables the cells are sized by, which is what stops the three drifting apart when one is resized."
+}

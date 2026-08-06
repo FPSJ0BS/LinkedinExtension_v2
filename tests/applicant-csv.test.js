@@ -99,7 +99,10 @@ test("the CSV columns start with the applicants table, column for column", async
   const head = page.slice(page.indexOf("<thead>"), page.indexOf("</thead>"));
   const headers = [...head.matchAll(/<th(?:\s[^>]*)?>([^<]+)<\/th>/g)]
     .map((match) => match[1].trim())
-    .filter((label) => label !== "Actions")
+    // Neither the row number nor the Actions cell is an export column: "#" is a
+    // position in the current filter, which changes when the filter does, and a
+    // number that means something different per view must never reach the CSV.
+    .filter((label) => label !== "Actions" && label !== "#")
     .map((label) => label.toLowerCase().replace(/ /g, "_"));
 
   assert.deepEqual([...Csv.APPLICANT_TABLE_COLUMNS], headers, "the exported list must match the rendered header");
