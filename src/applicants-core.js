@@ -1812,6 +1812,101 @@
     return (rows || []).filter((row) => !processed.has(applicantRowKey(row)));
   }
 
+  // ------------------------------------------------------------ panel arrival
+  /**
+   * Has the applicant we asked for actually mounted?
+   *
+   * **THE DEFECT THIS REPLACES: the panel was identified by its own text.** The
+   * fingerprint was `applicationId | text.length | text.slice(0, 300)`, and the
+   * caller's whole test was "that string is not what it was before the click".
+   * Two of those three fields are text, and the hiring surface is a single-page
+   * app that **re-mounts the detail column** — not on a browser reload, which
+   * would take the content script with it, but by tearing the old applicant's
+   * subtree out and building a new one in its place, several applicants into a
+   * run.
+   *
+   * A teardown changes the text. So does an empty panel, a spinner, a skeleton
+   * and a re-render of the *same* person. Every one of those satisfied "the
+   * fingerprint changed", and the run then scanned whatever was on screen: a
+   * half-mounted shell, or — when nothing scored two sections and the resolver
+   * fell back — a container holding the applicant *list*, which is how a record
+   * once came back named "Applicants".
+   *
+   * The question the caller is actually asking has an exact answer and it is not
+   * a diff: **is the panel now showing the application this row leads to, and has
+   * it finished mounting?** Both halves are structural. The id comes from the
+   * panel's own application link and from the address, never from prose; the
+   * mounting test is the same "at least two applicant sections" bar the panel
+   * resolver itself qualifies on, so a shell that has painted nothing cannot
+   * pass it.
+   *
+   * `identity` is the fallback for a row whose href carries no parseable id: a
+   * fingerprint built from links (the application id and the member's `/in/`
+   * slug) and still never from text, compared against the identity the panel had
+   * before the click. It can only ever say "somebody else is here now", which is
+   * weaker than the id test and is why the id test is preferred — but it is not a
+   * guess either, and a run must not stall on a layout that numbers its rows
+   * differently.
+   */
+  const PANEL_ARRIVAL = Object.freeze({
+    /** Nothing is mounted: the old applicant has gone and the new one has not arrived. */
+    TORN_DOWN: "torn-down",
+    /** A shell is up but the sections have not hydrated. */
+    MOUNTING: "mounting",
+    /** Still the applicant that was showing before the click. */
+    PREVIOUS: "previous",
+    /** Somebody, but not the person this row leads to. */
+    OTHER: "other",
+    ARRIVED: "arrived"
+  });
+
+  /**
+   * How many distinct applicant sections make a panel "mounted".
+   *
+   * The same bar the panel resolver scores on, deliberately: a container that
+   * would not qualify as the panel cannot be a panel that has arrived.
+   */
+  const PANEL_MIN_SECTIONS = 2;
+
+  function describePanelArrival({
+    expected = "",
+    applicationId = "",
+    identity = "",
+    previousIdentity = "",
+    sections = 0,
+    connected = false,
+    minSections = PANEL_MIN_SECTIONS
+  } = {}) {
+    const verdict = (state, reason) => ({ state, reason, arrived: state === PANEL_ARRIVAL.ARRIVED });
+    if (!connected) return verdict(PANEL_ARRIVAL.TORN_DOWN, "no panel is mounted");
+
+    const want = cleanText(expected).toLowerCase();
+    const has = cleanText(applicationId).toLowerCase();
+    const now = cleanText(identity).toLowerCase();
+    const was = cleanText(previousIdentity).toLowerCase();
+
+    if (want && has) {
+      // The authoritative test, and the only one that can tell "this is the
+      // wrong person" from "this person has not finished rendering".
+      if (has !== want) {
+        return now && now === was
+          ? verdict(PANEL_ARRIVAL.PREVIOUS, "the panel is still showing the previous applicant")
+          : verdict(PANEL_ARRIVAL.OTHER, "the panel is showing a different applicant");
+      }
+    } else if (was && now && now === was) {
+      // No id to compare, so the most that can be said is that nobody new is
+      // here yet. Deliberately not treated as arrival: a re-mount of the same
+      // person is exactly what this guard exists to notice.
+      return verdict(PANEL_ARRIVAL.PREVIOUS, "the panel has not changed applicant");
+    }
+
+    if (Number(sections) < Number(minSections)) {
+      return verdict(PANEL_ARRIVAL.MOUNTING, "the panel has not finished mounting");
+    }
+    if (want && !has) return verdict(PANEL_ARRIVAL.ARRIVED, "mounted, and no id was rendered to check it against");
+    return verdict(PANEL_ARRIVAL.ARRIVED, "mounted, and it is the applicant that was asked for");
+  }
+
   /**
    * Why a list walk stopped, and whether that answer is worth believing.
    *
@@ -1887,6 +1982,7 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     applicantRowKey, unprocessedApplicantRows,
+    PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement

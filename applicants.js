@@ -97,6 +97,14 @@
     extracting: null,
     running: null,
     run: Applicants.createRunState(),
+    /**
+     * Why the last row open ended the way it did.
+     *
+     * A row that will not open is otherwise indistinguishable from a row that
+     * opened somebody else, and both are reported as "could not open" — which
+     * is the sentence that tells a recruiter nothing. The verdict names which.
+     */
+    lastArrival: null,
     /** Set by Stop. Every loop checks it before it does anything else. */
     aborted: false,
     /**
@@ -675,7 +683,19 @@
    * came back named "Applicants". One row link is allowed, because the panel
    * legitimately links to the application it is showing; two or more is a list.
    */
-  function applicantPanel() {
+  /**
+   * The panel, **only when one is genuinely mounted** — null while LinkedIn is
+   * between applicants.
+   *
+   * This is the strict half of `applicantPanel()`, split out because two callers
+   * want opposite things from a torn-down panel. A scan in progress wants
+   * *something* to keep reading, so it takes the loose answer below. Anything
+   * deciding **who the panel is showing** wants the truth, and "no panel is
+   * mounted" is a truth the loose answer cannot express: its last resort is a
+   * container that holds the applicant list, and the first line of that
+   * container's text is the list's own heading.
+   */
+  function mountedApplicantPanel() {
     const candidates = [
       ...document.querySelectorAll("main,[role='main'],section,[class*='applicant'],[class*='profile-card'],[class*='detail']")
     ].filter((element) => element instanceof Element && isVisible(element) && !isExcludedContext(element));
@@ -687,7 +707,7 @@
       if (rowLinksIn(element) > 1) continue;
       const keys = new Set(headingsIn(element).map((heading) => heading.key).filter(Boolean));
       const score = keys.size;
-      if (score < 2) continue;
+      if (score < Applicants.PANEL_MIN_SECTIONS) continue;
       const size = (element.innerText || "").length;
       if (score > bestScore || (score === bestScore && size < bestSize)) {
         best = element;
@@ -695,7 +715,12 @@
         bestSize = size;
       }
     }
-    if (best) return best;
+    return best;
+  }
+
+  function applicantPanel() {
+    const mounted = mountedApplicantPanel();
+    if (mounted) return mounted;
 
     // Nothing qualified. Fall back to the widest container that is still not
     // the list, rather than to `document.body`, which always contains it.
@@ -3314,26 +3339,115 @@
   // row of the list. Never parallel, never a tab per applicant, and the stop
   // flag is checked before every single row.
 
-  /** A fingerprint of who the detail panel is currently showing. */
-  function panelIdentity() {
-    const panel = applicantPanel();
-    const text = cleanText(panel?.innerText || "");
-    const { applicationId } = Applicants.parseHiringContext(location.href);
-    return `${applicationId || ""}|${text.length}|${text.slice(0, 300)}`;
+  /**
+   * The application the panel is showing, from the panel's OWN link first.
+   *
+   * The address bar is the second source and never the only one, because on this
+   * surface it moves ahead of the render: LinkedIn routes the id in the moment a
+   * row is clicked, while the column it names is still being built. Asking the
+   * panel is asking the thing whose content is about to be read.
+   *
+   * `applicantPanel()` legitimately holds one application link — the one it is
+   * showing — which is exactly why the resolver refuses a candidate holding two.
+   */
+  function panelApplicationId(panel) {
+    if (panel?.isConnected) {
+      for (const anchor of panel.querySelectorAll("a[href]")) {
+        if (!isApplicantRowLink(anchor)) continue;
+        const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
+        if (id) return id;
+      }
+    }
+    return Applicants.parseHiringContext(location.href).applicationId || "";
   }
+
+  /**
+   * Who the panel is showing — built from links, never from its text.
+   *
+   * The old fingerprint was two thirds `innerText`, so a teardown, a spinner and
+   * a re-render of the same person all read as "a different applicant arrived".
+   * Everything here is an identifier: the application id and the member's own
+   * `/in/` slug. A panel that re-mounts showing the same person produces the
+   * same identity, which is the entire point.
+   */
+  function panelIdentity(panel = mountedApplicantPanel()) {
+    const live = panel?.isConnected ? panel : null;
+    const application = panelApplicationId(live);
+    let profile = "";
+    if (live) {
+      const anchor = [...live.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
+      if (anchor) profile = Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "");
+    }
+    return [application ? `id:${application}` : "", profile ? `in:${profile}` : ""].filter(Boolean).join("|");
+  }
+
+  /** How many distinct applicant sections have hydrated in the panel. */
+  function panelSectionCount(panel) {
+    if (!panel?.isConnected) return 0;
+    return new Set(headingsIn(panel).map((heading) => heading.key).filter(Boolean)).size;
+  }
+
+  /**
+   * Is the panel showing `expected`, and has it finished mounting?
+   *
+   * The DOM half of `Applicants.describePanelArrival` — this reads the page, the
+   * core decides. `mountedApplicantPanel()` rather than `applicantPanel()` on
+   * purpose: the loose resolver answers with a container that holds the
+   * applicant list when nothing is mounted, and "the list is on screen" must
+   * never be able to look like "the applicant arrived".
+   */
+  function describeApplicantArrival(expected, previousIdentity) {
+    const panel = mountedApplicantPanel();
+    return Applicants.describePanelArrival({
+      expected,
+      applicationId: panel ? panelApplicationId(panel) : "",
+      identity: panelIdentity(panel),
+      previousIdentity,
+      sections: panelSectionCount(panel),
+      connected: Boolean(panel)
+    });
+  }
+
+  /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
+  const PANEL_TEARDOWN_TIMEOUT_MS = 4000;
+  /** How long the applicant that was asked for has to mount before the row is skipped. */
+  const PANEL_ARRIVAL_TIMEOUT_MS = 12000;
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
    *
-   * The live defect: this waited for the address to change and then for the DOM
-   * to go quiet. Neither means the panel has re-rendered — LinkedIn routes
-   * without a full navigation, and the DOM is briefly quiet between tearing the
-   * old applicant down and mounting the new one. So the scan started on the
-   * previous applicant's panel or on an empty one, which is why every row after
-   * the first came back with no role, no company and no name.
+   * TWO defects, one after the other, and the second is what this replaces.
    *
-   * The condition is now the only one that means anything: the panel's own
-   * fingerprint has changed from the one it had before the click.
+   * First it waited for the address to change and the DOM to go quiet. Neither
+   * means the panel re-rendered — LinkedIn routes without a navigation, and the
+   * DOM is briefly quiet *between* tearing the old applicant down and mounting
+   * the new one — so the scan started on the previous applicant or on an empty
+   * column.
+   *
+   * Then it waited for a text fingerprint to differ from the one taken before
+   * the click. That is satisfied by the teardown itself. Several applicants into
+   * a run LinkedIn re-mounts the whole detail column, and during that re-mount
+   * nothing scores two sections, so the panel resolver falls back to a container
+   * holding the applicant list — a large, very different piece of text. The
+   * fingerprint duly changed, the row was reported open, and the scan read a
+   * half-built shell or the list itself.
+   *
+   * What is waited for now is what was always meant: **the applicant this row
+   * leads to, mounted.** In three steps, because a re-mount has three phases and
+   * conflating them is what went wrong.
+   *
+   *   1. **Teardown** — the panel we were holding goes away, or stops being that
+   *      applicant. Best-effort and short: LinkedIn may swap content in place
+   *      fast enough that no torn-down state is ever observable, and that is not
+   *      a failure. It is here so that step 2 cannot be satisfied by the panel
+   *      that was already on screen.
+   *   2. **Arrival** — a mounted panel, at least `PANEL_MIN_SECTIONS` sections
+   *      hydrated, showing this row's own application id. Not "different from
+   *      before".
+   *   3. **Settle**, and then **confirm again**. A panel that arrives and is
+   *      immediately re-mounted underneath the quiet wait is precisely the case
+   *      this whole change is about, so the answer is re-read after the wait
+   *      rather than assumed to have survived it.
    */
   async function selectApplicantRow(row) {
     const list = applicantList();
@@ -3346,19 +3460,37 @@
     if (!verdict.allowed) return false;
 
     const control = { element: row.control, verdict };
-    const before = panelIdentity();
+    const expected = Applicants.parseHiringContext(row.href).applicationId || "";
+    const heldPanel = mountedApplicantPanel();
+    const before = panelIdentity(heldPanel);
     control.element.click();
 
-    const changed = await waitFor(() => panelIdentity() !== before, {
-      timeoutMs: 12000,
-      pollMs: 200,
-      label: "applicant-panel"
-    });
-    // Then let it finish mounting. A panel that changed is not a panel that has
-    // arrived: the sections hydrate after the shell, and the scan's own quiet
-    // count takes it from here.
+    // 1. Teardown, best-effort: a null result here means the column was reused
+    //    in place, which the arrival test below handles on its own merits.
+    await waitFor(() => {
+      if (heldPanel && !heldPanel.isConnected) return true;
+      const now = mountedApplicantPanel();
+      return !now || panelIdentity(now) !== before;
+    }, { timeoutMs: PANEL_TEARDOWN_TIMEOUT_MS, pollMs: 120, label: "applicant-panel-teardown" });
+
+    // 2. Arrival: this applicant, mounted. `waitFor` returns the verdict itself,
+    //    so a timeout is a null and the row is skipped rather than scanned.
+    const arrival = await waitFor(() => {
+      const seen = describeApplicantArrival(expected, before);
+      return seen.arrived ? seen : null;
+    }, { timeoutMs: PANEL_ARRIVAL_TIMEOUT_MS, pollMs: 200, label: "applicant-panel" });
+
+    // 3. Then let it finish hydrating — a panel that has arrived is not a panel
+    //    that is complete; the scan's own quiet count takes it from here — and
+    //    re-ask, because a re-mount during that wait would otherwise go unseen.
     await waitForDomQuiet(450, 4000);
-    return Boolean(changed);
+    const settled = describeApplicantArrival(expected, before);
+    if (!arrival || !settled.arrived) {
+      state.lastArrival = settled;
+      return false;
+    }
+    state.lastArrival = settled;
+    return true;
   }
 
   /**
@@ -4084,7 +4216,13 @@
           if (!opened) {
             processed.add(key);
             state.run.skipped += 1;
-            state.run.lastError = `Could not open ${row.name || "the next applicant"}.`;
+            // Named, not merely counted: "could not open" covers a row that
+            // never responded and a panel that mounted somebody else, and only
+            // the second one means LinkedIn re-mounted the column underneath
+            // the run. The arrival verdict is the one thing that tells them
+            // apart, so it is what the recruiter is shown.
+            const why = state.lastArrival?.reason ? ` (${state.lastArrival.reason})` : "";
+            state.run.lastError = `Could not open ${row.name || "the next applicant"}${why}.`;
             state.run.index = processed.size;
             continue;
           }

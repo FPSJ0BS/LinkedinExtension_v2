@@ -984,7 +984,7 @@ test("the resume is downloaded, not previewed, whenever the page already has the
 
 test("the detail panel can never be a container that holds the applicant list", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const panel = source.slice(source.indexOf("function applicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
+  const panel = source.slice(source.indexOf("function mountedApplicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
 
   // The live defect: a wrapper around both columns satisfies "two sections", so
   // it won, and the first line of its text was the list's heading.
@@ -992,6 +992,18 @@ test("the detail panel can never be a container that holds the applicant list", 
   assert.ok(!/return best \|\| document\.querySelector\("main"\) \|\| document\.body;\s*\n\s*}\s*\n\s*\/\*\* A link/.test(source),
     "the fallback must not be document.body, which always contains the list");
   assert.match(panel, /rowLinksIn\(element\) <= 1/, "even the fallback must exclude the list");
+
+  // The scoring resolver may answer NULL, and that is what makes "nothing is
+  // mounted" expressible. Without it, everything asking WHO the panel is
+  // showing had to accept the loose fallback's answer, and mid-re-mount that
+  // answer is a container holding the list — the defect above, returning by the
+  // one door that was left open.
+  assert.match(panel, /let best = null;[\s\S]*?return best;\s*\}\s*function applicantPanel\(\)/,
+    "the strict resolver returns null when nothing qualifies");
+  assert.match(panel, /function applicantPanel\(\) \{\s*const mounted = mountedApplicantPanel\(\);/,
+    "and the loose one is built on it, so there is one scoring rule");
+  assert.match(panel, /score < Applicants\.PANEL_MIN_SECTIONS/,
+    "with the same section bar the arrival policy judges a mounted panel by");
 
   // One row link is fine — the panel legitimately links to the application it
   // is showing. Two or more is a list.
@@ -1033,22 +1045,104 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("async function loadEveryApplicantRow"));
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
 
   // The live defect: waiting for the address to change and the DOM to go quiet
   // meant the scan started on the previous applicant's panel or on an empty
   // one, so every row after the first had no name, role or company.
-  assert.match(source, /function panelIdentity\(\)/, "the panel must have a fingerprint");
-  assert.match(select, /const before = panelIdentity\(\)/, "taken before the click");
-  assert.match(select, /waitFor\(\(\) => panelIdentity\(\) !== before/, "and waited on after it");
   assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
   assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
+
+  // And the defect after it: a TEXT fingerprint, which the teardown alone
+  // satisfies. LinkedIn re-mounts the detail column several applicants into a
+  // run; nothing scores two sections while it does, so `applicantPanel()` fell
+  // back to a container holding the applicant list and the fingerprint duly
+  // "changed" — a half-built shell reported as an applicant who had arrived.
+  assert.match(source, /function panelIdentity\(panel = mountedApplicantPanel\(\)\)/,
+    "the panel's identity must be asked of a MOUNTED panel");
+  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function panelSectionCount"));
+  assert.ok(!/innerText/.test(identity), "identity must never be built from the panel's text");
+  assert.match(identity, /application \? `id:\$\{application\}` : ""/, "the application id is the identity");
+  assert.match(identity, /profile \? `in:\$\{profile\}` : ""/, "with the member's own slug beside it");
+
+  // Arrival is "this applicant, mounted", decided by the tested pure policy.
+  assert.match(select, /const expected = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
+    "the row states which applicant is expected, from its own href");
+  assert.match(select, /describeApplicantArrival\(expected, before\)/, "and arrival is judged against it");
+  assert.match(source, /function describeApplicantArrival\(expected, previousIdentity\) \{[\s\S]{0,600}?Applicants\.describePanelArrival\(\{/,
+    "the adapter reads the DOM; the core decides");
+  assert.match(source, /const panel = mountedApplicantPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
+    "and 'nothing is mounted' must be expressible, so the STRICT resolver is used");
+
+  // Three steps, in order: teardown, then arrival, then settle-and-confirm.
+  assert.ok(
+    select.indexOf("applicant-panel-teardown") < select.indexOf("const arrival = await waitFor"),
+    "teardown is waited for first, so arrival cannot be satisfied by the panel already on screen"
+  );
+  assert.ok(
+    select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
+    "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
+  );
+  assert.match(select, /if \(!arrival \|\| !settled\.arrived\) \{[\s\S]{0,200}?return false;/,
+    "either half failing is a row that did not open");
 
   // A row that never opened is a skip, not a record — scanning anyway would
   // save the previous applicant a second time under this row's identity.
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
   assert.match(run, /const opened = await selectApplicantRow\(row\)/, "the result must be checked");
   assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
+  // "Could not open" covers a row that never responded AND a panel that mounted
+  // somebody else. Only the second means the column was re-mounted underneath
+  // the run, so the verdict's reason is carried to the recruiter.
+  assert.match(run, /state\.lastArrival\?\.reason/, "the reason a row did not open must be reported");
+});
+
+test("a re-mounted panel is not mistaken for the next applicant arriving", () => {
+  const ARRIVAL = Applicants.PANEL_ARRIVAL;
+  const arrival = (patch) => Applicants.describePanelArrival({
+    expected: "111", applicationId: "111", identity: "id:111", previousIdentity: "id:222",
+    sections: 4, connected: true, ...patch
+  });
+
+  // The happy case: this applicant, hydrated.
+  assert.equal(arrival({}).state, ARRIVAL.ARRIVED);
+  assert.equal(arrival({}).arrived, true);
+
+  // THE DEFECT. Mid-re-mount there is no panel at all — and the old text
+  // fingerprint read that as "a different applicant has arrived", because the
+  // resolver fell back to a container holding the list and the text changed.
+  assert.equal(arrival({ connected: false }).state, ARRIVAL.TORN_DOWN);
+  assert.equal(arrival({ connected: false }).arrived, false);
+
+  // A shell that has painted but not hydrated is not an arrival either. The bar
+  // is the same one the panel resolver itself qualifies on.
+  assert.equal(arrival({ sections: 1 }).state, ARRIVAL.MOUNTING);
+  assert.equal(arrival({ sections: Applicants.PANEL_MIN_SECTIONS }).state, ARRIVAL.ARRIVED);
+
+  // The previous applicant still on screen, and somebody else entirely, are
+  // different facts and must not be reported as the same one: only the second
+  // means LinkedIn opened a row other than the one that was clicked.
+  assert.equal(arrival({ applicationId: "222", identity: "id:222" }).state, ARRIVAL.PREVIOUS);
+  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).state, ARRIVAL.OTHER);
+  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).arrived, false);
+
+  // A row whose href carries no parseable id still has to be walkable, so the
+  // link fingerprint stands in — it can only say "nobody new is here yet",
+  // which is weaker than the id test and never a guess.
+  const unnumbered = (patch) => Applicants.describePanelArrival({
+    expected: "", applicationId: "", previousIdentity: "in:linkedin.com/in/asha", sections: 3, connected: true, ...patch
+  });
+  assert.equal(unnumbered({ identity: "in:linkedin.com/in/asha" }).state, ARRIVAL.PREVIOUS,
+    "a panel that has not changed applicant has not arrived");
+  assert.equal(unnumbered({ identity: "in:linkedin.com/in/bhavna" }).state, ARRIVAL.ARRIVED);
+
+  // A mounted panel that rendered no id at all is accepted rather than stalling
+  // the run — stated in the verdict, so nothing pretends it was checked.
+  const unchecked = Applicants.describePanelArrival({
+    expected: "111", applicationId: "", identity: "", previousIdentity: "id:222", sections: 3, connected: true
+  });
+  assert.equal(unchecked.state, ARRIVAL.ARRIVED);
+  assert.match(unchecked.reason, /no id was rendered/);
 });
 
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
@@ -2356,15 +2450,22 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   assert.match(select, /inContainer: Boolean\(list && list\.contains\(row\.control\)\)/, "proven inside the left list");
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "and clicked exactly once per applicant");
 
-  // 3 + 5. After the click it WAITS for the right panel to become a different
-  //    applicant, then lets it finish mounting. No second click can happen while
-  //    a profile is still loading, because the caller only advances on the
-  //    resolved value.
-  assert.match(select, /const before = panelIdentity\(\);[\s\S]{0,200}?click\(\)/,
+  // 3 + 5. After the click it WAITS for the right panel to be showing THIS
+  //    applicant, mounted, then lets it finish hydrating and asks again. No
+  //    second click can happen while a profile is still loading, because the
+  //    caller only advances on the resolved value.
+  //
+  //    Amended in 3.7.10 with rule 9g, which it locks: "wait for the right
+  //    panel" is unchanged and is the permanent clause — what changed is that a
+  //    text fingerprint was never a way to tell whether the right panel was
+  //    there, since the teardown alone satisfied it.
+  assert.match(select, /const before = panelIdentity\(heldPanel\);[\s\S]{0,120}?click\(\)/,
     "the panel's identity is taken before the click");
-  assert.match(select, /await waitFor\(\(\) => panelIdentity\(\) !== before/,
-    "and the click is followed by waiting for the panel to actually change");
-  assert.match(select, /await waitForDomQuiet\([\s\S]{0,80}?return Boolean\(changed\);/,
+  assert.ok(!/panelIdentity\(\) !== before/.test(select),
+    "and 'the fingerprint differs' must not come back: a teardown satisfies it");
+  assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
+    "the click is followed by waiting for THIS applicant to be mounted");
+  assert.match(select, /await waitForDomQuiet\([\s\S]{0,400}?return true;/,
     "then the panel is allowed to finish mounting before the caller proceeds");
 
   // The caller does not re-click an applicant already shown, and treats a row

@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0085",
+  "name": "Confirm an applicant by identity and a mounted panel, never by panel text",
+  "request": "Confirm an applicant by identity and a mounted panel, never by panel text",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T06:45:00.981Z",
+  "completedAt": "2026-08-06T06:51:12.367Z",
+  "startCommit": "73ef0a7da078683e705103b33b86a9eb365e2239",
+  "gitRef": "task/TASK-0085",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 425 tests, validate)"
+  ],
+  "result": "selectApplicantRow now waits for the applicant that row leads to to be MOUNTED, decided from identifiers instead of the panel's text. The old fingerprint was applicationId|text.length|text.slice(0,300) and the whole test was 'that string differs from before the click' - which the teardown alone satisfies. Several applicants into a run LinkedIn re-mounts the detail column; while it does, nothing scores two sections, so applicantPanel() fell back to a container holding the applicant list and the fingerprint duly changed. The row was reported open and the scan read a half-built shell or the list itself. Added Applicants.describePanelArrival() (pure, tested): torn-down / mounting / previous / other / arrived, from the application id on the panel's own link (the address bar second, because it moves ahead of the render), the member's /in/ slug, and at least PANEL_MIN_SECTIONS hydrated sections. Split mountedApplicantPanel() out of applicantPanel() so 'nothing is mounted' is expressible at all - the loose fallback stays for a scan already in flight. selectApplicantRow waits in three steps: teardown (best-effort, short, so arrival cannot be satisfied by the panel already on screen), arrival, then settle-and-confirm-again because a re-mount during the quiet wait is the case this exists for. A row that opens somebody else is now distinguishable from one that never opened, and the verdict's reason reaches state.run.lastError. Rule 9g and the PERMANENT flow clause were amended FIRST; the PERMANENT test asserts the same guarantee against the stronger rule."
+}
