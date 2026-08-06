@@ -118,7 +118,7 @@ test("queue-db exposes the persistence surface the orchestrator relies on", () =
 test("the import queue uses the existing database under a new schema version", async () => {
   const source = await readFile(resolve(root, "src/db.js"), "utf8");
   assert.match(source, /DB_NAME = "profile-table-collector"/, "the database name must never change");
-  assert.match(source, /DB_VERSION = 5/, "v5 adds the applicant and job stores on top of v4's indexes");
+  assert.match(source, /DB_VERSION = 6/, "v6 indexes an applicant by the application it belongs to");
   assert.match(source, /QUEUE_STORE = "importQueue"/);
   assert.match(source, /SESSION_STORE = "importSession"/);
   assert.match(source, /createObjectStore\(QUEUE_STORE, \{ keyPath: "url" \}\)/, "the queue is keyed by profile URL so duplicates cannot be stored");
@@ -139,6 +139,51 @@ test("the v5 upgrade adds the applicant stores without disturbing the existing o
     upgrade.indexOf("APPLICANT_STORE") > upgrade.indexOf("SESSION_STORE"),
     "the new stores are added after the existing ones, never in place of them"
   );
+});
+
+test("v6 indexes an applicant by the application, so one application is one record", async () => {
+  const source = await readFile(resolve(root, "src/db.js"), "utf8");
+  const opener = source.slice(source.indexOf("export function openDatabase"));
+  const upgrade = opener.slice(opener.indexOf("request.onupgradeneeded"), opener.indexOf("request.onsuccess"));
+
+  assert.match(source, /APPLICATION_INDEX = "applicationId"/, "the index has one named constant");
+  assert.match(upgrade, /createIndex\(APPLICATION_INDEX, "applicationId"/, "on the record's own application id");
+  // Applied to a store that already exists, not only to a freshly created one:
+  // every user who has collected an applicant is on v5 with the store already
+  // there, so an index added inside the `!contains(APPLICANT_STORE)` branch
+  // would never be created for any of them.
+  assert.match(upgrade, /if \(db\.objectStoreNames\.contains\(APPLICANT_STORE\)\) \{[\s\S]{0,400}?createIndex\(APPLICATION_INDEX/,
+    "the index must be added to a store that already exists");
+  assert.match(upgrade, /if \(!applicants\.indexNames\.contains\(APPLICATION_INDEX\)\)/, "and only once");
+  // Additive only. Rolling back to v5 must cost this lookup and nothing else.
+  assert.ok(!/deleteObjectStore/.test(upgrade), "v6 must not delete a store either");
+  assert.ok(!/deleteIndex/.test(upgrade.slice(upgrade.indexOf("v6:"))), "nor an index");
+
+  // THE DEFECT IT PREVENTS. `applicantId` hashes jobId|profileUrl|name|applicationId,
+  // so how much of a person was known when they were written decides their key:
+  // a pass reading only the list row knows no profile URL, a pass that opens the
+  // panel does. Same person, same application, two hashes, two records.
+  await import("../src/extraction-core.js");
+  await import("../src/applicants-core.js");
+  const Applicants = globalThis.ProfileVaultApplicants;
+  const fromRow = Applicants.applicantId("4277798308", "", "Kaushal Kumar", "35141729733");
+  const fromPanel = Applicants.applicantId(
+    "4277798308", "https://www.linkedin.com/in/kaushal-kumar", "Kaushal Kumar", "35141729733"
+  );
+  assert.notEqual(fromRow, fromPanel, "the two passes genuinely hash differently — that is the whole problem");
+
+  const db = await readFile(resolve(root, "src/applicant-db.js"), "utf8");
+  assert.match(db, /async function findStoredApplication\(record\)/, "so the application is looked up as well as the id");
+  assert.match(db, /const existing = \(await getApplicant\(incoming\.id\)\) \|\| \(await findStoredApplication\(incoming\)\)/,
+    "before a second record can be created");
+  // Scoped to the job: the index is on the application id alone, and an applicant
+  // is a person *on a job*.
+  assert.match(db, /String\(candidate\?\.job\?\.id \|\| ""\)\.trim\(\) === jobId/, "and matched within the job");
+  // A database opened before v6 has the store but not the index. Answering
+  // "nothing stored" costs the duplicate this prevents; throwing would cost
+  // every save.
+  assert.match(db, /if \(!store\.indexNames\.contains\(APPLICATION_INDEX\)\) return Promise\.resolve\(\[\]\)/,
+    "a pre-v6 database must not throw on every save");
 });
 
 test("the v4 upgrade indexes what the record now has and retires what it does not", async () => {

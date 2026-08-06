@@ -13,7 +13,7 @@
  * arrangement `normalizeProfile` gives the saved profiles.
  */
 import "./applicants-core.js";
-import { APPLICANT_STORE, JOB_STORE, requestAsPromise, withNamedStore } from "./db.js";
+import { APPLICANT_STORE, APPLICATION_INDEX, JOB_STORE, requestAsPromise, withNamedStore } from "./db.js";
 
 const Applicants = /** @type {any} */ (globalThis).ProfileVaultApplicants;
 
@@ -58,15 +58,54 @@ export async function getApplicant(id) {
 }
 
 /**
+ * The record already stored for this application, whatever id it was written
+ * under.
+ *
+ * **Why an id lookup is not enough.** `applicantId` hashes
+ * `jobId|profileUrl|name|applicationId`, so *how much of a person was known when
+ * they were written* decides their key. A pass that reads only the list row
+ * knows the job, the application and the name but no profile URL; a pass that
+ * opens the panel knows all four. Same person, same application, two hashes, two
+ * records — and the second one silently, because nothing ever compared them.
+ *
+ * The application id is what actually identifies "this person on this job" —
+ * it is the whole reason the record is keyed on the pair at all — so it is asked
+ * first. Scoped to the job as well, because the index is on the application id
+ * alone and a stored record with a blank job must not match a real one.
+ *
+ * Returns null when either half is missing, which is deliberate: a record with
+ * no application id has no identity beyond its own hash, and guessing one would
+ * be exactly the invention rule 6 forbids.
+ */
+async function findStoredApplication(record) {
+  const applicationId = String(record?.applicationId || "").trim();
+  const jobId = String(record?.job?.id || "").trim();
+  if (!applicationId || !jobId) return null;
+  const matches = await withNamedStore(APPLICANT_STORE, "readonly", (store) => {
+    // A database opened before v6 has the store but not the index. Answering
+    // "nothing stored" is correct there and costs only the duplicate this
+    // lookup exists to prevent, rather than throwing on every single save.
+    if (!store.indexNames.contains(APPLICATION_INDEX)) return Promise.resolve([]);
+    return requestAsPromise(store.index(APPLICATION_INDEX).getAll(applicationId));
+  });
+  const match = (matches || []).find(
+    (candidate) => String(candidate?.job?.id || "").trim() === jobId
+  );
+  return match ? normalize(match) : null;
+}
+
+/**
  * Save one applicant, merged over whatever is already stored for them.
  *
  * The merge is the core's, so a second visit that saw a collapsed section adds
  * to the record rather than replacing it, and a resume already downloaded keeps
- * its filename and its `downloaded` status.
+ * its filename and its `downloaded` status. `mergeApplicantRecord` keeps
+ * `id: before.id`, so a record found by its application keeps the key it is
+ * already stored under and nothing has to be re-keyed or deleted.
  */
 export async function saveApplicant(input) {
   const incoming = normalize(input);
-  const existing = await getApplicant(incoming.id);
+  const existing = (await getApplicant(incoming.id)) || (await findStoredApplication(incoming));
   const record = existing ? Applicants.mergeApplicantRecord(existing, incoming) : incoming;
   await withNamedStore(APPLICANT_STORE, "readwrite", (store) => requestAsPromise(store.put(record)));
   if (record.job?.id) await saveJob(record.job);

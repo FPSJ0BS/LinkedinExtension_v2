@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0091",
+  "name": "One application is one record: reconcile a saved applicant by job and applicationId",
+  "request": "One application is one record: reconcile a saved applicant by job and applicationId",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:06:17.780Z",
+  "completedAt": "2026-08-06T08:09:02.176Z",
+  "startCommit": "8de86634e50b768589d59b7afa2c9e2a66565a65",
+  "gitRef": "task/TASK-0091",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-db.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/db.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-integration.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 424 tests, validate)"
+  ],
+  "result": "Prerequisite for the list pass, and a latent duplicate bug in its own right. applicantId hashes jobId|profileUrl|name|applicationId, so HOW MUCH OF A PERSON WAS KNOWN when they were written decides their key: a pass that reads only the list row knows the job, the application and the name but no profile URL, while a pass that opens the panel knows all four. Same person, same application, two hashes, two stored records - and silently, because saveApplicant only ever looked up incoming.id. Schema v6 adds ONE index and nothing else: applicants.applicationId. saveApplicant now consults findStoredApplication(incoming) when the id lookup misses, scoped to the job because the index is on the application id alone and an applicant is a person on a job; mergeApplicantRecord already keeps id: before.id, so the found record keeps the key it is stored under and nothing is re-keyed or deleted. The index is created against the store AS IT ALREADY EXISTS rather than inside the create-the-store branch - every user who has collected an applicant is on v5 with that store already there, so the other placement would never reach any of them - and a database still on v5 answers 'nothing stored' rather than throwing on every single save. Additive only: nothing dropped, no field removed, so a rollback to v5 costs this lookup and not one applicant, profile or queue row. Rule 14 amended to state the index, the reason and the placement."
+}

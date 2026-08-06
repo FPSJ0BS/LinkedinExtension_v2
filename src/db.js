@@ -1,7 +1,7 @@
 import { PROFILE_FIELDS, normalizeProfile, validateProfile } from "./profile-utils.js";
 
 const DB_NAME = "profile-table-collector"; // Preserve data from the earlier extension release.
-const DB_VERSION = 5; // v5 adds the recruiter applicant and job stores.
+const DB_VERSION = 6; // v6 indexes an applicant by the application it belongs to.
 const STORE = "profiles";
 export const QUEUE_STORE = "importQueue";
 export const SESSION_STORE = "importSession";
@@ -9,6 +9,8 @@ export const SESSION_STORE = "importSession";
 export const APPLICANT_STORE = "applicants";
 /** One record per job the applicants were collected from (3.7.0). */
 export const JOB_STORE = "jobs";
+/** The application an applicant record belongs to (v6) — see the upgrade below. */
+export const APPLICATION_INDEX = "applicationId";
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
@@ -71,6 +73,27 @@ export function openDatabase() {
       if (!db.objectStoreNames.contains(JOB_STORE)) {
         const jobs = db.createObjectStore(JOB_STORE, { keyPath: "id" });
         jobs.createIndex("updatedAt", "updatedAt", { unique: false });
+      }
+
+      // v6: find an applicant by the APPLICATION they are, not only by the id
+      // their record happens to be stored under.
+      //
+      // `applicantId` hashes `jobId|profileUrl|name|applicationId`, so how much
+      // of a person was known when they were written decides their key — and a
+      // pass that reads only the list row knows no profile URL, while a pass
+      // that opens the panel does. The same application therefore hashes two
+      // ways and would be stored twice. The application id is what actually
+      // identifies "this person on this job", so it is indexed and consulted
+      // before a second record can be created.
+      //
+      // Additive only: one index on an existing store, nothing dropped and no
+      // field removed, so rolling back to v5 costs this lookup and not one
+      // applicant, profile or queue row.
+      if (db.objectStoreNames.contains(APPLICANT_STORE)) {
+        const applicants = request.transaction.objectStore(APPLICANT_STORE);
+        if (!applicants.indexNames.contains(APPLICATION_INDEX)) {
+          applicants.createIndex(APPLICATION_INDEX, "applicationId", { unique: false });
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);

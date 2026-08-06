@@ -339,7 +339,18 @@ commands are unrecoverable.
 **Data**
 
 14. The IndexedDB name `profile-table-collector` must never change ([db.js](src/db.js)) — it
-    preserves pre-3.0 data. Schema is now **v5**: v3 added `importQueue` and `importSession`; v4
+    preserves pre-3.0 data. Schema is now **v6**, which adds **one index and nothing else**:
+    `applicants.applicationId`. `applicantId` hashes `jobId|profileUrl|name|applicationId`, so *how
+    much of a person was known when they were written* decides their key — a pass that reads only the
+    list row knows no profile URL, a pass that opens the panel does — and the same application
+    therefore hashed two ways and was stored twice, silently. The application id is what identifies
+    "this person on this job", so `saveApplicant` consults it (`findStoredApplication`, scoped to the
+    job) **before** a second record can be created, and `mergeApplicantRecord` keeps `id: before.id`
+    so nothing is re-keyed. The index is added to the store **as it already exists** — every user who
+    has collected an applicant is on v5 with the store already created, so adding it inside the
+    "create the store" branch would never reach them — and a pre-v6 database answers "nothing stored"
+    rather than throwing on every save. Rolling back to v5 costs this lookup and not one record.
+    Previously: v3 added `importQueue` and `importSession`; v4
     indexes `status` and `lastCollectedAt` and **deletes** the `currentCompany` and `location`
     indexes, which pointed at fields the record no longer has; **v5 adds `applicants` (keyPath `id`,
     indexed by `job.id`, `updatedAt` and `applicant.applicationStatus`) and `jobs` (keyPath `id`)**
