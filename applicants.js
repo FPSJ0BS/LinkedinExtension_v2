@@ -743,6 +743,169 @@
     return panel && panel.isConnected ? panel : applicantPanel();
   }
 
+  // ------------------------------------------------------------- re-mounting
+  // THE REPORT, with a screenshot: the whole page area flashes several
+  // applicants into a run. It is not a browser reload — that would take this
+  // script with it — it is LinkedIn's own app tearing the hiring view out and
+  // building it again: both columns, the list, its pager and the detail panel.
+  //
+  // `livePanel()` above already re-resolves a detached node, which is why the
+  // scan does not simply die. What it cannot do is notice that the node it
+  // handed back belongs to somebody ELSE, and a merge-only accumulator will
+  // happily fold that person's sections into the record it is building. So the
+  // surface is watched, reading pauses while it moves, and who is on screen is
+  // checked before anything is kept.
+
+  /** A burst of mutation costs one check, not one per node. */
+  const PANEL_WATCH_SETTLE_MS = 120;
+  /** How often the settle loop re-asks while the surface is moving. */
+  const PANEL_WATCH_POLL_MS = 150;
+
+  /** A re-mount that landed on a different applicant. Fatal to the record, not to the run. */
+  function remountedError(message) {
+    const error = new Error(message);
+    error.remounted = true;
+    return error;
+  }
+
+  /**
+   * Watch for the hiring surface being replaced underneath a read.
+   *
+   * Deliberately the same shape as `state.routeObserver`: on a page that mutates
+   * constantly the callback must be one boolean and out, with the real work on a
+   * short timer. No polling while the page is idle.
+   *
+   * **And what the timer asks has to be cheap, which rules out the obvious
+   * check.** `mountedApplicantPanel()` scores every candidate container and
+   * takes `innerText` on each, and `panelIdentity()` calls `isVisible()`, so
+   * both force a synchronous layout — several times a second, throughout every
+   * scan, on the recruiter's own page. That is the same forced-reflow cost
+   * `applicantRows()` had its name getter made lazy for.
+   *
+   * So detection asks two questions that cost no layout: **is the node we were
+   * reading still attached**, and **does the panel still link to the same
+   * application**. The first is the whole-view re-mount this exists for — the
+   * container is rebuilt, so the node we held detaches. The second catches a
+   * swap performed in place. Deciding *who* is on screen stays where it was
+   * already being paid for: `settlePanel` and `assertSameApplicant`, at the
+   * boundaries between reads.
+   *
+   * A replacement does not resume anything. It **restarts a quiet timer**, which
+   * is what makes `nextRemountStep` able to tell "it settled" from "it is still
+   * going", because a re-mount is a burst rather than an event.
+   */
+  function createPanelWatch(panel, expected = "") {
+    const watch = {
+      held: panel || null,
+      /** The applicant this whole extraction belongs to. Never re-derived. */
+      expected: cleanText(expected),
+      /** The last application the held panel linked to. Read with no layout. */
+      applicationId: panelApplicationId(panel),
+      replacements: 0,
+      acknowledged: 0,
+      /** For the record: how often it moved, and how often reading had to wait. */
+      detected: 0,
+      settled: 0,
+      lastAt: 0,
+      scheduled: false,
+      observer: null
+    };
+
+    const check = () => {
+      if (!watch.held) return;
+      const application = watch.held.isConnected ? panelApplicationId(watch.held) : "";
+      const replaced = !watch.held.isConnected || application !== watch.applicationId;
+      if (!replaced) return;
+      watch.replacements += 1;
+      watch.detected += 1;
+      watch.lastAt = Date.now();
+      watch.applicationId = application;
+    };
+
+    watch.observer = new MutationObserver(() => {
+      if (watch.scheduled) return;
+      watch.scheduled = true;
+      setTimeout(() => {
+        watch.scheduled = false;
+        check();
+      }, PANEL_WATCH_SETTLE_MS);
+    });
+    watch.observer.observe(document.documentElement, { childList: true, subtree: true });
+    watch.disconnect = () => {
+      try {
+        watch.observer.disconnect();
+      } catch {
+        // Already gone with the document it was watching.
+      }
+    };
+    return watch;
+  }
+
+  /**
+   * The panel to read next — after waiting out a re-mount, if there was one.
+   *
+   * Costs nothing when the surface has not moved: `nextRemountStep` answers
+   * `continue` and this is `livePanel()` with an extra comparison. When it HAS
+   * moved, reading stops until `REMOUNT.DEBOUNCE_MS` passes with no further
+   * replacement — resuming on the first sign of a panel would resume into the
+   * middle of the next teardown.
+   *
+   * Bounded by `REMOUNT.MAX_WAIT_MS`, because a surface that re-mounts forever
+   * must still end this applicant rather than hold the whole run.
+   */
+  async function settlePanel(watch, panel) {
+    if (!watch) return livePanel(panel);
+    const startedAt = Date.now();
+    for (;;) {
+      const mounted = mountedApplicantPanel();
+      const step = Applicants.nextRemountStep({
+        replacements: watch.replacements,
+        acknowledged: watch.acknowledged,
+        sinceLastMs: watch.lastAt ? Date.now() - watch.lastAt : Number.MAX_SAFE_INTEGER,
+        waitedMs: Date.now() - startedAt,
+        mounted: Boolean(mounted)
+      });
+      if (step.action === "continue") return livePanel(panel);
+      if (step.action === "give-up") throw remountedError(step.reason);
+      if (step.action === "resume") {
+        watch.acknowledged = watch.replacements;
+        watch.held = mounted;
+        // Re-based on what is actually on screen now, so the next replacement is
+        // measured from here rather than from the panel that has already gone.
+        watch.applicationId = panelApplicationId(mounted);
+        watch.settled += 1;
+        return mounted;
+      }
+      // Still moving. `assertRunnable` keeps Stop and a hidden tab ahead of it.
+      assertRunnable();
+      await wait(PANEL_WATCH_POLL_MS);
+    }
+  }
+
+  /**
+   * Refuse to keep reading somebody else.
+   *
+   * The one thing a merge-only accumulator cannot survive. `livePanel()` hands
+   * back whatever is mounted, which after a re-mount may be a different
+   * applicant entirely, and every section read from then on would be folded into
+   * the record being built — a person whose name, history and resume come from
+   * two people. Rule 6 makes that strictly worse than no record at all, so it is
+   * a failure for this row and the walk moves on.
+   *
+   * Only `OTHER` throws. A torn-down or half-mounted panel is a *wait*, which
+   * `settlePanel` has already done, and a re-mount showing the SAME applicant is
+   * the ordinary case — the accumulator is merge-only, so re-reading them is
+   * exactly right.
+   */
+  function assertSameApplicant(watch) {
+    if (!watch) return;
+    const seen = describeApplicantArrival(watch.expected, "");
+    if (seen.state !== Applicants.PANEL_ARRIVAL.OTHER) return;
+    throw remountedError(
+      `The hiring surface re-mounted onto a different applicant while this one was being read (${seen.reason}).`
+    );
+  }
+
   /**
    * The applicant list column.
    *
@@ -3058,7 +3221,7 @@
     return live;
   }
 
-  async function scanApplicantPanel(panel, accumulator, diagnostics, budget) {
+  async function scanApplicantPanel(panel, accumulator, diagnostics, budget, watch = null) {
     let live = livePanel(panel);
     let target = chooseScrollTarget(live);
     const originalY = currentScrollTop(target);
@@ -3105,8 +3268,15 @@
         scrollPanelTo(scan.position, target);
         await waitForDomQuiet(320, 2400);
         // The column is re-resolved on every step, because a re-mounted panel
-        // answers with the text it held when it was detached.
-        live = livePanel(live);
+        // answers with the text it held when it was detached — and, since the
+        // whole hiring view can be rebuilt mid-read, reading WAITS here while
+        // that is happening and refuses to continue on somebody else. The scan
+        // is where the sections come from, so this is the guard that matters.
+        live = await settlePanel(watch, live);
+        assertSameApplicant(watch);
+        // A re-mount replaces the scroll container too, so a target chosen from
+        // the old one addresses a node that is no longer on the page.
+        if (watch && !target?.isConnected) target = chooseScrollTarget(live) || target;
         snapshotPanel(live, accumulator, diagnostics);
       }
 
@@ -3124,7 +3294,8 @@
       // outside it, came through. That is the whole "current role and current
       // company are still empty" report.
       await revealNestedRegions(live, accumulator, diagnostics);
-      live = livePanel(live);
+      live = await settlePanel(watch, live);
+      assertSameApplicant(watch);
 
       // And the panel again, because a nested region that has just been walked
       // mounts content the panel did not have when it settled — which extends
@@ -3149,7 +3320,8 @@
       // A final read from the top, once everything below has hydrated.
       scrollPanelTo(0, target);
       await waitForDomQuiet(300, 1600);
-      live = livePanel(live);
+      live = await settlePanel(watch, live);
+      assertSameApplicant(watch);
       snapshotPanel(live, accumulator, diagnostics);
     } finally {
       // Hand the panel back where the recruiter left it, on every path.
@@ -3222,17 +3394,48 @@
     // expander again after the walk costs the same eight clicks in total.
     const expansion = createExpansionBudget();
 
-    if (options.expand !== false) {
-      await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
-    }
-    if (options.scan !== false) {
-      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
-      panel = walked.panel || panel;
-    } else snapshotPanel(panel, accumulator, diagnostics);
+    // WHO this extraction belongs to, fixed now and never re-derived. The panel's
+    // own link first — the address bar moves ahead of the render on this surface
+    // — and everything read from here on has to still be them.
+    const expectedApplicant = panelApplicationId(mountedApplicantPanel()) || context.applicationId || "";
+    const watch = createPanelWatch(panel, expectedApplicant);
+    diagnostics.expectedApplicant = expectedApplicant;
 
+    try {
+      if (options.expand !== false) {
+        await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
+      }
+      if (options.scan !== false) {
+        const walked = await scanApplicantPanel(
+          panel, accumulator, diagnostics, options.expand === false ? null : expansion, watch
+        );
+        panel = walked.panel || panel;
+      } else snapshotPanel(panel, accumulator, diagnostics);
+
+      return await finishApplicant({ panel, accumulator, diagnostics, context, sourceUrl, options, watch });
+    } finally {
+      // A watcher outliving its extraction would keep a MutationObserver on the
+      // recruiter's page for the rest of the session, and there is one per
+      // applicant.
+      watch.disconnect();
+      diagnostics.remounts = { detected: watch.detected, settled: watch.settled };
+    }
+  }
+
+  /**
+   * The disclosures, the resume and the record — the half of an extraction that
+   * runs once the panel has been walked.
+   *
+   * Split out so the whole of it sits inside one `try/finally` that disposes the
+   * re-mount watcher, rather than that `finally` having to wrap the function's
+   * every return path by hand.
+   */
+  async function finishApplicant({ panel, accumulator, diagnostics, context, sourceUrl, options, watch }) {
     // The overlays are opened on whatever the panel is now, not on the node the
-    // extraction started with — a detached one contains no control at all.
-    panel = livePanel(panel);
+    // extraction started with — a detached one contains no control at all — and
+    // never while the surface is still re-mounting.
+    panel = await settlePanel(watch, panel);
+    assertSameApplicant(watch);
     // The one call that also records the full section scan: what was looked
     // for, every heading the page actually rendered, where each section was
     // found and what nothing named at all.
@@ -3254,11 +3457,17 @@
     // was visible is kept. `stopped` is still re-thrown, always: rule 13a means
     // a Stop ends the work, and it is the one interruption that must not be
     // downgraded into a warning on a saved record.
+    //
+    // `remounted` is the SECOND such interruption and is re-thrown for the
+    // opposite reason to `hidden`: a hidden page loses a field off the right
+    // person, while a re-mount onto a different applicant means what is being
+    // read is somebody else's. Warning about that and saving anyway is exactly
+    // the blended record rule 6 forbids.
     if (options.contact !== false) {
       try {
         await openContactAndCollect(panel, accumulator, diagnostics);
       } catch (error) {
-        if (error?.stopped) throw error;
+        if (error?.stopped || error?.remounted) throw error;
         if (error?.hidden) accumulator.addWarning("contact: the page was hidden while the disclosure was open");
         else accumulator.addWarning(`contact: ${error?.message || error}`);
       }
@@ -3275,7 +3484,8 @@
     if (options.resume !== false) {
       try {
         // Closing the contact disclosure can re-mount the column underneath it.
-        panel = livePanel(panel);
+        panel = await settlePanel(watch, panel);
+        assertSameApplicant(watch);
         // The name the record will carry, which is the name the file is saved
         // under. It is settled by now: the qualification explanations that
         // corroborate it were read on the very first snapshot.
@@ -3286,10 +3496,27 @@
         // take the tab away. The resume is left as whatever it was resolved to
         // — `link_only` or `not_attempted`, never a guess (rule 6) — and the
         // person, their history and their verdicts are still saved.
-        if (error?.stopped) throw error;
+        if (error?.stopped || error?.remounted) throw error;
         if (error?.hidden) accumulator.addWarning("resume: the page was hidden while the viewer was open");
         else accumulator.addWarning(`resume: ${error?.message || error}`);
       }
+    }
+
+    // The last word before anything is kept. Everything above reads from the
+    // page; this asks whether the page was still showing the person the record
+    // is about. A file saved under the wrong applicant's name is the failure
+    // this is here to make impossible.
+    assertSameApplicant(watch);
+
+    // Said on the record, not only in the console. A re-mount the reader had to
+    // wait out is the difference between "this applicant looks thin" and "the
+    // surface was rebuilt three times while they were being read", and the
+    // second one is a fact about LinkedIn that no later investigation can
+    // recover from a stored record that does not mention it.
+    if (watch?.settled) {
+      accumulator.addWarning(
+        `the hiring surface re-mounted ${watch.settled} time(s) while this applicant was read; reading paused and resumed`
+      );
     }
 
     const record = Applicants.buildApplicantRecord({
@@ -3711,6 +3938,14 @@
     }
   }
 
+  /** Long enough to cover a re-mount of the whole hiring view; short enough not to hide a real absence. */
+  const LIST_REMOUNT_TIMEOUT_MS = 6000;
+
+  /** The applicant list, waiting out a re-mount that has taken it away. */
+  function waitForApplicantList(timeoutMs = LIST_REMOUNT_TIMEOUT_MS) {
+    return waitFor(() => applicantList(), { timeoutMs, pollMs: 200, label: "applicant-list" });
+  }
+
   /** The walk ledger, for a run that grows the list instead of pre-walking it. */
   function createListWalk(diagnostics) {
     diagnostics.listScroll = {
@@ -3749,7 +3984,17 @@
     // the run before, so staleness could not show; now that an inconclusive stop
     // is retried, the value has to mean what it says.
     walk.stoppedBy = "running";
-    const list = applicantList();
+    // A missing list is very often a list being REBUILT. The re-mount the panel
+    // watcher exists for takes the whole hiring view with it — the screenshot
+    // shows the entire page area flashing, both columns and the pager — so
+    // asking for the list during one of those milliseconds answers null, and
+    // through 3.7.9 that answer spent one of the run's three inconclusive
+    // growths. Three re-mounts in a row would end a run that had nothing wrong
+    // with it. Waiting is not a new bound: `waitForApplicantList` is `waitFor`,
+    // so Stop and a hidden tab still come first, and a list that genuinely is
+    // not there still returns `no-list` a moment later.
+    let list = applicantList();
+    if (!list) list = await waitForApplicantList();
     if (!list) {
       walk.stoppedBy = "no-list";
       return applicantRows().length;
@@ -4272,6 +4517,20 @@
               `The page kept going hidden while reading ${row.name || "this applicant"}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
             state.run.index = processed.size;
           }
+          continue;
+        }
+        // A re-mount that landed on somebody else, and it is deliberately NOT a
+        // reason to stop: **one applicant the surface would not hold still for
+        // must never end a run over 665 of them.** The record was discarded
+        // rather than blended (rule 6), this row is recorded as failed so the
+        // walk cannot loop on it, and the next row is opened normally. It stays
+        // uncollected in the store, so a later run over this job picks it up.
+        if (error?.remounted) {
+          processed.add(key);
+          state.run.failed += 1;
+          state.run.lastError =
+            `${error.message} ${row.name || "This applicant"} was not saved; the run continued.`;
+          state.run.index = processed.size;
           continue;
         }
         processed.add(key);

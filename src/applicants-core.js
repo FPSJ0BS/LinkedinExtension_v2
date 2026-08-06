@@ -1907,6 +1907,58 @@
     return verdict(PANEL_ARRIVAL.ARRIVED, "mounted, and it is the applicant that was asked for");
   }
 
+  // ------------------------------------------------------------ re-mounting
+  /**
+   * What to do about a hiring surface that re-mounted underneath a read.
+   *
+   * **The report, with a screenshot: the whole page area flashes several
+   * applicants into a run.** Not a browser reload — that would take the content
+   * script with it — but LinkedIn's own single-page app tearing its hiring view
+   * out and building it again: both columns, the list, its pager and the detail
+   * panel together.
+   *
+   * The extension's answer to that is *not* to prevent it, which it cannot, and
+   * not to keep reading through it, which is how two people end up in one
+   * record. It is to notice, **stop reading until the surface is quiet again**,
+   * and then check who is actually on screen.
+   *
+   * **Why the debounce is the whole of it.** A re-mount is not one event, it is
+   * a burst — unmount, shell, hydrate, sometimes twice — and resuming on the
+   * first sign of a panel means resuming into the middle of the next teardown.
+   * So a replacement does not schedule a resume; it *restarts a quiet timer*,
+   * and only `debounceMs` with no further replacement counts as settled. That is
+   * the same rule the scan itself settles on, and the same rule discovery uses
+   * for growth: the surface says when it is done, by going quiet.
+   *
+   * Bounded, because a column that re-mounts forever must still end the
+   * applicant rather than hold the run: `give-up` is a failure for that one
+   * person and the walk moves on to somebody it can read (rule 6 — no record is
+   * better than a blended one).
+   */
+  const REMOUNT = Object.freeze({
+    /** No further replacement for this long means the surface has settled. */
+    DEBOUNCE_MS: 450,
+    /** How long one applicant may spend waiting for a surface that keeps moving. */
+    MAX_WAIT_MS: 12000
+  });
+
+  function nextRemountStep({
+    replacements = 0,
+    acknowledged = 0,
+    sinceLastMs = 0,
+    waitedMs = 0,
+    mounted = false,
+    debounceMs = REMOUNT.DEBOUNCE_MS,
+    maxWaitMs = REMOUNT.MAX_WAIT_MS
+  } = {}) {
+    const step = (action, reason) => ({ action, reason });
+    if (Number(replacements) <= Number(acknowledged)) return step("continue", "the panel was not replaced");
+    if (Number(waitedMs) >= Number(maxWaitMs)) return step("give-up", "the hiring surface kept re-mounting");
+    if (!mounted) return step("wait", "nothing is mounted yet");
+    if (Number(sinceLastMs) < Number(debounceMs)) return step("wait", "the surface is still re-mounting");
+    return step("resume", "the surface settled after a re-mount");
+  }
+
   /**
    * Why a list walk stopped, and whether that answer is worth believing.
    *
@@ -1983,6 +2035,7 @@
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     applicantRowKey, unprocessedApplicantRows,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
+    REMOUNT, nextRemountStep,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement

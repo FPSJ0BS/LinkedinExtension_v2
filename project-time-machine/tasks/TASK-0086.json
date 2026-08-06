@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0086",
+  "name": "Survive a hiring SPA re-mount mid-applicant: detect it, debounce it, and never blend two people",
+  "request": "Survive a hiring SPA re-mount mid-applicant: detect it, debounce it, and never blend two people",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T06:52:59.051Z",
+  "completedAt": "2026-08-06T07:00:47.515Z",
+  "startCommit": "b5415935dc2a5ff922e1a5d578febaaf9104cc44",
+  "gitRef": "task/TASK-0086",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "The screenshot shows the whole page area flashing, not the detail column alone: LinkedIn re-mounts its entire hiring view - both columns, the list, its pager and the panel - several applicants into a run. livePanel() already re-resolved a detached node, which is why the scan did not simply die; what it could not do was notice that the node it handed back belongs to somebody ELSE, and the accumulator is merge-only, so every section read after that was folded into the record being built. One record, two people - which rule 6 makes strictly worse than no record. Added createPanelWatch(): a MutationObserver with the routeObserver's one-boolean-and-out callback, whose 120ms check costs NO layout - the node's isConnected and the application its panel links to, deliberately not mountedApplicantPanel() (innerText per candidate) or panelIdentity() (isVisible), which would force a reflow several times a second for the whole of every scan. A replacement does not schedule a resume, it restarts a quiet timer: Applicants.nextRemountStep() (pure, tested) returns continue/wait/resume/give-up and only REMOUNT.DEBOUNCE_MS (450) with no further replacement counts as settled, because a re-mount is a burst and resuming on the first sign of a panel resumes into the middle of the next teardown. Bounded at 12s. settlePanel() replaces the bare livePanel() at every read boundary and costs one comparison when nothing moved; assertSameApplicant() throws only on PANEL_ARRIVAL.OTHER, so a re-mount showing the same applicant is simply re-read. remounted is now re-thrown from both disclosures for the opposite reason to hidden - a hidden page loses a field off the right person - and one such applicant is a single failed row, never the end of the run. growApplicantList() now waits for the list before reporting no-list, since that null was spending one of the run's three inconclusive growths and three re-mounts in a row ended a healthy run."
+}

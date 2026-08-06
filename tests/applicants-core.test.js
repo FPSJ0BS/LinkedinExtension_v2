@@ -1145,6 +1145,119 @@ test("a re-mounted panel is not mistaken for the next applicant arriving", () =>
   assert.match(unchecked.reason, /no id was rendered/);
 });
 
+test("a re-mount of the hiring view pauses reading rather than blending two applicants", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE REPORT: the whole page area flashes several applicants into a run.
+  // LinkedIn re-mounts its hiring view — both columns, the list, the pager and
+  // the detail panel — and `livePanel()` happily hands back whichever panel is
+  // mounted afterwards. The accumulator is merge-only, so anything read from
+  // then on is folded into the record being built: one record, two people.
+  const watch = source.slice(source.indexOf("function createPanelWatch"), source.indexOf("async function settlePanel"));
+  assert.match(watch, /new MutationObserver\(/, "the surface is watched, not polled");
+  assert.match(watch, /if \(watch\.scheduled\) return;/, "with the routeObserver's one-boolean-and-out callback");
+  assert.match(watch, /const replaced = !watch\.held\.isConnected \|\| application !== watch\.applicationId;/,
+    "and a replacement is decided structurally: the node detached, or the panel links to somebody else");
+  assert.ok(!/innerText/.test(watch), "never from the panel's text");
+  assert.match(watch, /watch\.lastAt = Date\.now\(\)/, "a replacement restarts the quiet timer");
+
+  // The hot path must cost NO LAYOUT. `mountedApplicantPanel()` takes innerText
+  // on every candidate and `panelIdentity()` calls isVisible(); either one runs
+  // several times a second for the whole of every scan, on the recruiter's own
+  // page. That is the forced reflow `applicantRows()` had its name getter made
+  // lazy for. Deciding WHO is on screen stays at the read boundaries, where it
+  // was already being paid for.
+  const detector = watch.slice(watch.indexOf("const check = () => {"), watch.indexOf("watch.observer = new MutationObserver"));
+  assert.ok(!/mountedApplicantPanel\(\)/.test(detector), "the detector must not re-score every container");
+  assert.ok(!/panelIdentity\(/.test(detector), "nor call anything that forces a layout");
+
+  // A re-mount is a BURST. Resuming on the first sign of a panel resumes into
+  // the middle of the next teardown, so the debounce is the whole mechanism.
+  const settle = source.slice(source.indexOf("async function settlePanel"), source.indexOf("function assertSameApplicant"));
+  assert.match(settle, /Applicants\.nextRemountStep\(\{/, "the policy is the tested pure one");
+  assert.match(settle, /if \(step\.action === "continue"\) return livePanel\(panel\);/,
+    "and costs nothing when the surface has not moved");
+  assert.match(settle, /if \(step\.action === "give-up"\) throw remountedError/,
+    "a surface that never settles must still end this applicant");
+
+  // Only OTHER throws: torn-down and half-mounted are waits, and a re-mount
+  // showing the SAME applicant is the ordinary case a merge-only accumulator
+  // handles correctly by re-reading them.
+  const same = source.slice(source.indexOf("function assertSameApplicant"), source.indexOf("* The applicant list column"));
+  assert.match(same, /if \(seen\.state !== Applicants\.PANEL_ARRIVAL\.OTHER\) return;/,
+    "only a different applicant is fatal");
+  assert.match(same, /throw remountedError\(/, "and it is fatal to the record");
+
+  // Every point the scan reads is guarded, and the disclosures re-throw it for
+  // the opposite reason to `hidden`: a hidden page loses a field off the RIGHT
+  // person; a re-mount means the reading is of somebody else.
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function currentChallenge"));
+  assert.ok((scan.match(/await settlePanel\(watch, live\)/g) || []).length >= 3,
+    "the position walk, the region reveal and the final read all settle first");
+  assert.ok((scan.match(/assertSameApplicant\(watch\)/g) || []).length >= 3, "and all confirm who is on screen");
+  const finish = source.slice(source.indexOf("async function finishApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
+  assert.equal((finish.match(/if \(error\?\.stopped \|\| error\?\.remounted\) throw error;/g) || []).length, 2,
+    "both disclosures re-throw a re-mount rather than warning and saving anyway");
+  assert.match(finish, /assertSameApplicant\(watch\);[\s\S]{0,700}?Applicants\.buildApplicantRecord\(/,
+    "and the last word before anything is kept is who the page was showing");
+  assert.match(finish, /if \(watch\?\.settled\) \{[\s\S]{0,300}?addWarning\(/,
+    "a re-mount the reader waited out is said on the record");
+
+  // The watcher is per-extraction and disposed, or every applicant leaves a
+  // MutationObserver on the recruiter's page for the rest of the session.
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("async function finishApplicant"));
+  assert.match(extract, /const watch = createPanelWatch\(panel, expectedApplicant\)/, "one watcher per applicant");
+  assert.match(extract, /finally \{[\s\S]{0,400}?watch\.disconnect\(\);/, "disposed on every path");
+  assert.match(extract, /const expectedApplicant = panelApplicationId\(mountedApplicantPanel\(\)\) \|\| context\.applicationId/,
+    "and who the extraction belongs to is fixed once, from the panel's own link first");
+
+  // ONE applicant the surface would not hold still for must never end a run
+  // over 665 of them.
+  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
+  assert.match(run, /if \(error\?\.remounted\) \{[\s\S]{0,400}?state\.run\.failed \+= 1;[\s\S]{0,400}?continue;/,
+    "a re-mounted row is one failure and the walk goes on");
+  assert.ok(!/if \(error\?\.remounted\) \{[\s\S]{0,300}?break;/.test(run), "never a break");
+
+  // A missing list is very often a list being REBUILT — the same event. Through
+  // 3.7.9 that null spent one of the run's three inconclusive growths, so three
+  // re-mounts in a row ended a run with nothing wrong with it.
+  const grow = source.slice(source.indexOf("async function growApplicantList"));
+  assert.match(grow, /if \(!list\) list = await waitForApplicantList\(\);/, "the list is waited for before it is missing");
+  assert.match(source, /function waitForApplicantList\(timeoutMs = LIST_REMOUNT_TIMEOUT_MS\)/, "with its own bound");
+  assert.match(source, /return waitFor\(\(\) => applicantList\(\), \{ timeoutMs, pollMs: 200/,
+    "built on waitFor, so Stop and a hidden tab still come first");
+});
+
+test("a re-mount settles by going quiet, and a burst is not several settles", () => {
+  const step = (patch) => Applicants.nextRemountStep({
+    replacements: 1, acknowledged: 0, sinceLastMs: 5000, waitedMs: 100, mounted: true, ...patch
+  });
+
+  // Nothing moved: the caller reads on, and this costs one comparison.
+  assert.equal(step({ replacements: 0 }).action, "continue");
+  assert.equal(step({ replacements: 3, acknowledged: 3 }).action, "continue");
+
+  // Moved, and settled: quiet for longer than the debounce.
+  assert.equal(step({}).action, "resume");
+
+  // THE POINT. A re-mount is a burst — unmount, shell, hydrate — so resuming on
+  // the first sign of a panel resumes into the middle of the next teardown.
+  assert.equal(step({ sinceLastMs: Applicants.REMOUNT.DEBOUNCE_MS - 1 }).action, "wait");
+  assert.equal(step({ sinceLastMs: Applicants.REMOUNT.DEBOUNCE_MS }).action, "resume");
+
+  // Nothing mounted is a wait however quiet it has been: "no panel" is not a
+  // panel that settled.
+  assert.equal(step({ mounted: false }).action, "wait");
+
+  // And it is bounded, because a surface that re-mounts forever must still end
+  // this applicant rather than hold a 665-row run.
+  assert.equal(step({ waitedMs: Applicants.REMOUNT.MAX_WAIT_MS, mounted: false }).action, "give-up");
+  assert.match(step({ waitedMs: Applicants.REMOUNT.MAX_WAIT_MS }).reason, /kept re-mounting/);
+  // The give-up beats every other answer except "nothing happened" — a surface
+  // that has not moved is never given up on.
+  assert.equal(step({ replacements: 0, waitedMs: Applicants.REMOUNT.MAX_WAIT_MS }).action, "continue");
+});
+
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));

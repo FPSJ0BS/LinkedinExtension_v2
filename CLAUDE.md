@@ -805,6 +805,50 @@ was satisfied on the first read and the scan settled having seen one screenful.
 - **The expander runs twice** — before the walk and again at the bottom, where late-mounted sections
   finally exist — sharing one `createExpansionBudget()`, so `MAX_EXPANSIONS` is still eight in total.
 
+## Surviving a re-mount of the hiring view (3.7.10)
+
+**The report, with a screenshot: the whole page area flashes several applicants into a run.** Not a
+browser reload — that would take the content script with it — but LinkedIn's own app tearing the
+hiring view out and building it again: **both columns, the list, its pager and the detail panel
+together**. The extension's answer is to *survive* it, never to prevent it, and never to keep reading
+through it.
+
+- **The panel is watched, not polled.** `createPanelWatch()` ([applicants.js](applicants.js)) uses the
+  same shape as `state.routeObserver` — a `MutationObserver` whose callback is one boolean and out,
+  with the real check on a 120 ms timer — and that check is structural: is the node we were holding
+  still attached, is anything mounted at all, is its identity the one we last saw. No text, and no
+  polling while the page is idle. One watcher per extraction, disposed in a `finally`.
+- **A replacement restarts a quiet timer; it never schedules a resume.** A re-mount is a *burst* —
+  unmount, shell, hydrate, sometimes twice — so resuming on the first sign of a panel resumes into
+  the middle of the next teardown. `Applicants.nextRemountStep()` (pure, tested) answers
+  `continue | wait | resume | give-up`, and only `REMOUNT.DEBOUNCE_MS` (450) with **no further
+  replacement** counts as settled. That is the same "the surface says when it is done, by going
+  quiet" rule the scan and discovery already settle on. Bounded by `REMOUNT.MAX_WAIT_MS` (12 s).
+- **`settlePanel()` costs nothing when nothing moved** — `nextRemountStep` answers `continue` and it
+  is `livePanel()` plus a comparison. It replaces the bare `livePanel()` at every point the scan
+  reads: each step of the position walk, after the nested-region reveal, before the final read,
+  before the disclosures and before the resume.
+- **`assertSameApplicant()` is what a merge-only accumulator cannot do without.** `livePanel()` hands
+  back whatever is mounted, and after a re-mount that may be a different applicant — every section
+  read from then on would be folded into the record being built, producing a person whose name,
+  history and resume come from two people. Only `PANEL_ARRIVAL.OTHER` throws (a torn-down or
+  half-mounted panel is a *wait*, which `settlePanel` has already done; a re-mount showing the **same**
+  applicant is the ordinary case, and re-reading them is exactly right for a merge-only accumulator).
+- **`remounted` is the second interruption that is re-thrown from the disclosures**, for the opposite
+  reason to `hidden`: a hidden page loses a field off the *right* person, while a re-mount onto a
+  different applicant means what is being read is *somebody else's*. Warning and saving anyway is the
+  blended record rule 6 forbids. The record is discarded; a `settled` count that did not change
+  applicant becomes a **warning on the record**, because "this applicant looks thin" and "the surface
+  was rebuilt three times while they were read" are not the same fact.
+- **One applicant the surface would not hold still for never ends the run.** The run loop records
+  `remounted` as a failure for that row and opens the next one; the applicant stays uncollected in the
+  store, so a later run over the job picks them up.
+- **A missing list is very often a list being rebuilt.** `growApplicantList()` waits for it
+  (`waitForApplicantList`, `LIST_REMOUNT_TIMEOUT_MS` 6 s) before reporting `no-list` — through 3.7.9
+  that null spent one of the run's three `MAX_INCONCLUSIVE_GROWTHS`, so three re-mounts in a row ended
+  a run with nothing wrong with it. Waiting adds no bound: it is `waitFor`, so Stop and a hidden tab
+  still come first.
+
 **A run resumes; it never starts over.** `Applicants.createCollectedIndex()` is keyed on the
 `applicationId` in each row's own href, because that is the only identifier a row carries **before**
 it is opened — the record's `id` needs the profile URL, which only the panel shows. The name stands in
