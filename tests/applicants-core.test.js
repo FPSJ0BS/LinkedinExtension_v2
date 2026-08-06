@@ -1326,10 +1326,12 @@ test("the list pass opens every applicant across every page and takes what the p
   assert.match(pass, /await collectVisibleApplicant\(row, rowId\)/, "each applicant is opened and read");
   // From the options constant, so the doc comment reasoning about the click
   // budget is inside the slice.
-  const reveal = source.slice(source.indexOf("const VISIBLE_ONLY_OPTIONS"), source.indexOf("async function extractAllApplicants"));
-  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false, contact: false, resume: false \}\)/,
-    "nothing behind a button is opened: no expander, no contact disclosure, no resume viewer");
-  assert.match(reveal, /await extractApplicant\(VISIBLE_ONLY_OPTIONS\)/, "and the reading rule is the shared one");
+  const reveal = source.slice(source.indexOf("const FULL_APPLICANT_OPTIONS"), source.indexOf("async function extractAllApplicants"));
+  // Built up in stages on request, and this is the last of them: the contact
+  // disclosure and the resume are back, so nothing is suppressed any more.
+  assert.match(reveal, /const FULL_APPLICANT_OPTIONS = Object\.freeze\(\{\}\)/,
+    "the contact disclosure and the resume are collected again");
+  assert.match(reveal, /await extractApplicant\(FULL_APPLICANT_OPTIONS\)/, "and the reading rule is the shared one");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
   assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
   assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
@@ -1386,9 +1388,16 @@ test("the list pass opens every applicant across every page and takes what the p
   );
 
   // The full extraction is unchanged and is still what a full run calls — this
-  // pass reaches it through the same function with three flags turned off.
+  // pass reaches it through the same function, and since 3.7.10 with nothing
+  // suppressed, so the two commands now read identically.
   assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
   assert.match(run, /const \{ record \} = await extractApplicant\(options\);/, "and still be what a full run calls");
+  // Every flag is still honoured by `extractApplicant`, so suppressing any of
+  // them stays a one-word change rather than a rewrite.
+  const extractOptions = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
+  assert.match(extractOptions, /if \(options\.expand !== false\)/, "the expander stays opt-out");
+  assert.match(extractOptions, /if \(options\.contact !== false\)/, "the contact disclosure stays opt-out");
+  assert.match(extractOptions, /if \(options\.resume !== false\)/, "and so does the resume");
 
   // The job header is read ONCE. It sits above both columns and does not change
   // as the list is walked, so reading it per row would be hundreds of forced

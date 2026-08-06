@@ -707,16 +707,19 @@ questions, and the second costs hours where the first costs a walk down the list
   let it load fully, scroll to its bottom, then move onto the next"*, then *"capture name, current
   role, current company, total experience and education — what is normally visible on the profile
   page, not hidden behind any button"*).
-- **It is `extractApplicant` with three flags off, not a second reading rule.**
-  `VISIBLE_ONLY_OPTIONS` is `{ expand: false, contact: false, resume: false }`, and each flag is
-  exactly one thing behind a button: `expand` is `expandCollapsedSections` (and it also passes
-  `null` as the scan's expansion budget, so the second expander pass at the bottom of the walk is
-  skipped too), `contact` is the disclosure that holds the email and phone, `resume` is the viewer
-  and the download. What is left is **one click per applicant** — the row itself — plus the pager,
-  and rule 9's per-file budget is untouched. `current_role`, `current_company` and
-  `total_experience` are therefore `deriveCurrentPosition` and `totalExperienceFrom` over the
-  Experience cards the panel rendered, exactly as in a full collection: one definition of "current
-  role" on this surface, not two.
+- **It is `extractApplicant`, not a second reading rule** — `FULL_APPLICANT_OPTIONS`, and since
+  3.7.10 that is `{}`. It was built up in stages on request: names only, then "open each profile and
+  scroll it", then "capture name, role, company, experience and education — nothing behind a
+  button", and finally *"collect contact info like email and mobile, then download the resume to
+  disk."* Email, phone and the resume file are precisely the things **behind** buttons, so the flags
+  that suppressed them are gone, and `expand` came back with them: a "Show all 5 experiences" left
+  collapsed is an incomplete history, and history is what `current_role`, `current_company` and
+  `total_experience` are derived from. Every flag is still honoured by `extractApplicant`, so
+  suppressing any of them again is a one-word change.
+  ⚠ **The two whole-job commands now do the same thing.** They differ only in which "already have
+  them" index they consult (`createListedIndex` vs `createCollectedIndex`), and with full records
+  being written even that has almost no effect. Both are kept deliberately rather than one being
+  quietly removed — which to keep is the recruiter's call, not a side effect.
 - **The row's own name is the FLOOR, and only when it is needed.** `extractApplicant` saves whatever
   the panel gave it; a row that never opened, or a panel that resolved no name, would otherwise
   leave the one column this pass exists for empty while the row plainly rendered it. Safe because

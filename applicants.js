@@ -3990,39 +3990,35 @@
   const LIST_PROFILE_PACE_MS = 900;
 
   /**
-   * Read exactly what the profile renders, and press nothing to get more of it.
+   * Everything: the rendered panel, the contact disclosure, and the resume.
    *
-   * **Requested: "capture name, current role, current company, total experience
-   * and education — what is normally visible on the profile page, not hidden
-   * behind any button."** Every one of those is what a full extraction already
-   * reads off the rendered panel; the three things that make a full extraction
-   * *slow* and *clicky* are the ones behind buttons, and each is a flag:
+   * **This was built up in stages, on request, and this is the last of them.**
+   * It began as names only, then "open each profile and scroll it", then
+   * "capture name, role, company, experience and education — nothing behind a
+   * button", and now: *"collect data and contact info like email and mobile no.
+   * then download the resume in disk."* Email, phone and the resume file are the
+   * three things that ARE behind buttons, so the flags that suppressed them are
+   * gone and `expand` comes back with them — a "Show all 5 experiences" left
+   * collapsed is an incomplete history, and history is what `current_role`,
+   * `current_company` and `total_experience` are derived from.
    *
-   *   - `expand: false` — no `expandCollapsedSections`, which is literally "open
-   *     what is hidden behind a button". It also passes `null` as the scan's
-   *     expansion budget, so the second expander pass at the bottom of the walk
-   *     is skipped too.
-   *   - `contact: false` — the contact disclosure is never opened, so no email
-   *     and no phone. Those are behind a control by LinkedIn's design.
-   *   - `resume: false` — the viewer is never opened and nothing is downloaded.
-   *
-   * What is left is one click per applicant — the row — and rule 9's per-file
-   * budget is untouched. `deriveCurrentPosition` and `totalExperienceFrom` do
-   * the rest: `current_role`, `current_company` and `total_experience` are
-   * derived from the Experience cards the panel rendered, exactly as they are in
-   * a full collection, so this is the same reading rule rather than a second,
-   * thinner one.
+   * ⚠ **The two whole-job commands now do the same thing.** `Collect Applicant
+   * List` and `Collect Every Applicant` differ only in which "already have
+   * them" index they consult (`createListedIndex` vs `createCollectedIndex`),
+   * and with full records being written even that distinction has almost no
+   * effect. Left as two deliberately rather than quietly removing one: the
+   * recruiter has been pressing the first one throughout, and which of them to
+   * keep is their call, not a side effect of this change.
    */
-  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false, contact: false, resume: false });
+  const FULL_APPLICANT_OPTIONS = Object.freeze({});
 
   /**
    * Open this row's applicant, let the panel load, walk it to the bottom, and
    * take what it rendered.
    *
    * `extractApplicant` owns the whole of that — the wait for the applicant to be
-   * mounted (rule 9g), the scan, the record and the save — so this adds no
-   * reading rule of its own. It is the full run's own path with the three
-   * button-gated steps switched off.
+   * mounted (rule 9g), the scan, the disclosures, the resume, the record and the
+   * save — so this adds no reading rule of its own.
    */
   async function collectVisibleApplicant(row, rowId) {
     const openId = Applicants.parseHiringContext(location.href).applicationId || "";
@@ -4031,7 +4027,7 @@
     if (!rowId || rowId !== openId) {
       if (!(await selectApplicantRow(row))) return { opened: false, record: null };
     }
-    const { record } = await extractApplicant(VISIBLE_ONLY_OPTIONS);
+    const { record } = await extractApplicant(FULL_APPLICANT_OPTIONS);
     return { opened: true, record };
   }
 

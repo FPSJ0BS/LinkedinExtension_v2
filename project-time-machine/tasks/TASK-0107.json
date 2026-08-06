@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0107",
+  "name": "Collect Applicant List reads the contact disclosure and downloads the resume again",
+  "request": "Collect Applicant List reads the contact disclosure and downloads the resume again",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T11:10:04.325Z",
+  "completedAt": "2026-08-06T11:12:19.326Z",
+  "startCommit": "8a38a75f5eb695012b018cccde47588715320e05",
+  "gitRef": "task/TASK-0107",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 428 tests, validate)"
+  ],
+  "result": "Requested: collect the data AND the contact info (email, mobile) and then download the resume to disk. Those three are exactly the things behind buttons, which the list pass had been told to suppress in the previous stage - so the suppression is removed. VISIBLE_ONLY_OPTIONS { expand: false, contact: false, resume: false } becomes FULL_APPLICANT_OPTIONS {}, renamed rather than left holding an empty object under a name that says the opposite. expand comes back with the other two deliberately: a 'Show all 5 experiences' left collapsed is an incomplete history, and history is what current_role, current_company and total_experience are derived from. Nothing about the reading rule changed - the list pass has called extractApplicant since the last task, so this is only which of its flags are set, and every flag is still honoured, so suppressing any of them again is a one-word change. Stated plainly rather than glossed: the two whole-job commands now do the same thing. Collect Applicant List and Collect Every Applicant differ only in which already-have-them index they consult (createListedIndex vs createCollectedIndex), and with full records being written even that has almost no effect. Both are left in place rather than one being quietly removed, because which to keep is the recruiter's call and not a side effect of this change."
+}
