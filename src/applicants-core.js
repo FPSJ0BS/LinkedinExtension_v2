@@ -1703,6 +1703,22 @@
    * than an empty field. `cleanApplicantName` still applies, so LinkedIn's
    * `· 2nd` degree badge is stripped exactly as it is everywhere else.
    *
+   * **Returns `null` when the row is not a person, and that is the whole of it.**
+   * The live defect: the extension saved an applicant called
+   * **"Edit qualifications"**. The applicant list renders that link in its own
+   * header — *"Here are all applicants to your job. Edit qualifications"* — and
+   * its href carries the same `applicationId` the page is on, so it is
+   * structurally indistinguishable from the open applicant's row. Nothing about
+   * the *link* can catch it.
+   *
+   * The *text* can, and the policy for it already existed and already knew this
+   * exact phrase: `isApplicantNameCandidate()` refuses a control phrase (verb
+   * plus at least one more word) because the panel path was saving people under
+   * this same label a release earlier. The list pass simply never asked. It asks
+   * now, and a row that fails is **no record at all** rather than a record with
+   * a wrong name — rule 6, and the reason that policy is conservative: the name
+   * is the column the whole export is read by.
+   *
    * **A blank field here can never erase a full one.** `mergeApplicantRecord`
    * protects every scalar field by field (3.7.10), and `saveApplicant`
    * reconciles on `job.id + applicationId` (3.7.9), so a later pass that opens
@@ -1711,6 +1727,8 @@
    * list pass first; neither is incidental to it.
    */
   function buildApplicantListRecord({ name = "", href = "", job = null, context = {}, sourceUrl = "", buildId = "" } = {}) {
+    const applicantName = cleanApplicantName(name);
+    if (!isApplicantNameCandidate(applicantName)) return null;
     const row = parseHiringContext(href);
     const applicationId = row.applicationId || context.applicationId || null;
     const jobId = cleanText(job?.id) || context.jobId || null;
@@ -1719,7 +1737,7 @@
       // Carried when the page header supplied one, so the table shows which job
       // these people applied to rather than a bare id. Never assembled.
       job: { ...(job || {}), id: jobId },
-      applicant: { name: cleanApplicantName(name) },
+      applicant: { name: applicantName },
       extraction: {
         timestamp: new Date().toISOString(),
         sourceUrl,
@@ -1731,7 +1749,7 @@
         // from a full extraction that found nothing — and the two call for
         // opposite responses. `normalizeApplicantRecord` keeps `rawData`
         // verbatim, so this needs no change to the record's own schema.
-        rawData: { list_row: cleanApplicantName(name) }
+        rawData: { list_row: applicantName }
       }
     });
   }

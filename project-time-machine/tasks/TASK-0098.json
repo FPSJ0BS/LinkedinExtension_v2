@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0098",
+  "name": "The list pass must refuse a row that is not a person",
+  "request": "The list pass must refuse a row that is not a person",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T09:08:47.177Z",
+  "completedAt": "2026-08-06T09:11:25.791Z",
+  "startCommit": "60f10d698a14d9ea6ebb6fbf26f2519e50731385",
+  "gitRef": "task/TASK-0098",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Reported with a screenshot: the extension saved an applicant called 'Edit qualifications'. The applicant list renders that link in its own header - 'Here are all applicants to your job. Edit qualifications' - and its href carries the same applicationId the page is on, so it is structurally indistinguishable from the open applicant's row. Nothing about the LINK can catch it, and widening isApplicantRowLink would only start dropping real rows. The TEXT can, and the policy for it already existed and already knew this exact phrase: NAME_CONTROL_PHRASE_PATTERN was added in TASK-0082 when the panel path was saving people under the same label, one release earlier. The list pass I added simply never asked - it called cleanApplicantName and nothing else - which is the whole defect. buildApplicantListRecord now returns null unless isApplicantNameCandidate accepts the name, and the walk skips that row: processed so it is not offered again every turn, counted as skipped rather than collected, and named in lastError. No record rather than a record with a wrong name, because the name is the column the entire export is read by (rule 6). It consults the ONE policy rather than growing a second list of its own, so every label that policy already refuses - Applicants, Filter and sort, View full profile, Show more, Resume - is refused here too, and a blank row yields nothing. While writing the test I asserted that 'Edit Kovacs' should survive; it does not, and that is TASK-0082's deliberate trade-off rather than a bug, so the assertion was corrected to the documented behaviour (a bare 'Edit' is kept as a Hungarian given name) instead of the policy being loosened."
+}

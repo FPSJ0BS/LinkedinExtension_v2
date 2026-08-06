@@ -697,6 +697,15 @@ questions, and the second costs hours where the first costs a walk down the list
   than an empty field. `cleanApplicantName` still strips the `· 2nd` degree badge.
   `extraction.rawData.list_row` records the provenance, because a name-only record and a full
   extraction that found nothing call for opposite responses.
+- **A row that is not a person is no record at all.** `buildApplicantListRecord()` returns `null`
+  unless `isApplicantNameCandidate()` accepts the name, and the walk skips that row. The live defect:
+  an applicant saved as **"Edit qualifications"** — the list renders that link in its own header
+  ("Here are all applicants to your job. Edit qualifications") and its `href` carries the same
+  `applicationId` the page is on, so **nothing about the link tells it apart from the open
+  applicant's row**. The text does, and that policy already existed and already knew this exact
+  phrase: `NAME_CONTROL_PHRASE_PATTERN` was added when the *panel* path saved people under the same
+  label. The list pass simply never asked; it asks now, and asks the **one** policy rather than
+  growing a second list of its own.
 - **The job header is read once per run**, not per row: it sits above both columns and does not
   change as the list is walked, so reading it per row would be hundreds of forced layouts for one
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.

@@ -4141,6 +4141,23 @@
           sourceUrl: location.href,
           buildId: BUILD_ID
         });
+        // Not a person. The applicant list renders links that are not rows —
+        // the live one is **"Edit qualifications"**, in the list's own header
+        // ("Here are all applicants to your job. Edit qualifications"), and its
+        // href carries the same `applicationId` the page is on, so nothing about
+        // the link tells it apart from the open applicant's row. The text does,
+        // and `isApplicantNameCandidate` already refused this exact phrase for
+        // the panel path a release earlier. Skipped, never saved: a record with
+        // a wrong name in the column the export is read by is worse than no
+        // record (rule 6).
+        if (!record) {
+          processed.add(key);
+          state.run.skipped += 1;
+          state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
+          state.run.index = processed.size;
+          state.run.updatedAt = new Date().toISOString();
+          continue;
+        }
         state.run.currentName = record.applicant.name;
         // Saved one at a time, as it is read — the same streaming the full run
         // uses, and for the same reason: a pass the recruiter walks away from

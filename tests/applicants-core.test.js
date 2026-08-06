@@ -1212,6 +1212,45 @@ test("the list pass collects every applicant's name across every page, opening n
   // that found nothing — the two call for opposite responses.
   assert.equal(record.extraction.rawData.list_row, "Neeshu Kalkhanday");
 
+  // THE LIVE DEFECT: the extension saved an applicant called "Edit
+  // qualifications". The list renders that link in its own header — "Here are
+  // all applicants to your job. Edit qualifications" — and its href carries the
+  // same applicationId the page is on, so it is structurally indistinguishable
+  // from the open applicant's row. Nothing about the LINK can catch it; the
+  // text can, and `isApplicantNameCandidate` already refused this exact phrase
+  // for the panel path a release earlier. The list pass simply never asked.
+  const chrome_ = Applicants.buildApplicantListRecord({
+    name: "Edit qualifications",
+    href: "https://www.linkedin.com/hiring/applicants/?applicationId=35141729733&jobId=4277798308",
+    job: { id: "4277798308" },
+    sourceUrl: APPLICANTS_URL,
+    buildId: "test"
+  });
+  assert.equal(chrome_, null, "a control phrase is a thing to press, not a person");
+  // Every other label the policy already refuses is refused here too, because
+  // this asks the ONE policy rather than growing a second list of its own.
+  for (const label of ["Applicants", "Filter and sort", "View full profile", "Show more", "Resume"]) {
+    assert.equal(
+      Applicants.buildApplicantListRecord({ name: label, href: "?applicationId=1234567890", job: { id: "1" } }),
+      null,
+      `"${label}" must never become an applicant`
+    );
+  }
+  // And a row that rendered no name at all is no record, rather than a nameless
+  // one: the name is the column the whole export is read by.
+  assert.equal(Applicants.buildApplicantListRecord({ name: "   ", href: "?applicationId=1234567890" }), null);
+  // The trade-off TASK-0082 made when it wrote this policy, restated here
+  // because the list pass now depends on it: a **bare** `Edit` is accepted,
+  // since it is a real Hungarian given name and refusing it outright would
+  // trade a wrong name for a missing one on a real person. `Edit <anything>` is
+  // refused, which does cost a surname — the verb list is deliberately free of
+  // words that are themselves given names (Mark, Grant, Will, Rose, Art) to
+  // keep that cost as small as it can be.
+  assert.ok(Applicants.buildApplicantListRecord({ name: "Edit", href: "?applicationId=1234567890" }),
+    "a bare given name that happens to be a verb elsewhere is still a name");
+  assert.ok(Applicants.buildApplicantListRecord({ name: "Mark Sullivan", href: "?applicationId=1234567890" }),
+    "and a name whose first word is a given name is never treated as a control");
+
   // A name-only record is NOT collected, deliberately: `isCollectedApplicant`
   // needs one substantive field, so a later full run still visits this person
   // rather than walking past them forever.
@@ -1243,6 +1282,14 @@ test("the list pass collects every applicant's name across every page, opening n
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
   assert.match(pass, /type: "PV_APPLICANT_SAVE", record/, "each name is saved as it is read");
   assert.match(pass, /processed\.add\(key\)/, "and the row is retired by identity, like every other outcome");
+  // A row the policy refused is skipped, never saved — and never left pending,
+  // or the walk would offer it again on every turn.
+  assert.match(pass, /if \(!record\) \{[\s\S]{0,300}?state\.run\.skipped \+= 1;[\s\S]{0,300}?continue;/,
+    "a link that is not a person is skipped rather than saved");
+  assert.ok(
+    pass.indexOf("if (!record) {") < pass.indexOf('type: "PV_APPLICANT_SAVE"'),
+    "and refused before anything is sent, not after"
+  );
 
   // The profile extraction is STOPPED, never removed: `extractApplicant` and
   // everything it drives is still here and still the only path for a full run.
