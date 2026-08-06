@@ -3813,14 +3813,25 @@
    * worker can answer. The reply is deliberately lean: one small entry per
    * stored applicant rather than the records themselves.
    */
-  async function loadCollectedIndex(jobId) {
+  /**
+   * Who this job already has records for.
+   *
+   * `listOnly` decides WHICH question is asked of the same payload, and the two
+   * are genuinely different. A full run asks "is this person **collected**",
+   * because a record with nothing substantive on it is a run that failed on them
+   * and must be tried again. A list pass asks "do I already **have** them",
+   * because every record it writes is name-only — so the collected test always
+   * answers no, and a resumed pass would re-walk the entire job.
+   */
+  async function loadCollectedIndex(jobId, { listed = false } = {}) {
+    const build = listed ? Applicants.createListedIndex : Applicants.createCollectedIndex;
     try {
       const reply = await chrome.runtime.sendMessage({ type: "PV_APPLICANT_COLLECTED", jobId: jobId || "" });
-      return Applicants.createCollectedIndex(reply?.entries || [], { jobId: jobId || "" });
+      return build(reply?.entries || [], { jobId: jobId || "" });
     } catch {
       // The worker being unreachable must never mean "collect everything
       // again"; an empty index simply skips nobody.
-      return Applicants.createCollectedIndex([], { jobId: jobId || "" });
+      return build([], { jobId: jobId || "" });
     }
   }
 
@@ -3872,9 +3883,10 @@
     // walks past those rows without opening them; `recollect` is the way to ask
     // for the whole list again on purpose.
     const jobId = Applicants.parseHiringContext(location.href).jobId || "";
+    const listed = options.listOnly === true;
     const collected = options.recollect === true
       ? Applicants.createCollectedIndex([], { jobId })
-      : await loadCollectedIndex(jobId);
+      : await loadCollectedIndex(jobId, { listed });
     listDiagnostics.alreadyCollected = collected.size;
 
     // The job header, read ONCE for a list pass and attached to every row.
@@ -4123,11 +4135,11 @@
       // `extractApplicant` and everything it drives is untouched and still the
       // only path for the full collection — it is simply not called here.
       //
-      // The already-collected skip is deliberately NOT consulted: a name-only
-      // record is not `isCollectedApplicant`, so it would never match anyway,
-      // and re-saving is one merge that cannot lose anything. A list pass over
-      // a job already listed is therefore cheap and idempotent rather than
-      // clever.
+      // Rows this pass has already listed were retired in bulk above, against
+      // `createListedIndex` rather than `createCollectedIndex` — every record a
+      // list pass writes is name-only, which is deliberately *not* "collected",
+      // so the collected test always answers no and a resumed pass would walk
+      // the whole job again. `options.recollect` is how to ask for it anyway.
       if (options.listOnly === true) {
         // Rule 12a and rule 13a inside the loop, not between items: a hidden
         // tab renders nothing, so its rows are not worth reading, and a Stop

@@ -710,9 +710,19 @@ questions, and the second costs hours where the first costs a walk down the list
   change as the list is walked, so reading it per row would be hundreds of forced layouts for one
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.
 - **A listed applicant is not a collected one.** `isCollectedApplicant` needs one substantive field,
-  so a later full run still opens these people rather than walking past them forever. That is also
-  why the already-collected skip is not consulted during a list pass: it could never match, and
-  re-saving is one merge that cannot lose anything.
+  so a later full run still opens these people rather than walking past them forever.
+- **Which "already have them" question is asked depends on the pass** (3.7.10). A full run asks
+  `createCollectedIndex` — "is this person **collected**" — because a record with nothing substantive
+  on it is a run that *failed* on them and must be tried again. A list pass asks
+  `createListedIndex` — "do I already **have** them" — because every record it writes is name-only,
+  so the collected test always answers no and a resumed pass would walk the whole job again. That
+  matters most once the pass opens each applicant: a row then costs tens of seconds, and since an
+  interrupted run continues itself, a pass that keeps being interrupted would walk the first page
+  over and over — the re-saves reading as progress, which is exactly what clears the
+  fruitless-return budget that would otherwise stop it. `PV_APPLICANT_COLLECTED` therefore sends
+  **every** stored entry with the verdict beside it rather than filtering on the verdict, because a
+  page filtering on `collected` can never tell "already listed" from "never seen".
+  `options.recollect` asks for the whole list again either way.
 - **Two earlier changes are what make running it first safe**, and neither is incidental:
   `saveApplicant` reconciles on `job.id + applicationId` (rule 14, v6) so the later full pass enriches
   *this* record instead of creating a second one under a different hash, and `mergeApplicantRecord`

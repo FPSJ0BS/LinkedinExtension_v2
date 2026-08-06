@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0099",
+  "name": "A list pass skips the rows it has already listed, not only the ones fully collected",
+  "request": "A list pass skips the rows it has already listed, not only the ones fully collected",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T09:36:29.668Z",
+  "completedAt": "2026-08-06T09:39:57.510Z",
+  "startCommit": "4f4abfd8c683836991fefdb1f62154a638cca423",
+  "gitRef": "task/TASK-0099",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Prerequisite for making the list pass open each applicant, and a loop risk in its own right. createCollectedIndex answers 'is this person COLLECTED', which deliberately means 'carries something substantive' - so a name-only record reads as NOT collected, which is right for a full run (it must still open them) and wrong for the list pass itself, since every record that pass writes is name-only. The collected test therefore always answered no and a resumed list pass re-walked the whole job from the first row. Harmless while a row cost a millisecond; not harmless once a row costs tens of seconds, and actively a loop once an interrupted run continues itself - a pass that keeps being interrupted would walk page one over and over, and because the re-saves read as progress they clear the very fruitless-return budget that would otherwise stop it. Added createListedIndex(), which asks 'do I already HAVE them' by delegating to createCollectedIndex with anyRecord, so there is one keying rule and one job-scoping rule rather than two copies. loadCollectedIndex takes { listed } and picks the builder, so the payload is fetched once either way and the empty fallback keeps the same shape. The worker's PV_APPLICANT_COLLECTED reply no longer filters on the verdict - it sends every stored entry with collected beside it - because a page filtering on that flag can never tell 'already listed' from 'never seen'; the extra entries are three small fields each. createCollectedIndex is unchanged for the full run, and a test asserts the two indexes stay distinguishable, since conflating them would make a full run walk past people it never collected."
+}

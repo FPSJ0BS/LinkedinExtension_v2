@@ -1998,6 +1998,16 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     // Three fields per record rather than the whole record, because a job with
     // 600 collected applicants would otherwise put megabytes through the
     // message channel to answer one question per row.
+    //
+    // **Every stored record, and the verdict beside it — never only the
+    // collected ones.** Dropping the rest here made the payload answer exactly
+    // one question, and the list pass has to ask a different one: it writes
+    // name-only records, which are deliberately *not* `collected`, so a page
+    // filtering on that flag can never tell "I already listed this person" from
+    // "I have never seen them". `createCollectedIndex` still consults the flag
+    // and is unchanged; `createListedIndex` ignores it. The extra entries cost
+    // three small fields each — a job with 665 listed applicants is tens of
+    // kilobytes, which is the same order as the answer it already sent.
     const applicants = await getAllApplicants();
     const wanted = String(message?.jobId || "").trim();
     return {
@@ -2011,7 +2021,6 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
           // The one judgement, made by the core so there is one copy of it.
           collected: Applicants.isCollectedApplicant(record)
         }))
-        .filter((entry: any) => entry.collected)
     };
   }
 

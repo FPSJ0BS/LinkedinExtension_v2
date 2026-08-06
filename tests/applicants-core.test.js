@@ -2107,10 +2107,47 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 
   // The live complaint: a run stopped half way went back to the first applicant
   // and collected all of them again.
-  assert.match(source, /async function loadCollectedIndex\(jobId\)/, "the run must ask what is already saved");
+  assert.match(source, /async function loadCollectedIndex\(jobId, \{ listed = false \} = \{\}\)/,
+    "the run must ask what is already saved");
   assert.match(source, /type: "PV_APPLICANT_COLLECTED"/, "of the worker, which is the only thing with a store");
-  assert.match(run, /Applicants\.createCollectedIndex\(\[\], \{ jobId \}\)\s*\n\s*: await loadCollectedIndex\(jobId\)/,
+  assert.match(run, /Applicants\.createCollectedIndex\(\[\], \{ jobId \}\)\s*:\s*await loadCollectedIndex\(jobId, \{ listed \}\)/,
     "and `recollect` is how the whole list is asked for on purpose");
+
+  // WHICH question is asked of the same payload depends on the pass, and the
+  // two are genuinely different. A full run asks "is this person COLLECTED",
+  // because a record with nothing substantive on it is a run that failed on
+  // them and must be tried again. A list pass asks "do I already HAVE them" —
+  // every record it writes is name-only, so the collected test always answers
+  // no, and a resumed pass would walk the entire job over again.
+  assert.match(run, /const listed = options\.listOnly === true;/, "the list pass asks the other question");
+  assert.match(source, /const build = listed \? Applicants\.createListedIndex : Applicants\.createCollectedIndex;/,
+    "and one loader serves both, so the payload is fetched once either way");
+
+  // The worker must therefore stop dropping the merely-listed entries: a page
+  // filtering on `collected` can never tell "already listed" from "never seen".
+  const workerSource = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const collectedBranch = workerSource.slice(
+    workerSource.indexOf("if (type === APPLICANT_MESSAGES.COLLECTED) {"),
+    workerSource.indexOf("if (type === APPLICANT_MESSAGES.AUTO_RUN) {")
+  );
+  assert.match(collectedBranch, /collected: Applicants\.isCollectedApplicant\(record\)/, "the verdict still travels");
+  assert.ok(!/\.filter\(\(entry: any\) => entry\.collected\)/.test(collectedBranch),
+    "but it must not be applied as a filter, or only one of the two questions can be answered");
+
+  // And the two indexes must stay distinguishable, or the list pass would make
+  // a full run walk past people it never actually collected.
+  const entries = [
+    { applicationId: "1", jobId: "9", name: "Listed Only", collected: false },
+    { applicationId: "2", jobId: "9", name: "Fully Collected", collected: true }
+  ];
+  const onlyCollected = Applicants.createCollectedIndex(entries, { jobId: "9" });
+  assert.equal(onlyCollected.has({ applicationId: "1" }), false, "a name-only row is NOT collected");
+  assert.equal(onlyCollected.has({ applicationId: "2" }), true);
+  const everyRecord = Applicants.createListedIndex(entries, { jobId: "9" });
+  assert.equal(everyRecord.has({ applicationId: "1" }), true, "but it HAS been listed");
+  assert.equal(everyRecord.has({ applicationId: "2" }), true);
+  // Still scoped to the job — an applicant is a person on a job.
+  assert.equal(Applicants.createListedIndex(entries, { jobId: "8" }).has({ applicationId: "1" }), false);
 
   // Decided from the row's own href, before anything is opened.
   assert.match(run, /const rowId = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
@@ -2122,7 +2159,10 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 
   // A worker that cannot answer must never mean "collect everything again".
   const loader = source.slice(source.indexOf("async function loadCollectedIndex"), source.indexOf("async function extractAllApplicants"));
-  assert.match(loader, /catch \{[\s\S]*?createCollectedIndex\(\[\]/, "an unreachable worker skips nobody");
+  // `build` is whichever index this pass asked for, so the empty fallback is
+  // the same shape either way.
+  assert.match(loader, /catch \{[\s\S]*?return build\(\[\], \{ jobId: jobId \|\| "" \}\)/,
+    "an unreachable worker skips nobody");
 
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const branch = worker.slice(worker.indexOf("APPLICANT_MESSAGES.COLLECTED"), worker.indexOf("APPLICANT_MESSAGES.CLEAR"));
