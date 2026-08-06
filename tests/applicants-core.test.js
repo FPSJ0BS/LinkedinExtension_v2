@@ -1379,9 +1379,42 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   assert.match(grow, /walk\.fruitless = produced \? 0 : walk\.fruitless \+ 1/, "growth must mean new rows, never a click");
   // And "produced" is the CALLER's question — is there a row the run has not
   // done — so a pager that replaces a page is scored as the progress it is.
-  assert.match(grow, /const produced = wanted\(\);/, "the pager is judged by what the run can now collect");
+  // `arrived` is the same question asked with a deadline: `waitFor(() => wanted())`.
+  // Quiet was the wrong thing to wait on in both directions — the DOM is quiet
+  // while the next page is still in flight, and a re-mount never falls quiet
+  // inside the timeout at all — so the rows are waited for directly.
+  assert.match(grow, /const produced = Boolean\(arrived\) \|\| wanted\(\);/,
+    "the pager is judged by what the run can now collect");
+  assert.match(grow, /const arrived = await waitFor\(\(\) => wanted\(\), \{[\s\S]{0,160}?PAGE_ARRIVAL_TIMEOUT_MS/,
+    "and the page is waited for by its rows, not by the DOM falling quiet");
   assert.match(grow, /async function growApplicantList\(diagnostics, hasWork\)/, "the caller supplies the question");
   assert.match(grow, /assertRunnable\(\)/, "and Stop must end it");
+
+  // THE REPORT: "it stops after going to the next page." Pressing the pager
+  // re-mounts the whole hiring view, and for those milliseconds
+  // `applicantList()` answers null — so the walk fell back to the container it
+  // was holding, which by then is DETACHED. A detached node reports no scroll
+  // range (every pass reads as "already at the bottom"), and
+  // `findApplicantPaginationControl` searches its subtree and finds the PREVIOUS
+  // page's pager, which does nothing when clicked. Three presses later the walk
+  // concludes `pagination-retired`, or finds nothing and concludes `settled` —
+  // and both are CONCLUSIVE, so the run reports COMPLETED, `claimAutoRun`
+  // refuses to re-arm a completed job, and nothing can ever restart it.
+  assert.ok(!/const live = applicantList\(\) \|\| list;/.test(grow),
+    "falling back to the held container walks a detached list");
+  assert.match(grow, /const live = await waitForApplicantList\(\);\s*if \(!live\) \{\s*walk\.stoppedBy = "no-list";/,
+    "a missing list is waited for, and otherwise ends the call INCONCLUSIVELY");
+  assert.equal(Applicants.isConclusiveListStop("no-list"), false,
+    "so a re-mount can never complete a run");
+  // And the position handed to the new page must address the new page.
+  assert.match(grow, /const paged = applicantList\(\);\s*if \(paged\) scrollPanelTo\(0, chooseScrollTarget\(paged\)\)/,
+    "the scrolled container is replaced with the page it belonged to");
+
+  const waiter = source.slice(source.indexOf("function waitForApplicantList"), source.indexOf("function createListWalk"));
+  assert.match(waiter, /const live = applicantList\(\);\s*if \(live\) return Promise\.resolve\(live\)/,
+    "the common case must cost nothing");
+  assert.match(waiter, /waitFor\(\(\) => applicantList\(\), \{ timeoutMs, pollMs: 200/,
+    "and the wait is `waitFor`, so Stop and a hidden tab still come first");
 
   // THE REPORT: "it automatically stops working ... make sure it works until the
   // whole list is completed." The on-demand walk took ONE observation as the
@@ -1397,8 +1430,11 @@ test("the applicant list is grown when the run needs a row, never walked up fron
     "and confirmed BEFORE the pager is consulted, or the confirmation buys nothing"
   );
   assert.match(grow, /quiet = 0;/, "a fruitless page click earns the same confirmation over again");
-  assert.match(grow, /const live = applicantList\(\) \|\| list;/,
-    "the list is re-resolved per pass — a detached container reports the range it had when it was unmounted");
+  // Re-resolved per pass — a detached container reports the range it had when it
+  // was unmounted. Written `applicantList() || list` until 3.7.10, and that
+  // fallback WAS the detached container: see the re-mount assertions above.
+  assert.match(grow, /const live = await waitForApplicantList\(\);/,
+    "the list is re-resolved per pass, and never fallen back to a held node");
 
   // The other half, and the one no amount of confirming fixes: the container
   // being driven is a guess. When it is wrong `maxScrollPosition` answers 0,

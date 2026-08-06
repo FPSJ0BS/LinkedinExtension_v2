@@ -203,6 +203,22 @@ commands are unrecoverable.
       control is never offered, because on the last page LinkedIn renders the pager and disables it.
       The connections list's allowlist is deliberately **not** reused: its patterns are anchored on
       whole text labels, and a hiring pager is often an icon whose only name is an `aria-label`.
+      **The list is re-resolved before every pass and never fallen back to** (3.7.10). Pressing the
+      pager re-mounts the whole hiring view, so for those milliseconds `applicantList()` answers
+      null — and `applicantList() || list` fell back to the container the walk was holding, which by
+      then is **detached**. A detached node reports no scroll range, so every pass reads as "already
+      at the bottom"; `findApplicantPaginationControl` then searches that dead subtree and finds the
+      *previous* page's pager, which does nothing when clicked. Three presses later the walk concludes
+      `pagination-retired`, or finds no control and concludes `settled` — and **both are conclusive**,
+      so the run reported COMPLETED at the end of page one and `claimAutoRun` would never re-arm it.
+      That is the whole of "it stops after going to the next page". `waitForApplicantList()` waits the
+      re-mount out (`LIST_REMOUNT_TIMEOUT_MS`, 8 s) and there is now **no fallback at all**: either a
+      live list, or `no-list`, which is *inconclusive* and retried. The page itself is waited for by
+      its **rows** (`waitFor(() => wanted())`, `PAGE_ARRIVAL_TIMEOUT_MS` 15 s) rather than by the DOM
+      falling quiet, because quiet was wrong in both directions — the DOM is quiet while the next
+      page is still in flight, and a re-mount never falls quiet inside a timeout at all — and the
+      "start the new page at its top" scroll addresses the **new** container, since the old one went
+      with the old page.
       **A chevron is stripped before the label is matched** (3.7.9, `paginationLabel()`): the live
       pager on a 665-applicant job renders `Next ›` and `textContent` includes the glyph, so the
       whole-label anchor refused it and the run never left page one — and because no pager was found

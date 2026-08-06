@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0095",
+  "name": "Keep paging: never walk a detached list, and wait for the next page to actually arrive",
+  "request": "Keep paging: never walk a detached list, and wait for the next page to actually arrive",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:38:04.092Z",
+  "completedAt": "2026-08-06T08:41:17.096Z",
+  "startCommit": "3b77d2c61390dd68acc24e4ec5dcdbb9c858d3db",
+  "gitRef": "task/TASK-0095",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 426 tests, validate)"
+  ],
+  "result": "THE REPORT: it stops after going to the next page. Pressing the pager re-mounts the whole hiring view - the same flash the earlier screenshot showed - and for those milliseconds applicantList() answers null. growApplicantList fell back with 'applicantList() || list' to the container it was already holding, which by then is DETACHED, and that fallback was the entire defect. A detached node reports scrollHeight === clientHeight, so every pass reads as 'already at the bottom' and the quiet count runs straight out; findApplicantPaginationControl then searches that dead subtree and finds the PREVIOUS page's pager, which does nothing when clicked. Three presses later the walk concludes pagination-retired, or finds no control at all and concludes settled - and BOTH of those are conclusive, so the run reported COMPLETED at the end of page one, claimAutoRun refuses to re-arm a job whose execution completed, and nothing could ever restart it. A false completion is worse than a stop exactly here, which is what the PERMANENT conclusive-stop rule already says. There is now no fallback: waitForApplicantList() waits the re-mount out (8s, built on waitFor so Stop and a hidden tab still come first) and otherwise the call ends 'no-list', which is inconclusive and retried by the caller. The next page is waited for by its ROWS - waitFor(() => wanted()), 15s - rather than by the DOM falling quiet, because quiet was wrong in both directions: the DOM is quiet while the request is still in flight, so a fast return scored a working press as fruitless, and a re-mount never falls quiet inside the timeout at all. The 'start the new page at its top' scroll now addresses the new container, since the old one was replaced along with the page it belonged to. loadEveryApplicantRow waits for the list on the same reasoning. An older assertion pinned the exact buggy line; its intent - re-resolve per pass - is kept and strengthened."
+}

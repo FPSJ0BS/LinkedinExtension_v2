@@ -3390,7 +3390,9 @@
    * caps the whole walk.
    */
   async function loadEveryApplicantRow(diagnostics = {}) {
-    const list = applicantList();
+    // Waited for, exactly as the on-demand walk does: a missing list is far
+    // more often a list being rebuilt than a list that is not there.
+    const list = await waitForApplicantList();
     diagnostics.listScroll = { passes: 0, rows: 0, pages: 1, paged: 0, stoppedBy: "no-list" };
     if (!list) return applicantRows();
 
@@ -3548,6 +3550,43 @@
     }
   }
 
+  /**
+   * Long enough to cover LinkedIn re-mounting the whole hiring view; short
+   * enough that a list which genuinely is not there is still reported.
+   */
+  const LIST_REMOUNT_TIMEOUT_MS = 8000;
+  /** How long a pressed pager has to actually produce its page. */
+  const PAGE_ARRIVAL_TIMEOUT_MS = 15000;
+
+  /**
+   * The applicant list as it is **now**, waited for while the surface rebuilds.
+   *
+   * Pressing the pager re-mounts the hiring view — the reported "the whole page
+   * flashes" — and for those milliseconds `applicantList()` answers null. Every
+   * caller here previously fell back to the container it was already holding,
+   * which by then is **detached**, and that is the whole of "it stops after
+   * going to the next page":
+   *
+   *   - a detached container reports `scrollHeight === clientHeight`, so the
+   *     walk reads "already at the bottom" on the first pass and every pass
+   *     after it;
+   *   - `applicantRows()` re-resolves, so no new row is ever seen *through the
+   *     stale node*, and the quiet count runs out;
+   *   - `findApplicantPaginationControl` then searches that detached subtree,
+   *     finds the OLD page's pager, and clicking it does nothing at all.
+   *
+   * Three fruitless presses later the walk concludes `pagination-retired`, or
+   * finds no control and concludes `settled` — and **both of those are
+   * conclusive**, so the run reports COMPLETED, `claimAutoRun` refuses to re-arm
+   * a completed job, and nothing can restart it. A false completion is worse
+   * than a stop precisely here.
+   */
+  function waitForApplicantList(timeoutMs = LIST_REMOUNT_TIMEOUT_MS) {
+    const live = applicantList();
+    if (live) return Promise.resolve(live);
+    return waitFor(() => applicantList(), { timeoutMs, pollMs: 200, label: "applicant-list" });
+  }
+
   /** The walk ledger, for a run that grows the list instead of pre-walking it. */
   function createListWalk(diagnostics) {
     diagnostics.listScroll = {
@@ -3586,7 +3625,9 @@
     // the run before, so staleness could not show; now that an inconclusive stop
     // is retried, the value has to mean what it says.
     walk.stoppedBy = "running";
-    const list = applicantList();
+    // Waited for rather than sampled: a missing list is far more often a list
+    // being rebuilt than a list that is not there.
+    const list = await waitForApplicantList();
     if (!list) {
       walk.stoppedBy = "no-list";
       return applicantRows().length;
@@ -3634,7 +3675,18 @@
       // Re-resolved every pass, for the reason `livePanel` exists: the list is
       // re-mounted as it pages, and a detached container keeps answering with
       // the range it had when it was unmounted.
-      const live = applicantList() || list;
+      //
+      // **`|| list` used to be the fallback here, and it was the bug.** A page
+      // change detaches the container this walk is holding; falling back to it
+      // means measuring a node that is no longer on the page and, worse, finding
+      // the previous page's pager inside it. See `waitForApplicantList`. There
+      // is now no fallback at all: either a live list, or an inconclusive stop
+      // the caller retries — never a conclusive one reached on a dead node.
+      const live = await waitForApplicantList();
+      if (!live) {
+        walk.stoppedBy = "no-list";
+        break;
+      }
       const target = chooseScrollTarget(live);
       const max = maxScrollPosition(target);
       const position = currentScrollTop(target);
@@ -3691,18 +3743,37 @@
         walk.stoppedBy = "pagination-refused";
         break;
       }
-      // A page arrives over the network, and a new page starts at its top.
-      await waitForDomQuiet(500, 6000);
+      // A page arrives over the network and the whole hiring view is re-mounted
+      // while it does. **Waiting for the rows is not the same as waiting for
+      // quiet**, and quiet was the wrong question twice over: the DOM is quiet
+      // while the request is still in flight, so a fast `waitForDomQuiet`
+      // returned before page two existed and scored the press as fruitless —
+      // and a re-mount then mutates continuously, so the other outcome was the
+      // 6 s timeout, spent whether or not the page had already arrived.
+      //
+      // The rows answer directly, and they are the thing being waited for.
+      const arrived = await waitFor(() => wanted(), {
+        timeoutMs: PAGE_ARRIVAL_TIMEOUT_MS,
+        pollMs: 250,
+        label: "applicant-page"
+      });
+      // Then let the new page finish mounting before it is read or scrolled.
+      await waitForDomQuiet(400, 3000);
       // What the click revealed decides, never the click — and "revealed" is a
       // row this run has not collected, not a bigger number. A pager that swaps
       // 25 people for 25 different people moved the list forward by a whole
       // page; scoring that as nothing is what collected one page of 665.
-      const produced = wanted();
+      const produced = Boolean(arrived) || wanted();
       walk.fruitless = produced ? 0 : walk.fruitless + 1;
       if (produced) {
         walk.pages += 1;
         walk.rows = applicantRows().length;
-        scrollPanelTo(0, target);
+        // The container that was scrolled has been replaced along with the page
+        // it belonged to, so the "start the new page at its top" has to address
+        // the new one. Handing the position to a detached node silently does
+        // nothing, and the next pass then starts half way down page two.
+        const paged = applicantList();
+        if (paged) scrollPanelTo(0, chooseScrollTarget(paged));
         return walk.rows;
       }
       // A click that revealed nothing earns the same confirmation the first
