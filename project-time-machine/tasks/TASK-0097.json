@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0097",
+  "name": "Offer Collect Applicant List in the popup beside Collect Every Applicant",
+  "request": "Offer Collect Applicant List in the popup beside Collect Every Applicant",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:44:17.349Z",
+  "completedAt": "2026-08-06T08:45:49.668Z",
+  "startCommit": "030151a96774809e17b1ce1ec4f52f6ad2e9a658",
+  "gitRef": "task/TASK-0097",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Requested: add Collect Applicant List to the popup. It matters more there than on the Applicants page - the popup is what the recruiter has open while they are ON the hiring tab, which is the one place a list pass is started from. Rather than a second copy of the close discipline, collectEveryApplicant and collectApplicantList now share runApplicantJob(options, startedMessage): the popup still closes ONLY on the worker's own { ok: true, started: true }, which is its proof that it resolved the hiring tab, revealed it, got a matching-build PV_APPLICANT_PING, armed the auto-run and dispatched EXTRACT_ALL - anything less keeps the window open and shows the error, because a window that vanishes on failure is a button that silently did nothing. Still deliberately not runImport, which is shared with Start Collecting and Collect This Applicant and must never take the window away. The existing popup-close test now exercises the shared handler and additionally asserts that both commands route through it, so the two can no longer drift apart."
+}

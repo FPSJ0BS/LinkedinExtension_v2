@@ -711,9 +711,11 @@ questions, and the second costs hours where the first costs a walk down the list
 - **The profile extraction is stopped, never removed.** `extractApplicant` and everything it drives
   is untouched and is still the only path a full run takes; the list pass simply does not call it. A
   test asserts both halves.
-- Its own button, **Collect Applicant List**, beside Collect Every Applicant. It rides
-  `PV_APPLICANT_COLLECT_ALL`, so `listOnly` travels with the armed options and returning to the tab
-  resumes a list pass *as a list pass* rather than starting to open people.
+- Its own button, **Collect Applicant List**, beside Collect Every Applicant **on the Applicants page
+  and in the popup**. It rides `PV_APPLICANT_COLLECT_ALL`, so `listOnly` travels with the armed
+  options and returning to the tab resumes a list pass *as a list pass* rather than starting to open
+  people. Both whole-job commands in the popup share one handler (`runApplicantJob`), so the
+  close-only-on-`{ok, started}` discipline is one rule rather than two copies that can drift.
 
 ## Collecting every applicant (3.7.3, amended in 3.7.4 and 3.7.6)
 

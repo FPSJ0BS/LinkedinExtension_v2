@@ -2865,7 +2865,14 @@ test("the popup closes itself once Collect Every Applicant has actually started"
   // The run happens on the hiring tab, which the worker has just activated and
   // focused. A popup left hanging over it is covering the one thing the
   // recruiter pressed the button to watch.
-  const handler = popup.slice(popup.indexOf("collectEveryApplicant = async"), popup.indexOf("renderApplicantPanel()"));
+  // Both whole-job commands share one handler, so the close discipline below is
+  // one rule rather than two copies of it that can drift apart.
+  assert.match(popup, /collectEveryApplicant = \(\) => this\.runApplicantJob\(\s*\{\}/,
+    "Collect Every Applicant runs the whole panel");
+  assert.match(popup, /collectApplicantList = \(\) => this\.runApplicantJob\(\s*\{ listOnly: true \}/,
+    "Collect Applicant List asks for the names and nothing else");
+  assert.match(popup, /Collect Applicant List\s*<\/button>/, "and the popup offers it");
+  const handler = popup.slice(popup.indexOf("runApplicantJob = async"), popup.indexOf("renderApplicantPanel()"));
   assert.match(handler, /if \(response\?\.started\) \{\s*\n\s*this\.closePopup\(\);/,
     "closed on the worker's own proof that the run started");
   assert.match(handler, /if \(response\?\.ok === false\) throw new Error/,
