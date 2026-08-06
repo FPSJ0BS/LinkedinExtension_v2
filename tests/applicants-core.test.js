@@ -861,6 +861,56 @@ test("the column that scrolls is the panel's own, never the page around it", () 
   assert.equal(Applicants.chooseColumnScrollTarget([legacy]).id, "div#7");
 });
 
+test("the panel scan may never scroll the applicant list", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE REPORT: the run dragged the applicant list to the top, walked it to the
+  // bottom and snapped it back — once per applicant — while the profile column
+  // it was supposed to be reading barely moved.
+  //
+  // `scrollCandidates` offers every ANCESTOR of the panel, and the column
+  // chooser accepts a candidate that "carries the content being read" — which a
+  // wrapper around both columns does. So the scan could resolve its target to a
+  // container that scrolls the list, and `scanApplicantPanel` opens with
+  // `scrollPanelTo(0, target)` and restores in its `finally`: top, bottom, back.
+  const candidates = source.slice(source.indexOf("function scrollCandidates(root"), source.indexOf("function chooseScrollTarget"));
+  assert.match(candidates, /if \(excludeList && rowLinksIn\(element\) > 1\) return;/,
+    "a candidate holding the list must be refused when a column was asked for");
+  assert.match(source, /function choosePanelScrollTarget\(root\)/, "the panel's own chooser must be named");
+  assert.match(source, /return chooseScrollTarget\(root, \{ excludeList: true \}\)/, "and it is the excluding one");
+
+  // One row link is fine — the panel legitimately links to the applicant it is
+  // showing. Two or more is a list. The same test `applicantPanel()` applies.
+  assert.match(source, /function rowLinksIn\(element\)/, "and it is the same counting rule, not a second one");
+
+  // It is a PARAMETER, not a blanket rule: the list's own scroller is a
+  // legitimate target for the list's own callers, and refusing it everywhere
+  // would leave nothing able to page the list at all.
+  assert.match(source, /const target = chooseScrollTarget\(list\);/, "the list walk still gets a list target");
+  assert.match(source, /const listTarget = chooseScrollTarget\(applicantList\(\)\)/, "and so does the run's own bookkeeping");
+
+  // The page is refused too. The general chooser scores `isScrollingElement` at
+  // +60, so on a layout where no column qualifies it picks the document — which
+  // on this surface moves the list along with everything else.
+  assert.match(source, /if \(excludeList && \(fallback\?\.isScrollingElement \|\| fallback\?\.isDocumentRoot\)\) return null;/,
+    "a page-level fallback must be refused when a column was asked for");
+
+  // ...and a null target must then mean "do not guess", never "drive the page".
+  // `scrollPanelTo(top, null)` falls back to `window.scrollTo`, so every call in
+  // the scan is guarded and the position walk is skipped outright.
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("// ---------------------------------------------------------- extraction"));
+  assert.match(scan, /for \(; target;\) \{/, "no column identified means no position walk at all");
+  assert.ok(!/\n\s*scrollPanelTo\(0, target\);/.test(scan), "every scroll in the scan must be guarded by a target");
+  assert.match(scan, /if \(target\) scrollPanelTo\(originalY, target\);/, "including the restore");
+  assert.match(scan, /const originalY = target \? currentScrollTop\(target\) : 0;/,
+    "and the remembered position is only ours when a column was found");
+
+  // The nested-region pass already refused the list outright, and must keep to it.
+  const regions = source.slice(source.indexOf("function scrollableRegions"), source.indexOf("* Drive one nested region"));
+  assert.match(regions, /if \(list && \(list\.contains\(element\) \|\| element\.contains\(list\)\)\) continue;/,
+    "a nested region may be neither inside the list nor around it");
+});
+
 test("the panel is re-resolved and the whole column is walked, not one screenful", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
 
@@ -871,7 +921,8 @@ test("the panel is re-resolved and the whole column is walked, not one screenful
 
   const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("// ---------------------------------------------------------- extraction"));
   assert.match(scan, /live = livePanel\(live\)[\s\S]*?snapshotPanel\(live/, "every read must be of the live column");
-  assert.match(scan, /target = chooseScrollTarget\(live\) \|\| target/, "and the target re-chosen once the column has content");
+  assert.match(scan, /target = choosePanelScrollTarget\(live\) \|\| target/,
+    "and the target re-chosen once the column has content");
   assert.match(scan, /viewportHeight: viewportOf\(target\)/, "the viewport must be read live, not remembered");
 
   // Sections below the fold only exist once the walk has reached them, so the

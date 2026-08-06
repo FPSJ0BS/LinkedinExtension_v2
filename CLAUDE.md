@@ -886,6 +886,21 @@ was satisfied on the first read and the scan settled having seen one screenful.
   scrolling `overflow-y` and a candidate that carries the content being read, and prefers the
   **innermost** such container. It returns `null` when no column qualifies, and only then does
   `chooseScrollTarget()` fall back to the tested general chooser.
+- **A scan may never scroll the applicant list** (3.7.10, `choosePanelScrollTarget()`). "Carries the
+  content being read" is true of a wrapper around **both** columns, and `scrollCandidates()` offers
+  every ancestor of the panel — so the scan could resolve its target to a container that scrolls the
+  list, and then drove it: `scanApplicantPanel` opens with `scrollPanelTo(0, target)` and restores in
+  its `finally`, which on that target reads as *drag the list to the top, walk it to the bottom, snap
+  it back*, once per applicant. That was the reported behaviour. `scrollCandidates(root,
+  { excludeList: true })` refuses any candidate holding **two or more** row links — one is fine, the
+  panel legitimately links to the applicant it shows, and it is the same `rowLinksIn` test
+  `applicantPanel()` applies. A **page-level** fallback is refused for the same reason. It is a
+  parameter and not a blanket rule, because the list's own scroller is a legitimate target for the
+  list's own callers. **A null target then means "do not guess", never "drive the page"**: every
+  `scrollPanelTo` in the scan is guarded and the position walk is skipped outright, because
+  `scrollPanelTo(top, null)` falls back to `window.scrollTo` — which would have brought the very
+  behaviour back in through the fallback. `revealPanelContent` needs no target at all, so nothing is
+  lost.
 - **`scrollCandidates()` offers descendants as well as every ancestor.** Which side of the scroller
   `applicantPanel()` lands on is markup's choice. A descendant qualifies only if it carries
   ≥ `COLUMN_TEXT_SHARE` (60 %) of the panel's text, so a filter or a menu is refused — the same rule

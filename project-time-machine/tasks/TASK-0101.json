@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0101",
+  "name": "The panel scan may never scroll the applicant list",
+  "request": "The panel scan may never scroll the applicant list",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T10:18:16.798Z",
+  "completedAt": "2026-08-06T10:23:32.356Z",
+  "startCommit": "3592cf9886ad76eea625ef3e604c8c1aa6f8b165",
+  "gitRef": "task/TASK-0101",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 428 tests, validate)"
+  ],
+  "result": "THE REPORT: the run dragged the applicant list to the top, walked it to the bottom and snapped it back once per applicant, while the profile column it was meant to be reading barely moved. Cause: scrollCandidates offers every ANCESTOR of the panel, and chooseColumnScrollTarget accepts a candidate that 'carries the content being read' - which a wrapper around BOTH columns does. So the scan could resolve its target to a container that scrolls the list, and scanApplicantPanel then drove it: it opens with scrollPanelTo(0, target) and restores originalY in its finally, which on that target is exactly top, bottom, snap back. Added scrollCandidates(root, { excludeList }) refusing any candidate holding two or more row links - one is fine, the panel legitimately links to the applicant it shows, and it is the same rowLinksIn test applicantPanel() already applies - plus choosePanelScrollTarget() for the scan's two call sites. A page-level fallback is refused too, because the general chooser scores isScrollingElement at +60 and would pick the document, which on this surface moves the list with everything else. Deliberately a parameter rather than a blanket rule: the list's own scroller is a legitimate target for the list's own callers, and refusing it everywhere would leave nothing able to page the list. The second half matters as much as the first: a null target must mean 'do not guess', never 'drive the page'. scrollPanelTo(top, null) falls back to window.scrollTo and currentScrollTop/maxScrollPosition fall back to the document, so refusing a page target would have brought the same behaviour straight back through the fallback - every scroll in the scan is now guarded and the position walk is skipped outright when no column qualifies. Nothing is lost: revealPanelContent drags the panel's bottom into view inside anchorPage and needs no target at all. scrollableRegions already refused anything inside or around the list and is asserted to keep doing so."
+}
