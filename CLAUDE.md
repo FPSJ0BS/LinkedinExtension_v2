@@ -630,6 +630,22 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
 - `extraction.rawData` keeps the verbatim text every section was parsed from, so a LinkedIn layout
   change is diagnosable from the exported record rather than only from a live page.
 
+**A scan interrupted by a hidden tab keeps what it read** (3.7.10). Reported: *"when it is in the
+middle of a profile and I change to another tab and come back, it moves to the next profile without
+saving it."* `scanApplicantPanel` throws `hidden` the moment the tab goes to the background —
+correctly, rule 12a — and that throw took the **whole applicant** with it, because the accumulator
+is local to `extractApplicant` and nothing had been built from it yet: sections read minutes
+earlier, while the page was plainly on screen, went with it. This is the same argument the two
+disclosures already win, one level up — **a hidden page is a lost *remainder*, not a lost
+applicant** — so `saveInterruptedApplicant()` writes what was read and the error is **still
+re-thrown**. Re-throwing is the load-bearing half: the row is not retired, so the run returns to it
+once the page is renderable again, and because `saveApplicant` merges and `mergeApplicantRecord`
+never overwrites a filled field with a blank, the retry's fuller read wins and the partial can only
+ever be a floor. A record with nothing on it is not written at all — an empty save would claim the
+applicant had been looked at and found bare. The salvage swallows its own failures, because a
+salvage that threw would replace the error the caller is actually reporting. `stopped` is untouched
+and still propagates (rule 13a): a Stop must never become a saved record.
+
 **Merging is enrichment, exactly like the profile accumulator.** `mergeApplicantRecord` concatenates
 the lists and never overwrites a filled field with a blank, and **a resume already `downloaded` keeps
 its filename and its status** — that is what stops the second visit fetching the same file again.

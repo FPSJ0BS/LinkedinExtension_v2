@@ -3149,6 +3149,34 @@
   }
 
   /**
+   * Write down what a half-finished read had already found.
+   *
+   * Only ever called on the way out of an interrupted scan, and deliberately
+   * silent about its own failures: this is a salvage, and a salvage that throws
+   * would replace the error the caller is actually reporting.
+   *
+   * A record with nothing on it is not written at all — an empty save would
+   * claim the applicant had been looked at and found bare, which is the opposite
+   * of what happened, and `isCollectedApplicant` would still (correctly) call it
+   * uncollected, so it buys nothing either.
+   */
+  async function saveInterruptedApplicant({ accumulator, context, sourceUrl, diagnostics }) {
+    try {
+      const record = Applicants.buildApplicantRecord({
+        snapshot: accumulator.snapshot(),
+        context,
+        sourceUrl,
+        buildId: BUILD_ID
+      });
+      if (!Applicants.isCollectedApplicant(record) && !cleanText(record.applicant?.name)) return;
+      await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
+      if (diagnostics) diagnostics.partialSave = true;
+    } catch (error) {
+      if (diagnostics) diagnostics.partialSaveError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
    * Collect the applicant currently open in the detail panel.
    *
    * The order is fixed and asserted by a test: expand what is collapsed, walk
@@ -3194,8 +3222,35 @@
       await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
     }
     if (options.scan !== false) {
-      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
-      panel = walked.panel || panel;
+      try {
+        const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
+        panel = walked.panel || panel;
+      } catch (error) {
+        if (!error?.hidden) throw error;
+        // **THE REPORT: "when it is in the middle of a profile and I change to
+        // another tab and come back, it moves to the next profile without
+        // saving it."**
+        //
+        // The walk throws `hidden` the moment the tab goes to the background —
+        // correctly, rule 12a — and that throw took the whole applicant with it,
+        // because the accumulator is local to this function and nothing had been
+        // built from it yet. Sections read minutes earlier, while the page was
+        // plainly on screen, went with it.
+        //
+        // This is the same argument the two disclosures below already win, one
+        // level up: **a hidden page is a lost REMAINDER, not a lost applicant.**
+        // What was read while the page was visible is legitimate, so it is
+        // written now — and the error is still re-thrown, so the row is NOT
+        // retired and the run comes back to it once the page is renderable
+        // again. `saveApplicant` merges and `mergeApplicantRecord` never
+        // overwrites a filled field with a blank, so the retry's fuller read
+        // wins and this can only ever be a floor.
+        //
+        // `stopped` is untouched and still propagates: rule 13a.
+        accumulator.addWarning("scan: the page was hidden part-way through this applicant, so this is a partial read");
+        await saveInterruptedApplicant({ accumulator, context, sourceUrl, diagnostics });
+        throw error;
+      }
     } else snapshotPanel(panel, accumulator, diagnostics);
 
     // The overlays are opened on whatever the panel is now, not on the node the

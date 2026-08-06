@@ -1416,6 +1416,44 @@ test("the list pass opens every applicant across every page and takes what the p
     "and rides the same command, so the auto-run remembers it");
 });
 
+test("a scan interrupted by a hidden tab keeps what it read while the page was visible", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE REPORT: "when it is in the middle of a profile and I change to another
+  // tab and come back, it moves to the next profile without saving it." The
+  // walk throws `hidden` the moment the tab goes to the background — correctly,
+  // rule 12a — and that throw took the whole applicant with it, because the
+  // accumulator is local to `extractApplicant` and nothing had been built from
+  // it yet. Sections read minutes earlier, while the page was plainly on
+  // screen, went with it.
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
+  assert.match(extract, /if \(!error\?\.hidden\) throw error;/, "only a hidden page is salvaged");
+  assert.match(extract, /await saveInterruptedApplicant\(\{ accumulator, context, sourceUrl, diagnostics \}\);\s*throw error;/,
+    "what was read is written, and the error is STILL re-thrown");
+
+  // Re-thrown is the load-bearing half: the row must not be retired, so the run
+  // comes back to it once the page is renderable again. The store merge means
+  // the retry's fuller read wins and the partial can only ever be a floor.
+  assert.match(source, /async function saveInterruptedApplicant\(\{ accumulator, context, sourceUrl, diagnostics \}\)/,
+    "the salvage is its own named step");
+  const salvage = source.slice(source.indexOf("async function saveInterruptedApplicant"), source.indexOf("* Collect the applicant currently open in the detail panel."));
+  assert.match(salvage, /if \(!Applicants\.isCollectedApplicant\(record\) && !cleanText\(record\.applicant\?\.name\)\) return;/,
+    "an empty record is not written — it would claim the applicant was looked at and found bare");
+  assert.match(salvage, /catch \(error\) \{[\s\S]{0,200}?partialSaveError/,
+    "and a salvage that threw would replace the error the caller is actually reporting");
+
+  // `stopped` is untouched and still propagates: rule 13a means a Stop ends the
+  // work, and it is the one interruption that must not become a saved record.
+  assert.ok(!/if \(error\?\.stopped\)[\s\S]{0,80}?saveInterruptedApplicant/.test(extract),
+    "a Stop is never salvaged into a record");
+
+  // The same argument the two disclosures below already win, one level up — so
+  // all three now agree that a hidden page is a lost REMAINDER, not a lost
+  // applicant.
+  assert.equal((extract.match(/error\?\.hidden/g) || []).length >= 3, true,
+    "the scan, the contact disclosure and the resume must all treat `hidden` the same way");
+});
+
 test("a torn-down panel is never mistaken for the next applicant arriving", () => {
   const ARRIVAL = Applicants.PANEL_ARRIVAL;
   const arrival = (patch) => Applicants.describePanelArrival({
