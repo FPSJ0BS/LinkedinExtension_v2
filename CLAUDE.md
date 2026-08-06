@@ -203,6 +203,16 @@ commands are unrecoverable.
       control is never offered, because on the last page LinkedIn renders the pager and disables it.
       The connections list's allowlist is deliberately **not** reused: its patterns are anchored on
       whole text labels, and a hiring pager is often an icon whose only name is an `aria-label`.
+      **A chevron is stripped before the label is matched** (3.7.9, `paginationLabel()`): the live
+      pager on a 665-applicant job renders `Next ›` and `textContent` includes the glyph, so the
+      whole-label anchor refused it and the run never left page one — and because no pager was found
+      the walk reported `settled`, a *conclusive* stop, so the job was marked `COMPLETED` at 25 of
+      665 and could not restart. Stripping rather than widening the pattern keeps the anchor's
+      meaning: removing a glyph from `Next: Message` leaves `next: message`, which still fails, and
+      the denylist is consulted before any of it. A control whose **whole** name is the glyph is
+      accepted only because `inContainer` is checked immediately after — a bare `›` elsewhere on a
+      hiring page is refused. **Numbered page buttons stay refused**: a bare `2` would make any
+      numeric control in the list a pager.
    i. The opened viewer's own **Download** control (`purpose: "resume-download"`, added in 3.7.9),
       matched by `RESUME_DOWNLOAD_CONTROL_PATTERN` on the **whole** label and **proven inside the
       viewer this extension opened itself**. It exists because the address a viewer fetches is not

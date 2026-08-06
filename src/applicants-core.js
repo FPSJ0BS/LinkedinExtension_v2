@@ -319,6 +319,42 @@
   const APPLICANT_PAGINATION_PATTERN =
     /^(?:next(?: page| \d+| \d+ applicants?)?|show more|load more|see more applicants?|more applicants?|page \d+)$/i;
 
+  /**
+   * Chevrons and arrows a pager welds onto its own name.
+   *
+   * THE LIVE DEFECT, measured from the recruiter's own screen: the pager on a
+   * 665-applicant job renders as `Next ›`, and `textContent` on that control
+   * includes the glyph. The allowlist is anchored on the WHOLE label — on
+   * purpose, so `Next: Message` can never match — so `next ›` was refused as
+   * `not-a-pagination-control` and the run never left page one. Worse than
+   * stopping: with no pager found the walk reports `settled`, which is a
+   * CONCLUSIVE stop, so the job was marked COMPLETED at 25 of 665 and could not
+   * restart.
+   *
+   * Stripped rather than added to the pattern, so the anchor keeps its meaning:
+   * `Next: Message` still fails because removing a glyph leaves `next: message`,
+   * not `next`. The denylist is still consulted first, before any of this.
+   */
+  const PAGINATION_GLYPH_PATTERN = /[›»〉⟩❯⟫>→⇒▶►]/;
+
+  /**
+   * The pager's name with its glyphs removed, or `next` when the glyph IS the
+   * whole name.
+   *
+   * A control named only `›` is accepted **solely** because every caller has
+   * already proven it is inside the applicant list — `inContainer` is checked
+   * immediately after this, and a bare chevron anywhere else on a hiring page
+   * would be refused there. Numbered buttons are deliberately NOT covered: a
+   * bare `2` stays refused, because any numeric control in the list would
+   * otherwise qualify.
+   */
+  function paginationLabel(value) {
+    const raw = String(value ?? "");
+    const stripped = normalizeLabel(raw.replace(/[›»〉⟩❯⟫>→⇒▶►]+/g, " "));
+    if (stripped) return stripped;
+    return PAGINATION_GLYPH_PATTERN.test(raw) ? "next" : "";
+  }
+
   function normalizeLabel(value) {
     const core = CORE();
     if (core?.cleanText) return core.cleanText(value).toLowerCase();
@@ -371,7 +407,7 @@
       return { allowed: true, forbidden: false, label, purpose, reason: "applicant-row" };
     }
     if (purpose === CONTROL_PURPOSE.PAGINATION) {
-      if (!APPLICANT_PAGINATION_PATTERN.test(label)) return refuse("not-a-pagination-control");
+      if (!APPLICANT_PAGINATION_PATTERN.test(paginationLabel(label))) return refuse("not-a-pagination-control");
       // Proven inside the list, exactly as connections pagination is: a "Next"
       // anywhere else on a hiring page belongs to something that is not the
       // applicant list, and pressing it would leave the run somewhere else.

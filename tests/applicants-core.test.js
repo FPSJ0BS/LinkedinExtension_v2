@@ -2154,8 +2154,12 @@ test("the run collects every page of the applicant list, not only the first", as
 
   const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
   const policy = core.slice(core.indexOf("function classifyApplicantControl"), core.indexOf("return refuse(\"unknown-purpose\")"));
-  assert.match(policy, /if \(!APPLICANT_PAGINATION_PATTERN\.test\(label\)\) return refuse\("not-a-pagination-control"\)/,
-    "an allowlist, by name");
+  // Still an allowlist by name; since 3.7.9 the label has its chevron glyphs
+  // stripped first, because the live pager renders `Next ›` and the anchor is on
+  // the whole label. Stripping rather than widening the pattern keeps the anchor
+  // meaningful — `Next: Message` still fails it.
+  assert.match(policy, /if \(!APPLICANT_PAGINATION_PATTERN\.test\(paginationLabel\(label\)\)\) return refuse\("not-a-pagination-control"\)/,
+    "an allowlist, by name, on the de-glyphed label");
   assert.match(policy, /purpose === CONTROL_PURPOSE\.PAGINATION[\s\S]{0,400}?if \(!inContainer\) return refuse\("outside-applicant-list"\)/,
     "and the container proof is mandatory");
   // The denylist still wins: it is tested before any purpose branch.
@@ -2410,6 +2414,45 @@ test("PERMANENT: only a walk that reached the list end may complete a run", asyn
   const grow = source.slice(source.indexOf("async function growApplicantList"), source.indexOf("function logListWalk"));
   assert.match(grow, /walk\.stoppedBy = "running";/, "each growth call clears the previous call's verdict");
   void RUN_STATE;
+});
+
+test("a Next pager is still the pager when its label carries a chevron", () => {
+  const P = Applicants.CONTROL_PURPOSE.PAGINATION;
+  const verdict = (text) => Applicants.classifyApplicantControl({ text, purpose: P, inContainer: true });
+
+  // THE LIVE DEFECT, read off the recruiter's own screen: the pager on a
+  // 665-applicant job renders `Next ›` and `textContent` includes the glyph.
+  // The allowlist is anchored on the whole label, so `next ›` was refused and the
+  // run never left page one — and because no pager was found the walk reported
+  // `settled`, a CONCLUSIVE stop, so the job was marked COMPLETED at 25 of 665.
+  for (const label of ["Next", "Next ›", "Next >", "Next →", "next  ❯", "Next page", "Show more", "Load more", "Page 2"]) {
+    assert.equal(verdict(label).allowed, true, `${label} is the pager`);
+  }
+
+  // A control whose whole name IS the glyph is accepted too — but only because
+  // every caller has proven it is inside the list, which is asserted next.
+  for (const glyph of ["›", "❯", "»"]) {
+    assert.equal(verdict(glyph).allowed, true, `${glyph} is a pager inside the list`);
+    assert.equal(
+      Applicants.classifyApplicantControl({ text: glyph, purpose: P, inContainer: false }).reason,
+      "outside-applicant-list",
+      "and is refused the moment that proof is missing"
+    );
+  }
+
+  // Numbers stay refused: any numeric control in the list would otherwise
+  // qualify. This was the deliberate half of the widening.
+  for (const number of ["2", "3", "10"]) {
+    assert.equal(verdict(number).allowed, false, `a bare ${number} is not a pager`);
+  }
+
+  // And stripping a glyph must not smuggle anything past the anchor or the
+  // denylist — removing `›` from `Next: Message` leaves `next: message`.
+  for (const forbidden of ["Next: Message", "Message · Next", "Next › Reject", "Save", "Shortlist"]) {
+    const result = verdict(forbidden);
+    assert.equal(result.allowed, false, `${forbidden} must never be pressed`);
+  }
+  assert.equal(verdict("Next: Message").forbidden, true, "the denylist is still consulted first");
 });
 
 test("the panel Download probe observes and never presses", async () => {

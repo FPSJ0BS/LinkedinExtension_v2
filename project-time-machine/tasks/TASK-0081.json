@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0081",
+  "name": "Accept a Next pager whose label carries a chevron glyph",
+  "request": "Accept a Next pager whose label carries a chevron glyph",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T05:54:45.576Z",
+  "completedAt": "2026-08-06T05:57:19.650Z",
+  "startCommit": "456ed9ed9d1d6c940d7df8689d372915f1095117",
+  "gitRef": "task/TASK-0081",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed end to end: typecheck, build, 423/423 tests (up from 422, one added), validate (31 build files, 4 React entry points, service-worker imports)",
+    "behaviour spot-checked directly: Next, 'Next >', 'Next arrow', bare chevrons, Next page, Show more, Load more and Page 2 are allowed; bare 2/3/10 refused; Next: Message, Message Next, 'Next > Reject', Save and Shortlist all refused as forbidden-action; a bare chevron with inContainer false refused as outside-applicant-list",
+    "click budget unchanged at exactly seven; no new control and no new call site - only the label the existing pagination control is matched by",
+    "the one pre-existing assertion pinning the old literal was updated deliberately and records why; rule 9h amended in the same task to describe the stripping and its limits",
+    "NOT verified against live LinkedIn (rule 17): the label was read from the user's screenshot, not from a live run, and whether pressing it actually advances the list is still unproven"
+  ],
+  "result": "The live pager on the recruiter's 665-applicant job renders 'Next >' with a chevron glyph, and textContent includes it. APPLICANT_PAGINATION_PATTERN is anchored on the whole label - deliberately, so 'Next: Message' can never match - so 'next >' was refused as not-a-pagination-control and the run never left page one. That is worse than merely stopping: with no pager found the walk reports settled, which isConclusiveListStop treats as a real end of list, so the job was marked COMPLETED at roughly 25 of 665 and the reload-resume was disabled with it. Added paginationLabel(), which strips chevron and arrow glyphs before the allowlist is applied, and treats a control whose whole name is the glyph as 'next'. Stripping rather than widening the pattern keeps the anchor meaningful - removing a glyph from 'Next: Message' leaves 'next: message', which still fails - and the denylist is still consulted first. Numbered page buttons stay refused on purpose, since a bare 2 would make any numeric control in the list a pager."
+}
