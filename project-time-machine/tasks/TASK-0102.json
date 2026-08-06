@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0102",
+  "name": "Page forward instead of scrolling the applicant list to find rows",
+  "request": "Page forward instead of scrolling the applicant list to find rows",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T10:23:44.371Z",
+  "completedAt": "2026-08-06T10:27:16.239Z",
+  "startCommit": "c374853f0cb421055037a55c38df0fc5a2e912db",
+  "gitRef": "task/TASK-0102",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 428 tests, validate)"
+  ],
+  "result": "Requested: do not scroll the applicants list, just scroll the profile. The premise checks out in this file - applicantRows() filters on isVisible(), which tests whether an element has a RENDERED BOX and not whether it is in the viewport, so a row scrolled out of sight is already readable and already clickable, and on a page whose rows are all mounted scrolling the list buys nothing. So the order in growApplicantList is inverted. It used to scroll to the bottom, confirm that bottom over LIST_QUIET_PASSES, and only then look for the pager. It now returns immediately when the page still shows rows the run has not done, then tries the PAGER, and only scrolls if there is no pager to press. On a mounted page that means: walk every rendered row, press Next, walk the next page - with the list never moving between profiles, which was the complaint. The scroll is KEPT as that last resort and deliberately not deleted: an account that virtualizes its list genuinely has rows absent from the DOM until something scrolls, and the alternative to one confirming pass at the end of a page is collecting a fraction of it and calling that complete - the exact failure rule 9h and the conclusive-stop rule exist to prevent. It now costs one pass per PAGE rather than one per APPLICANT. Pressing a page is factored into turnPage() so both paths share one rule, including waiting for the new page by its rows rather than by the DOM falling quiet, and re-targeting the scroll at the container the new page brought with it. An existing assertion pinned 'the bottom is confirmed before the pager is consulted'; that is still true inside the scroll loop and is now asserted against the loop body, with the deliberate pre-scroll pager attempt asserted separately."
+}

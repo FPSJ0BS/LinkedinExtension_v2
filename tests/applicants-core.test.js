@@ -1591,6 +1591,30 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   assert.match(grow, /const paged = applicantList\(\);\s*if \(paged\) scrollPanelTo\(0, chooseScrollTarget\(paged\)\)/,
     "the scrolled container is replaced with the page it belonged to");
 
+  // REQUESTED: do not scroll the applicant list. The premise holds in this file
+  // — `applicantRows()` filters on `isVisible()`, which tests whether an element
+  // has a rendered box and NOT whether it is in the viewport — so a row scrolled
+  // out of sight is already readable and already clickable, and on a page whose
+  // rows are all mounted, scrolling buys nothing.
+  assert.match(source, /return rect\.width > 0 && rect\.height > 0 && element\.getClientRects\(\)\.length > 0;/,
+    "visibility must stay 'has a rendered box', never 'is in the viewport'");
+  // So the order is inverted: rows first, then the pager, and the list is only
+  // ever scrolled as the last thing before declaring the list finished.
+  assert.ok(
+    grow.indexOf("if (wanted()) {") < grow.indexOf("const pager = pagerFor(live);"),
+    "a page still showing unprocessed rows is never grown at all"
+  );
+  assert.ok(
+    grow.indexOf("const pager = pagerFor(live);") < grow.indexOf("for (let pass = 0; pass < LIST_GROW_PASSES"),
+    "and the pager is tried BEFORE anything is scrolled — that is the whole request"
+  );
+  // The scroll is kept as the last resort and deliberately not deleted: an
+  // account that virtualizes its list genuinely has rows absent from the DOM,
+  // and the alternative to one confirming scroll per page is collecting a
+  // fraction of it and calling that complete.
+  assert.match(grow, /nudgeListToLastRow\(\)/, "the last-resort scroll must remain for a virtualized list");
+  assert.match(grow, /const turnPage = async \(pager\) =>/, "and pressing a page is one rule, used by both paths");
+
   const waiter = source.slice(source.indexOf("function waitForApplicantList"), source.indexOf("function createListWalk"));
   assert.match(waiter, /const live = applicantList\(\);\s*if \(live\) return Promise\.resolve\(live\)/,
     "the common case must cost nothing");
@@ -1604,10 +1628,15 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   // `extractAllApplicants` saw no further row and marked the run COMPLETED. A
   // slice still in flight, or a scroll target with no range, therefore finished
   // a 665-applicant job in the first dozen rows and called it done.
-  assert.match(grow, /quiet \+= 1;\s*\n\s*if \(quiet < LIST_QUIET_PASSES\) continue;/,
+  assert.match(grow, /quiet \+= 1;\s*if \(quiet < LIST_QUIET_PASSES\) continue;/,
     "the bottom has to be confirmed, not believed on sight");
+  // Inside the SCROLL loop the confirmation still comes first, or it buys
+  // nothing. (The deliberate pager attempt before any scrolling is asserted
+  // separately below — that one has no bottom to confirm, because it has not
+  // scrolled.)
+  const loop = grow.slice(grow.indexOf("for (let pass = 0; pass < LIST_GROW_PASSES"));
   assert.ok(
-    grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;") < grow.indexOf("const pager ="),
+    loop.indexOf("if (quiet < LIST_QUIET_PASSES) continue;") < loop.indexOf("const pager = pagerFor(live);"),
     "and confirmed BEFORE the pager is consulted, or the confirmation buys nothing"
   );
   assert.match(grow, /quiet = 0;/, "a fruitless page click earns the same confirmation over again");

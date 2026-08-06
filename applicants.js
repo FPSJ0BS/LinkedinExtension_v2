@@ -3720,6 +3720,81 @@
         const startedWith = new Set(applicantRows().map(rowKey));
         return () => applicantRows().some((row) => !startedWith.has(rowKey(row)));
       })();
+    // -------------------------------------------------- page first, scroll last
+    // **REQUESTED: do not scroll the applicant list.** The premise checks out in
+    // this file — `applicantRows()` filters on `isVisible()`, which tests whether
+    // an element has a rendered box and *not* whether it is in the viewport, so a
+    // row scrolled out of sight is already readable and already clickable. On a
+    // page whose rows are all mounted, scrolling the list buys nothing at all.
+    //
+    // So the order is inverted. This used to scroll to the bottom, confirm the
+    // bottom over `LIST_QUIET_PASSES`, and only then look for the pager; now the
+    // pager is tried FIRST, and the list is only ever scrolled as the last thing
+    // before declaring the list finished. On a mounted page that means the run
+    // walks every rendered row, presses Next, and walks the next page — with the
+    // list never moving between profiles, which is the reported complaint.
+    //
+    // The scroll is kept as that last resort and deliberately not deleted: if an
+    // account virtualizes its list, rows genuinely are absent from the DOM until
+    // something scrolls, and the alternative to one confirming scroll at the end
+    // of a page is collecting a fraction of it and calling that complete —
+    // exactly the failure rule 9h and the conclusive-stop rule exist to prevent.
+    // It costs one pass per page rather than one per applicant.
+    const pagerFor = (live) => (
+      walk.fruitless < MAX_FRUITLESS_PAGINATION ? findApplicantPaginationControl(live) : null
+    );
+
+    /** Press the pager and wait for the page it produces. Returns rows, or 0. */
+    const turnPage = async (pager) => {
+      try {
+        clickApplicantPager(pager);
+        walk.paged += 1;
+      } catch {
+        walk.stoppedBy = "pagination-refused";
+        return 0;
+      }
+      // Waited for by its ROWS, never by the DOM falling quiet: the DOM is quiet
+      // while the request is still in flight, and the re-mount that follows never
+      // falls quiet inside a timeout at all.
+      const arrived = await waitFor(() => wanted(), {
+        timeoutMs: PAGE_ARRIVAL_TIMEOUT_MS,
+        pollMs: 250,
+        label: "applicant-page"
+      });
+      await waitForDomQuiet(400, 3000);
+      const produced = Boolean(arrived) || wanted();
+      walk.fruitless = produced ? 0 : walk.fruitless + 1;
+      if (!produced) return 0;
+      walk.pages += 1;
+      walk.rows = applicantRows().length;
+      // The container that was scrolled went with the page it belonged to.
+      const paged = applicantList();
+      if (paged) scrollPanelTo(0, chooseScrollTarget(paged));
+      return walk.rows;
+    };
+
+    // The list is showing rows this run has not done, and none of them needed a
+    // scroll to reach. Nothing to grow.
+    if (wanted()) {
+      walk.rows = applicantRows().length;
+      return walk.rows;
+    }
+
+    // Out of rows on this page, so turn it — before scrolling anything.
+    {
+      const live = await waitForApplicantList();
+      if (!live) {
+        walk.stoppedBy = "no-list";
+        return applicantRows().length;
+      }
+      const pager = pagerFor(live);
+      if (pager) {
+        const rows = await turnPage(pager);
+        if (rows) return rows;
+        if (walk.stoppedBy === "pagination-refused") return applicantRows().length;
+      }
+    }
+
     // How many consecutive passes have ended at the bottom having revealed
     // nothing. One is not an answer: LinkedIn fetches the next slice over the
     // network, and a slice that has not arrived yet looks exactly like a list
@@ -3782,56 +3857,22 @@
       quiet += 1;
       if (quiet < LIST_QUIET_PASSES) continue;
 
-      // Genuinely settled at the bottom of this page. Is there another one?
-      // Without this the end of page one is indistinguishable from the end of
-      // the list.
-      const pager = walk.fruitless < MAX_FRUITLESS_PAGINATION
-        ? findApplicantPaginationControl(live)
-        : null;
+      // Genuinely settled at the bottom of this page, and scrolling revealed
+      // nothing the pager had not already been asked for above. Is there another
+      // page? Without this the end of page one is indistinguishable from the end
+      // of the list.
+      const pager = pagerFor(live);
       if (!pager) {
         walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
         break;
       }
-      try {
-        clickApplicantPager(pager);
-        walk.paged += 1;
-      } catch {
-        walk.stoppedBy = "pagination-refused";
-        break;
-      }
-      // A page arrives over the network and the whole hiring view is re-mounted
-      // while it does. **Waiting for the rows is not the same as waiting for
-      // quiet**, and quiet was the wrong question twice over: the DOM is quiet
-      // while the request is still in flight, so a fast `waitForDomQuiet`
-      // returned before page two existed and scored the press as fruitless —
-      // and a re-mount then mutates continuously, so the other outcome was the
-      // 6 s timeout, spent whether or not the page had already arrived.
-      //
-      // The rows answer directly, and they are the thing being waited for.
-      const arrived = await waitFor(() => wanted(), {
-        timeoutMs: PAGE_ARRIVAL_TIMEOUT_MS,
-        pollMs: 250,
-        label: "applicant-page"
-      });
-      // Then let the new page finish mounting before it is read or scrolled.
-      await waitForDomQuiet(400, 3000);
       // What the click revealed decides, never the click — and "revealed" is a
       // row this run has not collected, not a bigger number. A pager that swaps
       // 25 people for 25 different people moved the list forward by a whole
       // page; scoring that as nothing is what collected one page of 665.
-      const produced = Boolean(arrived) || wanted();
-      walk.fruitless = produced ? 0 : walk.fruitless + 1;
-      if (produced) {
-        walk.pages += 1;
-        walk.rows = applicantRows().length;
-        // The container that was scrolled has been replaced along with the page
-        // it belonged to, so the "start the new page at its top" has to address
-        // the new one. Handing the position to a detached node silently does
-        // nothing, and the next pass then starts half way down page two.
-        const paged = applicantList();
-        if (paged) scrollPanelTo(0, chooseScrollTarget(paged));
-        return walk.rows;
-      }
+      const rows = await turnPage(pager);
+      if (rows) return rows;
+      if (walk.stoppedBy === "pagination-refused") break;
       // A click that revealed nothing earns the same confirmation the first
       // verdict had to earn, rather than letting the next pass press again
       // immediately. `fruitless` still retires the control after three.

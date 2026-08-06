@@ -203,6 +203,18 @@ commands are unrecoverable.
       control is never offered, because on the last page LinkedIn renders the pager and disables it.
       The connections list's allowlist is deliberately **not** reused: its patterns are anchored on
       whole text labels, and a hiring pager is often an icon whose only name is an `aria-label`.
+      **Page first; scroll only as the last resort** (3.7.10). Requested outright: *"you do not need
+      to scroll down the applicants list, you just need to scroll the profile side."* The premise
+      holds — `applicantRows()` filters on `isVisible()`, which tests whether an element has a
+      **rendered box** and not whether it is in the viewport, so a row scrolled out of sight is
+      already readable and already clickable. `growApplicantList` therefore returns immediately when
+      the page still shows unprocessed rows, then tries the **pager**, and only scrolls if there is
+      no pager to press — so on a page whose rows are all mounted the list never moves between
+      profiles, which was the complaint. The scroll is **kept** as that last resort and deliberately
+      not deleted: an account that virtualizes its list genuinely has rows absent from the DOM until
+      something scrolls, and the alternative to one confirming pass per page is collecting a fraction
+      of it and calling that complete — the exact failure the conclusive-stop rule exists to prevent.
+      It now costs one pass per *page* rather than one per *applicant*.
       **The list is re-resolved before every pass and never fallen back to** (3.7.10). Pressing the
       pager re-mounts the whole hiring view, so for those milliseconds `applicantList()` answers
       null — and `applicantList() || list` fell back to the container the walk was holding, which by
