@@ -215,8 +215,8 @@ class ApplicantsApp extends React.Component {
    */
   collectList = () => this.command(
     APPLICANT_MESSAGES.COLLECT_ALL,
-    "Reading the applicant list, page by page…",
-    "Running. Each name is saved as it is read — you can close this page.",
+    "Reading each applicant's profile, page by page…",
+    "Running. Each applicant is saved as it is read — you can close this page.",
     { options: { listOnly: true } }
   );
 

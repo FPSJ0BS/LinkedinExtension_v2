@@ -714,33 +714,40 @@ questions, and the second costs hours where the first costs a walk down the list
   resume-after-a-reload. The only difference is what happens to a row: `Applicants.buildApplicantListRecord()`
   is built from the row itself and streamed to the store with `PV_APPLICANT_SAVE`, one at a time as
   it is read, exactly as the full run streams a finished applicant.
-- **It opens each applicant, lets the panel load and walks it to the bottom before moving on**
-  (`revealApplicantProfile`, 3.7.10 — requested outright: *"slow down on every profile, let it load
-  fully, scroll to its bottom, then move onto the next"*). It is the full run's **movement** without
-  the full run's **reading**: the same single gated row click (rule 9g), the same wait for the panel
-  to be showing that applicant, and the same `scanApplicantPanel` walk — so "loaded" and "scrolled to
-  the bottom" mean here exactly what they mean there, rather than a second, thinner idea of both.
-  **The saved name still comes from the list row, never from the opened panel**: opening is for
-  loading, not for reading. The accumulator the walk fills is discarded, and that is not waste — the
-  walk's stop rule *is* "the panel stopped producing new content", and only the accumulator's own
-  signature can answer it.
-- **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel` gates
-  `expandCollapsedSections` on, so the eight expander clicks a full extraction may spend are never
-  spent here: **one click per applicant** — the row itself — plus the pager. `extractApplicant` and
-  everything it drives is untouched and is still the only path a full collection takes.
-- **A profile that would not open never loses the person.** The name came from the row and is
-  unaffected, so it is still saved and the failure is named in `lastError`. A hidden page is a pause
-  with the same `MAX_HIDDEN_RETRIES` bound the full run applies, or a panel that reliably hides the
-  tab would re-run one applicant for as long as the tab is left alone.
+- **It opens each applicant, lets the panel load, walks it to the bottom, and takes what the panel
+  rendered** (`collectVisibleApplicant`, 3.7.10 — requested outright: *"slow down on every profile,
+  let it load fully, scroll to its bottom, then move onto the next"*, then *"capture name, current
+  role, current company, total experience and education — what is normally visible on the profile
+  page, not hidden behind any button"*).
+- **It is `extractApplicant` with three flags off, not a second reading rule.**
+  `VISIBLE_ONLY_OPTIONS` is `{ expand: false, contact: false, resume: false }`, and each flag is
+  exactly one thing behind a button: `expand` is `expandCollapsedSections` (and it also passes
+  `null` as the scan's expansion budget, so the second expander pass at the bottom of the walk is
+  skipped too), `contact` is the disclosure that holds the email and phone, `resume` is the viewer
+  and the download. What is left is **one click per applicant** — the row itself — plus the pager,
+  and rule 9's per-file budget is untouched. `current_role`, `current_company` and
+  `total_experience` are therefore `deriveCurrentPosition` and `totalExperienceFrom` over the
+  Experience cards the panel rendered, exactly as in a full collection: one definition of "current
+  role" on this surface, not two.
+- **The row's own name is the FLOOR, and only when it is needed.** `extractApplicant` saves whatever
+  the panel gave it; a row that never opened, or a panel that resolved no name, would otherwise
+  leave the one column this pass exists for empty while the row plainly rendered it. Safe because
+  both halves of the store are merge-only — `saveApplicant` reconciles on job + applicationId so the
+  floor lands *on* the record just written rather than beside it, and `mergeApplicantRecord` never
+  overwrites a filled field with a blank, so it can only fill the gap and never flatten the details.
+- **A profile that would not open never loses the person**, and the failure is named in `lastError`.
+  A hidden page is a pause with the same `MAX_HIDDEN_RETRIES` bound the full run applies, or a panel
+  that reliably hides the tab would re-run one applicant for as long as the tab is left alone.
 - **It paces itself** (`LIST_PROFILE_PACE_MS`), because a run walks hundreds of panels back to back
   on the recruiter's own session and the connections importer has paced between profiles since 3.3.
   ⚠ This makes a pass cost **tens of seconds per applicant** rather than a millisecond — a
   665-applicant job is hours, not minutes. That is what makes the listed-index skip below load-bearing
   rather than an optimisation.
-- **The name and the two ids, and deliberately nothing else.** The row also renders a headline and a
-  location; taking them would mean deciding that line two is the headline and line three is the
-  location — positional guessing on generated markup, which rule 11 refuses and rule 6 makes worse
-  than an empty field. `cleanApplicantName` still strips the `· 2nd` degree badge.
+- **From the row itself: the name and the two ids, and deliberately nothing else.** The row also
+  renders a headline and a location; taking them would mean deciding that line two is the headline
+  and line three is the location — positional guessing on generated markup, which rule 11 refuses and
+  rule 6 makes worse than an empty field. Everything beyond the name comes from the **panel**, which
+  labels its own sections. `cleanApplicantName` still strips the `· 2nd` degree badge, and
   `extraction.rawData.list_row` records the provenance, because a name-only record and a full
   extraction that found nothing call for opposite responses.
 - **A row that is not a person is no record at all.** `buildApplicantListRecord()` returns `null`

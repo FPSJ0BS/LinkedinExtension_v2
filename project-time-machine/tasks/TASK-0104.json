@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0104",
+  "name": "The list pass captures every detail the profile renders, and still presses nothing",
+  "request": "The list pass captures every detail the profile renders, and still presses nothing",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T10:46:15.195Z",
+  "completedAt": "2026-08-06T10:52:09.724Z",
+  "startCommit": "df29ebab95a4c1240ef92c1464c397dd049bff51",
+  "gitRef": "task/TASK-0104",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 429 tests, validate)"
+  ],
+  "result": "Requested: capture name, current role, current company, total experience and education - what is normally visible on the profile page, not hidden behind any button - and save them into the existing table columns. Every one of those is already what a full extraction reads off the rendered panel; the three things that make a full extraction slow and clicky are precisely the ones behind buttons, and each is already a flag. So the list pass now calls extractApplicant(VISIBLE_ONLY_OPTIONS) - { expand: false, contact: false, resume: false } - rather than scanning and discarding. expand:false skips expandCollapsedSections AND becomes the scan's null expansion budget, so the second expander pass at the bottom of the walk is skipped too; contact:false leaves the email and phone disclosure unopened; resume:false never opens the viewer or downloads anything. What is left is one click per applicant - the row - plus the pager, so rule 9's per-file budget is untouched. This is deliberately NOT a second reading rule: current_role, current_company and total_experience are deriveCurrentPosition and totalExperienceFrom over the Experience cards the panel rendered, exactly as in a full collection, so there is one definition of 'current role' on this surface rather than two. The row's own name is kept as a FLOOR and sent only when the panel resolved no name or the row never opened - safe because saveApplicant reconciles on job + applicationId so it lands on the record just written rather than beside it, and mergeApplicantRecord never overwrites a filled field with a blank, so it can only fill the gap and never flatten the details. Verified first, as asked, that TASK-0101 did not break profile-side scrolling: the right column holds no applicant-row links, so it passes the new exclusion untouched, and chooseColumnScrollTarget still scores depth as a bonus and picks it. Both UI messages updated, since 'reading the applicant list' no longer describes what the button does."
+}

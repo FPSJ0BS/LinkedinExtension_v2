@@ -1275,9 +1275,10 @@ test("a run that stopped short on the job it is still showing continues itself",
     "which is the guard the delay exists for");
 });
 
-test("the list pass opens every applicant across every page and saves only the name", async () => {
+test("the list pass opens every applicant across every page and takes what the panel renders", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  const Csv = await import("../src/applicant-csv.js");
 
   // The record: the name and the two ids, and deliberately nothing else. The row
   // also renders a headline and a location, and taking them would mean deciding
@@ -1367,54 +1368,76 @@ test("the list pass opens every applicant across every page and saves only the n
   // once, this one is the per-row work.
   const pass = run.slice(run.lastIndexOf("if (options.listOnly === true) {"), run.indexOf("if (collected.has({ applicationId: rowId"));
   assert.ok(pass.length > 200, "the list-pass branch must be found, not an empty slice");
-  assert.ok(!/extractApplicant\(/.test(pass), "no panel is READ");
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
 
-  // Since 3.7.10 it DOES open each applicant and walk their panel to the bottom
-  // before moving on — requested outright — and only the name is still saved.
-  // The walk is there so every profile is genuinely reached and rendered, not
-  // so that more is read from it.
-  assert.match(pass, /await revealApplicantProfile\(row, rowId\)/, "each applicant is opened and walked");
-  // From the pace constant, so the doc comment above the function — which is
-  // where the click budget is reasoned about — is inside the slice.
-  const reveal = source.slice(source.indexOf("const LIST_PROFILE_PACE_MS"), source.indexOf("async function extractAllApplicants"));
-  assert.match(reveal, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
+  // Each applicant is opened, the panel walked to the bottom, and what it
+  // RENDERED is taken: name, current role, current company, total experience,
+  // education. Not a second reading rule — `extractApplicant` is the one the
+  // full collection uses, with the three button-gated steps switched off.
+  assert.match(pass, /await collectVisibleApplicant\(row, rowId\)/, "each applicant is opened and read");
+  // From the options constant, so the doc comment reasoning about the click
+  // budget is inside the slice.
+  const reveal = source.slice(source.indexOf("const VISIBLE_ONLY_OPTIONS"), source.indexOf("async function extractAllApplicants"));
+  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false, contact: false, resume: false \}\)/,
+    "nothing behind a button is opened: no expander, no contact disclosure, no resume viewer");
+  assert.match(reveal, /await extractApplicant\(VISIBLE_ONLY_OPTIONS\)/, "and the reading rule is the shared one");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
   assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
-  assert.match(reveal, /await scanApplicantPanel\(applicantPanel\(\), accumulator, diagnostics, null\)/,
-    "walked by the SAME scan a full collection uses, so 'loaded' and 'scrolled to the bottom' mean one thing");
-  // `null` for the expansion budget is what keeps this to one click per
-  // applicant: it is the flag `scanApplicantPanel` gates the expander on, so
-  // the eight clicks a full extraction may spend are never spent here.
-  assert.match(reveal, /expandCollapsedSections/,
-    "and the reason the expander is not run must be stated where the budget is passed");
+  assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
 
-  // The name still comes from the ROW, never from the opened panel: opening is
-  // for loading, not for reading.
-  assert.match(pass, /name: row\.name,/, "the saved name is the row's");
-  assert.ok(!/findApplicantName|accumulator\.snapshot\(\)/.test(pass), "nothing is taken out of the panel");
+  // `expand: false` is what keeps this to ONE click per applicant — it is also
+  // the flag `extractApplicant` turns into a null expansion budget, so the
+  // second expander pass at the bottom of the walk is skipped too.
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
+  assert.match(extract, /options\.expand === false \? null : expansion/,
+    "expand:false must reach the scan's expansion budget, not only the first pass");
+  assert.match(extract, /if \(options\.contact !== false\)/, "the contact disclosure is opt-out");
+  assert.match(extract, /if \(options\.resume !== false\)/, "and so is the resume viewer");
 
-  // A panel that would not open must not lose the person: the name came from
-  // the row and is unaffected.
-  assert.match(pass, /opened = false;[\s\S]{0,1200}?type: "PV_APPLICANT_SAVE"/,
-    "a profile that would not open still saves the name");
+  // The derived columns come from the SAME rules a full collection uses, so
+  // there is one definition of "current role" on this surface.
+  const derived = Applicants.normalizeApplicantRecord({
+    applicant: {
+      name: "Komal Sharma",
+      experience: [
+        { title: "Human Resources Manager", company: "GTECH LLC", dateRange: "2026-Present", current: true },
+        { title: "Human Resources Executive", company: "FCS Software Solutions Ltd", dateRange: "2025-2026" }
+      ],
+      education: [{ institution: "Dr. A.P.J. Abdul Kalam Technical University" }]
+    }
+  });
+  assert.equal(derived.applicant.currentRole, "Human Resources Manager", "current role is the Present card");
+  assert.equal(derived.applicant.currentCompany, "GTECH LLC");
+  assert.ok(derived.applicant.totalExperience, "and total experience is derived from the cards");
+  assert.equal(derived.applicant.education[0].institution, "Dr. A.P.J. Abdul Kalam Technical University");
+  // Every one of those is a column of the table this pass fills.
+  for (const column of ["applicant_name", "current_role", "current_company", "total_experience", "education"]) {
+    assert.ok(Csv.APPLICANT_TABLE_COLUMNS.includes(column), `${column} must be a table column`);
+  }
+
+  // The row's name is the FLOOR, and only when it is needed: a row that never
+  // opened, or a panel that resolved no name, would otherwise leave the one
+  // column this pass exists for empty while the row plainly rendered it.
+  assert.match(pass, /const named = cleanText\(record\?\.applicant\?\.name\);/, "the panel's name is preferred");
+  assert.match(pass, /if \(!named\) await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_SAVE", record: fromRow \}\)/,
+    "and the row's name only fills a gap");
+  assert.match(pass, /opened = false;/, "a profile that would not open still reaches the floor save");
   // And a hidden page is a pause with the SAME bound the full run applies, or a
   // panel that reliably hides the tab re-runs one applicant forever.
   assert.match(pass, /if \(error\?\.hidden\) \{[\s\S]{0,900}?hiddenRetries > MAX_HIDDEN_RETRIES/,
     "a hidden page pauses, bounded");
-  assert.match(pass, /type: "PV_APPLICANT_SAVE", record/, "each name is saved as it is read");
   assert.match(pass, /processed\.add\(key\)/, "and the row is retired by identity, like every other outcome");
-  // A row the policy refused is skipped, never saved — and never left pending,
-  // or the walk would offer it again on every turn.
-  assert.match(pass, /if \(!record\) \{[\s\S]{0,300}?state\.run\.skipped \+= 1;[\s\S]{0,300}?continue;/,
+  // A row the policy refused is skipped, never opened and never saved — and
+  // never left pending, or the walk would offer it again on every turn.
+  assert.match(pass, /if \(!fromRow\) \{[\s\S]{0,300}?state\.run\.skipped \+= 1;[\s\S]{0,300}?continue;/,
     "a link that is not a person is skipped rather than saved");
   assert.ok(
-    pass.indexOf("if (!record) {") < pass.indexOf('type: "PV_APPLICANT_SAVE"'),
-    "and refused before anything is sent, not after"
+    pass.indexOf("if (!fromRow) {") < pass.indexOf("await collectVisibleApplicant"),
+    "and refused before the row is even opened, not after"
   );
 
-  // The profile extraction is STOPPED, never removed: `extractApplicant` and
-  // everything it drives is still here and still the only path for a full run.
+  // The full extraction is unchanged and is still what a full run calls — this
+  // pass reaches it through the same function with three flags turned off.
   assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
   assert.match(run, /const \{ record \} = await extractApplicant\(options\);/, "and still be what a full run calls");
 
@@ -1431,7 +1454,7 @@ test("the list pass opens every applicant across every page and saves only the n
     "which asks for a list pass and nothing else");
   // `listOnly` travels with the armed options, so returning to the tab resumes a
   // list pass as a list pass rather than starting to open people.
-  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading the applicant list/,
+  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading each applicant's profile/,
     "and rides the same command, so the auto-run remembers it");
 });
 
