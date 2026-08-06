@@ -1335,6 +1335,34 @@
   }
 
   /**
+   * The applicant's own single-valued fields.
+   *
+   * Kept in step with `normalizeApplicantRecord` by hand, deliberately: this is
+   * the list a merge must protect field by field, and deriving it from a sample
+   * record would silently include whatever a future field turns out to be. The
+   * lists, `contact` and `resume` are merged by their own rules and are not
+   * here; `name` is, because a re-read that failed to resolve a name must not
+   * blank the one already stored.
+   */
+  const APPLICANT_SCALAR_FIELDS = Object.freeze([
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt", "applicationStatus"
+  ]);
+
+  /**
+   * A value that is actually there, preferring the newer one.
+   *
+   * The same three-way test `mergeJob` has always applied — `null`, `undefined`
+   * and `""` are all "the page did not show it" — lifted out so the applicant's
+   * own fields get it too. `false` and `0` are values and are kept.
+   */
+  function preferFilled(next, previous) {
+    const missing = (value) => value === null || value === undefined || value === "";
+    return missing(next) ? previous : next;
+  }
+
+  /**
    * Merge a fresh collection over a stored record.
    *
    * Merge-only for the lists, exactly like the profile accumulator, because a
@@ -1342,6 +1370,32 @@
    * the record rather than replace it. A resume that was already downloaded
    * keeps its filename and status — the point of the dedupe is that the second
    * visit does not download it again and does not forget that it has it.
+   *
+   * **THE DEFECT THIS FIXES: a thinner later read erased a fuller stored one.**
+   * The rule has always been stated as "never overwrites a filled field with a
+   * blank", and it was true of the lists, of `contact` and of `job` — every one
+   * of those is merged field by field. It was NOT true of the applicant's own
+   * scalars, which arrived by `...after.applicant`, so `currentRole`,
+   * `currentCompany`, `headline`, `location`, `totalExperience`, `appliedAt`,
+   * `contactedAt` and `applicationStatus` were replaced by whatever the newer
+   * read had — including `null`.
+   *
+   * That is not hypothetical and it is not only about the list pass. Every
+   * re-collection of an applicant already had it: rule 12a pauses a scan the
+   * moment the tab is hidden, `revealPanelContent` gives up on a column it
+   * cannot move, and a re-mount can leave a section unread — so a second visit
+   * that saw less than the first **deleted the difference**, silently, and the
+   * record looked exactly like an applicant who simply has no current role. It
+   * is the same class of loss `keepDownload` was added to stop for the resume,
+   * and the same reason the profile accumulator is merge-only: a later read is
+   * more hydrated *usually*, never *reliably*.
+   *
+   * `resume` gets the same treatment per field rather than `{...before, ...after}`,
+   * which had the identical hole — a pass that found no file set `filename: null`
+   * over a stored name. `available` is OR-ed because a resume seen once exists,
+   * and `downloadStatus` keeps the stored verdict whenever the newer read did not
+   * attempt anything, which generalises `keepDownload` rather than replacing it:
+   * `not_attempted` is "I did not look", never "there is nothing".
    */
   function mergeApplicantRecord(existing, incoming) {
     if (!existing) return normalizeApplicantRecord(incoming);
@@ -1352,20 +1406,44 @@
       before.applicant.resume.downloadStatus === RESUME_STATUS.DOWNLOADED &&
       after.applicant.resume.downloadStatus !== RESUME_STATUS.DOWNLOADED;
 
+    const scalars = {};
+    for (const field of APPLICANT_SCALAR_FIELDS) {
+      scalars[field] = preferFilled(after.applicant[field], before.applicant[field]);
+    }
+
+    const resume = keepDownload ? before.applicant.resume : {
+      ...before.applicant.resume,
+      ...after.applicant.resume,
+      // A resume seen once exists, whatever a later pass managed to see.
+      available: Boolean(before.applicant.resume.available || after.applicant.resume.available),
+      filename: preferFilled(after.applicant.resume.filename, before.applicant.resume.filename),
+      fileType: preferFilled(after.applicant.resume.fileType, before.applicant.resume.fileType),
+      pages: preferFilled(after.applicant.resume.pages, before.applicant.resume.pages),
+      url: preferFilled(after.applicant.resume.url, before.applicant.resume.url),
+      viewerUrl: preferFilled(after.applicant.resume.viewerUrl, before.applicant.resume.viewerUrl),
+      localReference: preferFilled(after.applicant.resume.localReference, before.applicant.resume.localReference),
+      // "I did not look" must never overwrite "I looked, and here is what I found".
+      downloadStatus: after.applicant.resume.downloadStatus === RESUME_STATUS.NOT_ATTEMPTED
+        ? before.applicant.resume.downloadStatus
+        : after.applicant.resume.downloadStatus
+    };
+
     return normalizeApplicantRecord({
       ...after,
       id: before.id,
+      applicationId: preferFilled(after.applicationId, before.applicationId),
       collectedAt: before.collectedAt,
       job: mergeJob(after.job, before.job),
       applicant: {
         ...after.applicant,
+        ...scalars,
         contact: {
           email: after.applicant.contact.email || before.applicant.contact.email,
           phone: after.applicant.contact.phone || before.applicant.contact.phone,
           website: after.applicant.contact.website || before.applicant.contact.website,
           other: [...before.applicant.contact.other, ...after.applicant.contact.other]
         },
-        resume: keepDownload ? before.applicant.resume : { ...before.applicant.resume, ...after.applicant.resume },
+        resume,
         experience: [...before.applicant.experience, ...after.applicant.experience],
         education: [...before.applicant.education, ...after.applicant.education],
         skills: [...before.applicant.skills, ...after.applicant.skills],
@@ -1882,7 +1960,7 @@
     RESUME_STATUS, RESUME_EXTENSION_PATTERN, isResumeDocumentUrl, documentUrlFromDescriptor,
     // naming the saved file
     sanitizeFileName, resumeFileExtension, resumeFileName,
-    applicantId, normalizeApplicantRecord, mergeApplicantRecord,
+    applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,
     createApplicantAccumulator, buildApplicantRecord,
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,

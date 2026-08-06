@@ -603,6 +603,20 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
 **Merging is enrichment, exactly like the profile accumulator.** `mergeApplicantRecord` concatenates
 the lists and never overwrites a filled field with a blank, and **a resume already `downloaded` keeps
 its filename and its status** — that is what stops the second visit fetching the same file again.
+**Through 3.7.10 that first clause was only true of the lists, `contact` and `job`** — each merged
+field by field — and **not** of the applicant's own scalars, which arrived by `...after.applicant`,
+so `currentRole`, `currentCompany`, `headline`, `location`, `totalExperience`, `appliedAt`,
+`contactedAt`, `applicationStatus` and even `name` were replaced by whatever the newer read had,
+including `null`. Every re-collection already had this: rule 12a pauses a scan the moment the tab is
+hidden, `revealPanelContent` gives up on a column it cannot move, and a re-mount can leave a section
+unread — so a second visit that saw less than the first **deleted the difference**, silently, and the
+record then looked exactly like an applicant who has no current role. `APPLICANT_SCALAR_FIELDS` names
+the fields a merge protects one by one (kept in step with `normalizeApplicantRecord` by hand, so a
+future field is a deliberate addition rather than a silent inclusion), and `resume` gets the same
+per-field treatment: `available` is OR-ed because a resume seen once exists, and a `not_attempted`
+status keeps the stored verdict, because **"I did not look" is never "there is nothing"** — which
+generalises `keepDownload` rather than replacing it. It stays *prefer-filled*, not prefer-stored: a
+newer value that exists still wins, or a corrected name could never land.
 `saveApplicant` ([applicant-db.js](src/applicant-db.js)) always merges, so the streamed mid-run save
 is idempotent.
 

@@ -538,6 +538,93 @@ test("re-collecting an applicant enriches the record and never re-downloads the 
   assert.equal(merged.id, stored.id);
 });
 
+test("a thinner later read never erases a fuller stored one", () => {
+  // THE DEFECT. "Never overwrites a filled field with a blank" was true of the
+  // lists, of `contact` and of `job` — each merged field by field — and NOT of
+  // the applicant's own scalars, which arrived by `...after.applicant`. So a
+  // second visit that saw less than the first deleted the difference, silently,
+  // and the record then looked exactly like somebody with no current role.
+  //
+  // Not hypothetical, and not only about the list pass: rule 12a pauses a scan
+  // the moment the tab is hidden, `revealPanelContent` gives up on a column it
+  // cannot move, and a re-mount can leave a section unread. A later read is more
+  // hydrated *usually*, never *reliably*.
+  const stored = Applicants.normalizeApplicantRecord({
+    applicationId: "25550787924",
+    job: { id: "4277798308", title: "Human Resources Executive" },
+    applicant: {
+      name: "Mahak Ayani",
+      profileUrl: "https://www.linkedin.com/in/mahak-ayani",
+      headline: "HR Head",
+      location: "Delhi, India",
+      currentRole: "HR Manager",
+      currentCompany: "Naad Wellness",
+      totalExperience: "4 yrs",
+      appliedAt: "12mo ago",
+      contactedAt: "12mo ago",
+      applicationStatus: "Reviewed",
+      resume: { available: true, filename: "mahak.pdf", fileType: "pdf", pages: 3, url: "https://media.licdn.com/x.pdf", downloadStatus: "downloaded" }
+    }
+  });
+
+  // A pass that read the row and nothing else — every scalar null.
+  const thin = Applicants.normalizeApplicantRecord({
+    applicationId: "25550787924",
+    job: { id: "4277798308" },
+    applicant: { name: "Mahak Ayani" }
+  });
+
+  const merged = Applicants.mergeApplicantRecord(stored, thin);
+  for (const field of Applicants.APPLICANT_SCALAR_FIELDS) {
+    assert.equal(merged.applicant[field], stored.applicant[field], `${field} must survive a thinner read`);
+  }
+  assert.equal(merged.job.title, "Human Resources Executive", "and so must the job header");
+  assert.equal(merged.applicationId, "25550787924");
+
+  // The resume had the identical hole: `{...before, ...after}` let a pass that
+  // found no file write `filename: null` over a stored name.
+  assert.equal(merged.applicant.resume.filename, "mahak.pdf");
+  assert.equal(merged.applicant.resume.fileType, "pdf");
+  assert.equal(merged.applicant.resume.pages, 3);
+  assert.equal(merged.applicant.resume.available, true, "a resume seen once exists");
+  assert.equal(merged.applicant.resume.downloadStatus, "downloaded");
+
+  // "I did not look" must never overwrite "I looked, and here is what I found"
+  // — which generalises `keepDownload` rather than replacing it.
+  const linkOnly = Applicants.normalizeApplicantRecord({
+    applicant: { name: "A", resume: { available: true, viewerUrl: "https://www.linkedin.com/hiring/x", downloadStatus: "link_only" } }
+  });
+  const notLooked = Applicants.normalizeApplicantRecord({ applicant: { name: "A" } });
+  assert.equal(
+    Applicants.mergeApplicantRecord(linkOnly, notLooked).applicant.resume.downloadStatus,
+    "link_only",
+    "not_attempted is 'I did not look', never 'there is nothing'"
+  );
+  // But a real later verdict still wins, or a wrong answer could never be fixed.
+  const failed = Applicants.normalizeApplicantRecord({
+    applicant: { name: "A", resume: { available: true, downloadStatus: "failed" } }
+  });
+  assert.equal(
+    Applicants.mergeApplicantRecord(linkOnly, failed).applicant.resume.downloadStatus,
+    "failed",
+    "a pass that did look may correct the record"
+  );
+
+  // A FULLER read still wins, in both directions — this is prefer-filled, not
+  // prefer-stored. Otherwise a corrected name or a changed role could never land.
+  const fuller = Applicants.normalizeApplicantRecord({
+    applicant: { name: "Mahak Ayani", currentRole: "Head of HR", location: "Gurugram, India" }
+  });
+  const forward = Applicants.mergeApplicantRecord(stored, fuller);
+  assert.equal(forward.applicant.currentRole, "Head of HR", "a newer value that exists still wins");
+  assert.equal(forward.applicant.location, "Gurugram, India");
+  assert.equal(forward.applicant.headline, "HR Head", "and what it did not mention is kept");
+
+  // `false` and `0` are values, not absences.
+  assert.equal(Applicants.APPLICANT_SCALAR_FIELDS.includes("name"), true,
+    "a re-read that resolved no name must not blank the stored one");
+});
+
 test("the accumulator is merge-only, so a section scrolled past is not lost", () => {
   const accumulator = Applicants.createApplicantAccumulator();
   accumulator.addName("Mahak Ayani");

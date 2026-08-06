@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0093",
+  "name": "A thinner later read must never erase a fuller stored one",
+  "request": "A thinner later read must never erase a fuller stored one",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:13:49.776Z",
+  "completedAt": "2026-08-06T08:16:04.778Z",
+  "startCommit": "acb696a490c184e52e6f8e86c2057152c1bfaeca",
+  "gitRef": "task/TASK-0093",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 425 tests, validate)"
+  ],
+  "result": "Found while building the list pass, and separable from it: mergeApplicantRecord's stated rule - never overwrites a filled field with a blank - was true of the lists, of contact and of job, each of which is merged field by field, and NOT of the applicant's own scalars, which arrived by ...after.applicant. So currentRole, currentCompany, headline, location, totalExperience, appliedAt, contactedAt, applicationStatus and even name were replaced by whatever the newer read had, including null. This was never hypothetical and was never only about the list pass: rule 12a pauses a scan the moment the tab is hidden, revealPanelContent gives up on a column it cannot move, and a re-mount can leave a section unread - so a second visit that saw less than the first DELETED the difference, silently, and the record then looked exactly like an applicant who has no current role. Same class of loss keepDownload was added to stop for the resume, and the same reason the profile accumulator is merge-only: a later read is more hydrated usually, never reliably. Added APPLICANT_SCALAR_FIELDS (kept in step with normalizeApplicantRecord by hand, so a future field is a deliberate addition rather than a silent inclusion) and preferFilled(), which applies mergeJob's own three-way null/undefined/empty test - false and 0 are values and are kept. resume gets the same per-field treatment, since {...before, ...after} had the identical hole and let a pass that found no file write filename: null over a stored name; available is OR-ed because a resume seen once exists, and a not_attempted status keeps the stored verdict because 'I did not look' is never 'there is nothing', which generalises keepDownload rather than replacing it. Deliberately prefer-filled and not prefer-stored: a newer value that exists still wins, or a corrected name could never land - asserted in both directions."
+}
