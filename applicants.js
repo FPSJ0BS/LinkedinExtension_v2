@@ -461,35 +461,12 @@
    * if it resolves to the column shell the scroller is a descendant. Offering
    * only ancestors meant the second case fell through to the page.
    */
-  /**
-   * @param {Element} root
-   * @param {{excludeList?: boolean}} options
-   *   `excludeList` refuses any candidate that **holds the applicant list**, and
-   *   it is the whole of "scroll the profile, never the list".
-   *
-   *   THE DEFECT: this offers every ancestor of the panel, and the column
-   *   chooser accepts a candidate that carries the content being read — which a
-   *   wrapper around *both* columns does. So the scan could resolve its target to
-   *   a container that scrolls the list, and then drove it: `scanApplicantPanel`
-   *   opens with `scrollPanelTo(0, target)` and restores `originalY` in its
-   *   `finally`, so on that target the run reads exactly as *drag the list to the
-   *   top, walk it to the bottom, snap it back* — once per applicant, which is
-   *   precisely what was reported.
-   *
-   *   The test is the one `applicantPanel()` already uses for the same reason:
-   *   one row link is fine (the panel legitimately links to the applicant it is
-   *   showing), two or more is a list. It is a parameter rather than a blanket
-   *   rule because the list's own scroller is a legitimate target for the
-   *   *list's* callers — refusing it everywhere would leave nothing able to
-   *   scroll the list at all.
-   */
-  function scrollCandidates(root, { excludeList = false } = {}) {
+  function scrollCandidates(root) {
     const seen = new Set();
     const output = [];
     const add = (element, isScrollingElement = false, carriesContent = null) => {
       if (!(element instanceof Element) || seen.has(element)) return;
       seen.add(element);
-      if (excludeList && rowLinksIn(element) > 1) return;
       const described = describeScrollCandidate(element, root, isScrollingElement, carriesContent);
       if (described) output.push(described);
     };
@@ -523,24 +500,12 @@
    * scroller and the page moves only its own chrome — and the tested general
    * chooser as the fallback for a layout where the page really is the scroller.
    */
-  function chooseScrollTarget(root, { excludeList = false } = {}) {
-    const candidates = scrollCandidates(root, { excludeList });
+  function chooseScrollTarget(root) {
+    const candidates = scrollCandidates(root);
     const column = Applicants.chooseColumnScrollTarget?.(candidates);
     if (column) return column;
     if (!Connections?.chooseScrollTarget) return null;
-    // The general chooser scores `isScrollingElement` at +60, so on a layout
-    // where no column qualifies it will happily pick the page — which on this
-    // surface moves the list along with everything else. Refused outright when
-    // the caller asked for a column: no scrolling at all beats scrolling the
-    // wrong thing, and `revealPanelContent`'s `scrollIntoView` needs no target.
-    const fallback = Connections.chooseScrollTarget(candidates);
-    if (excludeList && (fallback?.isScrollingElement || fallback?.isDocumentRoot)) return null;
-    return fallback;
-  }
-
-  /** The detail column's own scroller, and never anything that holds the list. */
-  function choosePanelScrollTarget(root) {
-    return chooseScrollTarget(root, { excludeList: true });
+    return Connections.chooseScrollTarget(candidates);
   }
 
   function currentScrollTop(target) {
@@ -3063,13 +3028,8 @@
 
   async function scanApplicantPanel(panel, accumulator, diagnostics, budget) {
     let live = livePanel(panel);
-    // The DETAIL column's own scroller, and nothing that holds the list. A
-    // target that scrolls the list turns this function into "drag the list to
-    // the top, walk it down, snap it back", once per applicant.
-    let target = choosePanelScrollTarget(live);
-    // Only meaningful when a column was identified; `currentScrollTop(null)`
-    // answers with the document's position, which is not ours to restore.
-    const originalY = target ? currentScrollTop(target) : 0;
+    let target = chooseScrollTarget(live);
+    const originalY = currentScrollTop(target);
     const deadline = Date.now() + SCAN_BUDGET_MS;
     // `revealPanelContent` scrolls whatever ancestors an element needs, which
     // can include the document, so the page's own position is remembered too.
@@ -3081,34 +3041,20 @@
     diagnostics.scrollContainerFound = Boolean(target);
 
     try {
-      if (target) scrollPanelTo(0, target);
+      scrollPanelTo(0, target);
       await waitForDomQuiet(400, 2600);
       // Re-chosen once the column has content in it. Before the first paint the
       // panel can have no overflow at all, and a target picked from that state
       // is the page — which is precisely the container that does not move the
       // applicant's sections.
       live = livePanel(live);
-      target = choosePanelScrollTarget(live) || target;
+      target = chooseScrollTarget(live) || target;
       diagnostics.scrollContainer = target?.id || "none";
       diagnostics.scrollContainerFound = Boolean(target);
-      diagnostics.scrollRange = target ? maxScrollPosition(target) : 0;
+      diagnostics.scrollRange = maxScrollPosition(target);
       snapshotPanel(live, accumulator, diagnostics);
 
-      // **No column qualified, so nothing is driven by position.**
-      //
-      // `scrollPanelTo(top, null)` falls back to `window.scrollTo`, and
-      // `currentScrollTop`/`maxScrollPosition` fall back to the document — so a
-      // null target does not mean "do nothing", it means "drive the page", which
-      // on this surface drags the list along with everything else. That is the
-      // exact outcome `choosePanelScrollTarget` refuses a page-level target to
-      // avoid, and it would have come straight back in through the fallbacks.
-      //
-      // `revealPanelContent` below needs no target at all — it drags the bottom
-      // of the panel into view and lets the browser scroll whatever ancestor
-      // that needs, inside `anchorPage` — so the honest move when no column can
-      // be identified is to skip the position walk and use the mechanism that
-      // never had to guess.
-      for (; target;) {
+      for (;;) {
         scan = Core.nextScanStep(scan, {
           position: currentScrollTop(target),
           maxPosition: maxScrollPosition(target),
@@ -3169,15 +3115,13 @@
       }
 
       // A final read from the top, once everything below has hydrated.
-      if (target) scrollPanelTo(0, target);
+      scrollPanelTo(0, target);
       await waitForDomQuiet(300, 1600);
       live = livePanel(live);
       snapshotPanel(live, accumulator, diagnostics);
     } finally {
-      // Hand the panel back where the recruiter left it, on every path — and
-      // only the panel. With no target there is nothing of ours to restore, and
-      // `scrollPanelTo(y, null)` would move the document instead.
-      if (target) scrollPanelTo(originalY, target);
+      // Hand the panel back where the recruiter left it, on every path.
+      scrollPanelTo(originalY, target);
       window.scrollTo({ top: originalWindowY, behavior: "auto" });
     }
 

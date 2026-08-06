@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "TASK-0106",
+  "name": "Rollback of TASK-0101 (The panel scan may never scroll the applicant list)",
+  "request": "Rollback of TASK-0101 (The panel scan may never scroll the applicant list)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-06T11:01:10.892Z",
+  "completedAt": "2026-08-06T11:01:13.309Z",
+  "startCommit": "bae88d1a26350e35bd46ce9c12805bcd9b300b36",
+  "commit": null,
+  "gitRef": "task/TASK-0106",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-06T11-01-10-284Z created and verified"
+  ],
+  "result": "Reversed TASK-0101 — The panel scan may never scroll the applicant list",
+  "target": {
+    "taskId": "TASK-0101",
+    "taskName": "The panel scan may never scroll the applicant list",
+    "commit": "c374853f0cb421055037a55c38df0fc5a2e912db"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-06T11-01-10-284Z",
+    "commit": "bae88d1a26350e35bd46ce9c12805bcd9b300b36"
+  }
+}
