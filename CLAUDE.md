@@ -947,6 +947,23 @@ point:
 - It waits for the list to have rows, refuses to start on a hidden tab and defers to
   `visibilitychange` (rule 12a), never starts on top of a run in flight, and **adds no click** — it
   replays `extractAllApplicants`, which builds a fresh run state and walks from the first row.
+- **A run that stops short while nobody navigates anywhere continues itself** (3.7.10,
+  `continueInterruptedRun`). Every restart path above answers "did we *arrive* somewhere" — a route
+  change, a tab return, a reload — and **none of them fires when a run simply ends early while the
+  recruiter is sitting on the page watching it**, which is exactly what an inconclusive stop is:
+  `MAX_INCONCLUSIVE_GROWTHS` spent on a list that was being re-mounted leaves `RUN_STATE.STOPPED`,
+  the worker is correctly told `INTERRUPTED` so the job stays restartable, and then nothing restarts
+  it. So the run asks for itself back — a continuation of the recruiter's own unfinished instruction,
+  on the job they started it on, which is the same standing the reload-resume has. It routes through
+  `pumpAutoRun`, so every guard on that path applies unchanged. Four bounds, and this is the one
+  place on the surface where a missing bound walks a recruiter's job forever: a **COMPLETED** run is
+  never continued (the end of the list ends it), `autoRun.disabled` is checked first (rule 13a),
+  leaving the surface blanks the key, and the same `MAX_FRUITLESS_RETURNS` budget a tab return spends
+  applies — an attempt that collected nobody new does not earn another, while one that collected
+  somebody resets it, which is why walking page after page is unbounded in *pages* and still bounded
+  in *failures*. It is deliberately **not** applied on the throw path: a throw out of the walk is a
+  challenge, a checkpoint or a page that stayed hidden past the wait, and rule 13 says those pause
+  for a person.
 
 **Pressing Collect Every Applicant in the popup closes the popup** (3.7.7). The run happens on the
 hiring tab, which the worker has just activated and focused, so a popup hanging over it covers the one

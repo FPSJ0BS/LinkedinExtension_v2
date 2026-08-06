@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0096",
+  "name": "A run that stopped short on a job the page is still on continues itself",
+  "request": "A run that stopped short on a job the page is still on continues itself",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:41:56.043Z",
+  "completedAt": "2026-08-06T08:44:06.894Z",
+  "startCommit": "e6b502d0db2c7917619378c2783309aa891fd20e",
+  "gitRef": "task/TASK-0096",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "The other half of 'keep going until there is no next page'. Every restart path on this surface answers 'did we ARRIVE somewhere' - a route change, a tab return, a reload - and none of them fires when a run simply ends early while the recruiter is sitting on the page watching it. That is exactly what an inconclusive stop is: MAX_INCONCLUSIVE_GROWTHS spent on a list being re-mounted leaves RUN_STATE.STOPPED, the worker is correctly told INTERRUPTED so the job stays restartable, and then nothing restarts it, because no address changed and no tab was switched. The surface goes quiet mid-list with the instruction still armed and nobody to act on it. continueInterruptedRun() asks for the run back - a continuation of the recruiter's own unfinished instruction, on the job they started it on, which is the same standing the reload-resume already has, so the extension still never decides on its own to start reading a page. It routes through pumpAutoRun rather than calling the runner, so every guard on that path applies unchanged: the worker is still asked whether the job is armed, a hidden tab still defers, a run in flight is still left alone. Deferred by CONTINUE_DELAY_MS because it runs inside the promise the caller assigned to state.running, which startAutoRun refuses to start on top of. Four bounds, and this is the one place on the surface where a missing bound walks a job forever: a COMPLETED run is never continued so the end of the list ends it, autoRun.disabled is checked first (rule 13a), leaving the surface blanks the key, and the same MAX_FRUITLESS_RETURNS budget a tab return spends applies - an attempt that collected nobody new does not earn another, while one that collected somebody resets it, which is why walking page after page is unbounded in pages and still bounded in failures. Deliberately NOT applied on the throw path: a throw out of the walk is a challenge, a checkpoint or a page hidden past the wait, and rule 13 says those pause for a person rather than being retried in a loop."
+}

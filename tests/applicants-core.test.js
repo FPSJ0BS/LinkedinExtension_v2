@@ -1134,6 +1134,57 @@ test("the next applicant is only scanned once the panel is showing them", async 
   assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
 });
 
+test("a run that stopped short on the job it is still showing continues itself", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // THE GAP. Every restart path on this surface answers "did we ARRIVE
+  // somewhere" — a route change, a tab return, a reload. None of them fires
+  // when a run simply ends early while the recruiter is sitting on the page
+  // watching it, which is exactly what an inconclusive stop is: the growth
+  // budget spent on a list that was being re-mounted leaves RUN_STATE.STOPPED,
+  // the worker is correctly told INTERRUPTED so the job stays restartable, and
+  // then nothing restarts it because no address changed and no tab was switched.
+  const runner = source.slice(source.indexOf("async function runEveryApplicant"), source.indexOf("function applicantsPageKey"));
+  assert.match(runner, /await report\(lifecycle\);[\s\S]{0,300}?continueInterruptedRun\(result\);/,
+    "the lifecycle is reported BEFORE the continuation, or claimAutoRun refuses a still-running lease");
+
+  // NOT on the throw path. A throw out of the walk is a challenge, a checkpoint
+  // or a page that stayed hidden past the wait, and rule 13 says those pause and
+  // wait for a person — retrying them in a loop turns a rate limit into a worse
+  // one.
+  // The runner's own body, which ends where the continuation is defined.
+  const body = runner.slice(0, runner.indexOf("const CONTINUE_DELAY_MS"));
+  const thrown = body.slice(body.indexOf("} catch (error) {"));
+  assert.ok(thrown.length > 50, "the throw path must be found, not an empty slice");
+  assert.ok(!/continueInterruptedRun/.test(thrown), "a challenge or a checkpoint must never be retried in a loop");
+
+  const cont = source.slice(source.indexOf("function continueInterruptedRun"), source.indexOf("// -------------------------------------------------- coming back to a job"));
+  assert.ok(cont.length > 200, "the continuation must be its own named step");
+
+  // Every bound, and this is the one place on the surface where a missing bound
+  // is a run that walks a recruiter's job forever.
+  assert.match(cont, /if \(state\.autoRun\.disabled \|\| state\.aborted\) return;/, "Stop is checked first (rule 13a)");
+  assert.match(cont, /if \(result\?\.run\?\.state === Applicants\.RUN_STATE\.COMPLETED\) return;/,
+    "the end of the list ends it");
+  assert.match(cont, /if \(result\?\.run\?\.stopRequested\) return;/, "and so does a stop already recorded on the run");
+  assert.match(cont, /const key = applicantsPageKey\(location\.href\);\s*if \(!key\) return;/,
+    "leaving the surface blanks the key");
+  assert.match(cont, /state\.autoRun\.fruitlessReturns >= MAX_FRUITLESS_RETURNS/,
+    "an attempt that collected nobody new does not earn another");
+
+  // It goes through pumpAutoRun, so every guard that path already has applies
+  // unchanged — the worker is still asked whether the job is armed.
+  assert.match(cont, /setTimeout\(\(\) => pumpAutoRun\(\), CONTINUE_DELAY_MS\)/,
+    "the continuation is deferred and routed through the existing arrival path");
+  assert.ok(!/runEveryApplicant\(/.test(cont), "it must never call the runner directly, or every guard is bypassed");
+
+  // Deferred because it runs INSIDE the promise the caller assigned to
+  // `state.running`, and `startAutoRun` refuses to start on top of a run in
+  // flight.
+  assert.match(source, /if \(state\.running \|\| state\.extracting\) return abandonAutoRun\("a run is already in flight"\)/,
+    "which is the guard the delay exists for");
+});
+
 test("the list pass collects every applicant's name across every page, opening nobody", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");

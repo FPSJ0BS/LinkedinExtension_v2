@@ -4294,11 +4294,81 @@
         ? Applicants.AUTO_RUN_STATE.COMPLETED
         : Applicants.AUTO_RUN_STATE.INTERRUPTED;
       await report(lifecycle);
+      // Reported first, then continued: the worker has to see this execution
+      // finish before it can hand the job to the next one, and `claimAutoRun`
+      // refuses a lease that is still `running`.
+      continueInterruptedRun(result);
       return result;
     } catch (error) {
       await report(Applicants.AUTO_RUN_STATE.INTERRUPTED);
+      // Deliberately NOT continued. A throw out of the walk is a challenge, a
+      // checkpoint or a page that stayed hidden past the wait, and rule 13 says
+      // those pause and wait for a person — retrying them in a loop is the one
+      // thing that would turn a rate limit into a worse one.
       throw error;
     }
+  }
+
+  /** Long enough for the surface to settle after whatever ended the last attempt. */
+  const CONTINUE_DELAY_MS = 1500;
+
+  /**
+   * A run that stopped short, on a job this page is still sitting on, continues.
+   *
+   * **THE GAP THIS CLOSES.** Every restart path on this surface answers "did we
+   * *arrive* somewhere" — a route change, a tab return, a reload. None of them
+   * fires when a run simply ends early *while the recruiter is sitting on the
+   * page watching it*, which is precisely what an inconclusive stop is:
+   * `MAX_INCONCLUSIVE_GROWTHS` spent on a list that was being re-mounted leaves
+   * `RUN_STATE.STOPPED`, the worker is correctly told `INTERRUPTED` so the job
+   * stays restartable — and then nothing restarts it, because no address
+   * changed and no tab was switched. The surface goes quiet mid-list with the
+   * instruction still armed and nobody to act on it.
+   *
+   * So the run asks for itself back. It is a **continuation of the recruiter's
+   * own unfinished instruction**, on the job they started it on, which is the
+   * same standing the reload-resume has — the extension still never decides on
+   * its own to start reading a page.
+   *
+   * **What stops it looping**, which matters more here than anywhere else on
+   * this surface:
+   *   - a COMPLETED run is never continued, so the end of the list ends it;
+   *   - Stop latches `autoRun.disabled`, checked first (rule 13a);
+   *   - leaving the surface blanks the key;
+   *   - and the same `MAX_FRUITLESS_RETURNS` budget a tab return spends: a
+   *     continuation that collected nobody new does not earn another. A pass
+   *     that collected somebody resets it, which is exactly why walking page
+   *     after page is unbounded in *pages* and still bounded in *failures*.
+   *
+   * It goes through `pumpAutoRun`, so every guard that path already has applies
+   * unchanged: the worker is still asked whether this job is armed, a hidden tab
+   * still defers, and a run already in flight is still left alone.
+   */
+  function continueInterruptedRun(result) {
+    if (state.autoRun.disabled || state.aborted) return;
+    if (result?.run?.state === Applicants.RUN_STATE.COMPLETED) return;
+    if (result?.run?.stopRequested) return;
+    const key = applicantsPageKey(location.href);
+    if (!key) return;
+    if (key === state.autoRun.returnKey && state.autoRun.fruitlessReturns >= MAX_FRUITLESS_RETURNS) {
+      if (!state.autoRun.quietedReturns) {
+        state.autoRun.quietedReturns = true;
+        console.info(
+          "[Profile Vault] not continuing this job again: "
+          + `${state.autoRun.fruitlessReturns} attempt(s) collected nobody new. `
+          + "Press Collect Applicant List or Collect Every Applicant to run it again."
+        );
+      }
+      return;
+    }
+    state.autoRun.pendingKey = key;
+    state.autoRun.attempts = 0;
+    const why = result?.run?.lastError || result?.list?.stoppedBy || "interrupted";
+    console.info(`[Profile Vault] the run stopped short (${why}); continuing on this page.`);
+    // Deferred, because this runs INSIDE the promise the caller assigned to
+    // `state.running` — `startAutoRun` refuses to start on top of a run in
+    // flight, and from in here the current one has not settled yet.
+    setTimeout(() => pumpAutoRun(), CONTINUE_DELAY_MS);
   }
 
   // -------------------------------------------------- coming back to a job
