@@ -958,11 +958,7 @@ test("the resume is downloaded, not previewed, whenever the page already has the
     step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
     "nothing may be opened until the page has been asked"
   );
-  // Since 3.7.9 the guard carries a second condition: a control that would open
-  // its own tab is never pressed either, because that hides the page and makes
-  // the run revisit the same applicant. Stricter, not looser.
-  assert.match(step, /if \(!url && !opensNewTab\) \{\s*\n\s*\/\/ The page did not render it/,
-    "the viewer is the fallback, not the method");
+  assert.match(step, /if \(!url\) \{\s*\n\s*\/\/ The page did not render it/, "the viewer is the fallback, not the method");
   assert.match(step, /diagnostics\.resume\.foundWithoutOpening = Boolean\(rendered\)/, "and it is reported which path was taken");
   // Whichever path ran, a viewer that was opened is closed again — and the close
   // is VERIFIED. Discarding the result is how a preview could be left on screen
@@ -2617,13 +2613,10 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
     "and the surface records that it did not need to open anything");
   assert.match(step, /let url = rendered;/, "the found address is the one the rest of the step uses");
 
-  // THE GUARD. Opening is inside `if (!url && !opensNewTab)`, so an address that
-  // was already known means the viewer is never opened and the resume control
-  // never clicked — and since 3.7.9 a control that would open its own tab is not
-  // pressed either. Stricter than the original guard, never looser.
-  const guard = "if (!url && !opensNewTab) {";
-  assert.match(step, /if \(!url && !opensNewTab\) \{[\s\S]{0,600}?control\.element\.click\(\);/,
-    "the resume is opened ONLY when no address was found and the control stays in this tab");
+  // THE GUARD. Opening is inside `if (!url)`, so an address that was already
+  // known means the viewer is never opened and the resume control never clicked.
+  assert.match(step, /if \(!url\) \{[\s\S]{0,600}?control\.element\.click\(\);/,
+    "the resume is opened ONLY when no address was found");
   assert.ok(
     step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
     "the address is looked for before the control is ever pressed"
@@ -2634,11 +2627,11 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
   // Both halves still happen on the no-open path, because they live after the
   // guarded block: the address is proven, kept as the link, and saved to disk.
   assert.ok(
-    step.indexOf("url = await resolveResumeDocumentUrl(url, diagnostics)") > step.indexOf(guard),
+    step.indexOf("url = await resolveResumeDocumentUrl(url, diagnostics)") > step.indexOf("if (!url) {"),
     "the descriptor resolve is outside the open-only block, so it runs either way"
   );
   assert.ok(
-    step.indexOf('type: "PV_APPLICANT_DOWNLOAD_RESUME"') > step.indexOf(guard),
+    step.indexOf('type: "PV_APPLICANT_DOWNLOAD_RESUME"') > step.indexOf("if (!url) {"),
     "and so is the download, so not opening never means not saving"
   );
 });
@@ -2805,35 +2798,6 @@ test("a Next pager is still the pager when its label carries a chevron", () => {
     assert.equal(result.allowed, false, `${forbidden} must never be pressed`);
   }
   assert.equal(verdict("Next: Message").forbidden, true, "the denylist is still consulted first");
-});
-
-test("a resume control that opens its own tab is never pressed", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
-
-  // THE RUN-KILLER this repo already named in src/background.ts: an
-  // `<a target="_blank">` resume control opens a real tab, the hiring page goes
-  // hidden, extraction throws `hidden`, and the SAME applicant is retried up to
-  // MAX_HIDDEN_RETRIES before being failed — which is what "it goes to the same
-  // profile again and again before doing anything" actually is.
-  assert.match(step, /const controlTarget = cleanText\(control\.element\.getAttribute\?\.\("target"\)\)/,
-    "the control's target is read before anything is pressed");
-  assert.match(step, /const opensNewTab = Boolean\(controlTarget\) && !\/\^_self\$\/i\.test\(controlTarget\)/,
-    "anything but _self opens a tab");
-  assert.match(step, /if \(!url && !opensNewTab\) \{/,
-    "and such a control is never pressed");
-
-  // It is still recorded, and named apart from a viewer that showed nothing —
-  // the two are different problems with different fixes.
-  assert.match(step, /diagnostics\.resume\.opensNewTab = opensNewTab;/, "the decision is on the record");
-  assert.match(step, /reason = opensNewTab \? "control-opens-new-tab" : "no-document-url"/,
-    "and says which of the two happened");
-
-  // Declining to press costs no address: the href is still kept as the viewer
-  // page, and the no-open sweep already had its chance at the document.
-  assert.match(step, /const viewerUrl = linkedUrl \? "" : controlHref;/,
-    "the control's own address is still recorded");
-  assert.equal((step.match(/\.click\(\)/g) || []).length, 1, "still exactly one click in this step");
 });
 
 test("the panel Download probe observes and never presses", async () => {

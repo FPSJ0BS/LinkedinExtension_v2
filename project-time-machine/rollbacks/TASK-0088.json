@@ -1,0 +1,10 @@
+{
+  "id": "TASK-0088",
+  "type": "rollback",
+  "targetTaskId": "TASK-0084",
+  "targetCommit": "73ef0a7da078683e705103b33b86a9eb365e2239",
+  "backupBranch": "tm-backup/2026-08-06T07-16-23-899Z",
+  "backupCommit": "ea32c69345bb535bace481e7879656f6906c6787",
+  "fromCommit": "ea32c69345bb535bace481e7879656f6906c6787",
+  "performedAt": "2026-08-06T07:16:24.268Z"
+}

@@ -261,19 +261,6 @@ commands are unrecoverable.
       until LinkedIn's own viewer resolves it. `diagnostics.resume.foundWithoutOpening` records which
       of the two paths each applicant took. Locked by
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
-
-      **A control that would open its own tab is never pressed** (3.7.9). The guard is
-      `if (!url && !opensNewTab)`: any `target` other than `_self` means pressing it navigates a new
-      tab, the hiring page goes hidden, `assertRunnable()` throws `hidden`, and the **same applicant
-      is retried `MAX_HIDDEN_RETRIES` times** before being recorded as failed — which is what "it
-      goes to the same profile again and again before doing anything" is. This repo already named the
-      failure: `openAndSaveResume()` in [background.ts](src/background.ts) was written for it and
-      says so verbatim, but that worker path was abandoned for the direct download and left the click
-      unguarded. Declining costs nothing that was being had — a control that navigates away never
-      showed a viewer to read — and the `href` is still kept as `viewerUrl`. It is rule 9e's "a link
-      needs no click" applied to the one control that cannot be clicked safely.
-      `diagnostics.resume.reason` distinguishes `control-opens-new-tab` from `no-document-url`,
-      because a viewer that showed no address and a control never pressed are different problems.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
       the applicant that row leads to to be *mounted*, never for the address bar and never for the
