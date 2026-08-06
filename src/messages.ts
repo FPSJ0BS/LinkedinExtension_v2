@@ -100,19 +100,6 @@ export const APPLICANT_MESSAGES = {
    * content-script loop cannot overwrite the lifecycle of its successor.
    */
   RUN_LIFECYCLE: "PV_APPLICANT_RUN_LIFECYCLE",
-  /**
-   * One terminal row outcome, streamed as it happens, so the run's own ledger
-   * outlives the document that built it.
-   *
-   * The auto-run above already survives a navigation; what did not was *what
-   * this execution had already decided about each row*. A restart therefore
-   * re-decided all of them: rows genuinely saved were caught by the collected
-   * index, but a row that failed or would not open was tried again from
-   * scratch on every restart, forever, because nothing counted. Keyed on the
-   * run id, so pressing Collect Every Applicant again mints a new one and
-   * genuinely starts over.
-   */
-  RUN_PROGRESS: "PV_APPLICANT_RUN_PROGRESS",
   CLEAR: "PV_APPLICANT_CLEAR",
   DIAGNOSTICS: "PV_APPLICANT_DIAGNOSTICS"
 } as const;

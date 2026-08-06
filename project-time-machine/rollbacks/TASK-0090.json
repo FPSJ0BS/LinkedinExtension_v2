@@ -1,0 +1,10 @@
+{
+  "id": "TASK-0090",
+  "type": "restore",
+  "targetTaskId": "TASK-0083",
+  "targetCommit": "cb18b947c6e9e6899c4fed0d8e3af46f350ef087",
+  "backupBranch": "tm-backup/2026-08-06T08-00-24-809Z",
+  "backupCommit": "54580ac3586548cb0ea91cec659e8485bf068a08",
+  "fromCommit": "54580ac3586548cb0ea91cec659e8485bf068a08",
+  "performedAt": "2026-08-06T08:00:25.096Z"
+}

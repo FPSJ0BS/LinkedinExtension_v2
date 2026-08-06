@@ -1,0 +1,53 @@
+{
+  "schema": 2,
+  "id": "TASK-0090",
+  "name": "Restore project to TASK-0083 (Number the rows of the applicants table)",
+  "request": "Restore project to TASK-0083 (Number the rows of the applicants table)",
+  "type": "restore",
+  "status": "completed",
+  "startedAt": "2026-08-06T08:00:24.954Z",
+  "completedAt": "2026-08-06T08:01:36.069Z",
+  "startCommit": "54580ac3586548cb0ea91cec659e8485bf068a08",
+  "gitRef": "task/TASK-0090",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed on the restored tree: typecheck, build, 423/423 tests, validate (31 build files, 4 React entry points, service-worker imports)",
+    "git diff --stat against task/TASK-0083 over all project paths is empty - the tree is byte-identical to the target, verified before completing",
+    "the interrupted run's leftover temp file was removed; the TASK-0090 record parsed clean (id, type restore, name) before it was committed"
+  ],
+  "result": "Restored the project tree to TASK-0083 on request. The rollback's own tree restore succeeded and was verified byte-identical to task/TASK-0083, but the run was interrupted by an EPERM while renaming its record into place - a Windows file lock, not a Git or content failure - so HEAD never moved and the active-task lock was correctly left held for exactly this recovery. Finished in place rather than re-run: the working tree was already the intended result and re-running would have restored the same content a second time. Undoes TASK-0084 through TASK-0089 as project code: the applicant-identity confirmation, the SPA re-mount handling, the worker-side run ledger, the resume-tab guard with its own reversal, and paging before scrolling. Every one of those records is preserved and reachable by tag.",
+  "target": {
+    "taskId": "TASK-0083",
+    "taskName": "Number the rows of the applicants table",
+    "commit": "cb18b947c6e9e6899c4fed0d8e3af46f350ef087"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-06T08-00-24-809Z",
+    "commit": "54580ac3586548cb0ea91cec659e8485bf068a08"
+  }
+}

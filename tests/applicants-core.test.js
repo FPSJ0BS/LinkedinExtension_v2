@@ -980,7 +980,7 @@ test("the resume is downloaded, not previewed, whenever the page already has the
 
 test("the detail panel can never be a container that holds the applicant list", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const panel = source.slice(source.indexOf("function mountedApplicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
+  const panel = source.slice(source.indexOf("function applicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
 
   // The live defect: a wrapper around both columns satisfies "two sections", so
   // it won, and the first line of its text was the list's heading.
@@ -988,18 +988,6 @@ test("the detail panel can never be a container that holds the applicant list", 
   assert.ok(!/return best \|\| document\.querySelector\("main"\) \|\| document\.body;\s*\n\s*}\s*\n\s*\/\*\* A link/.test(source),
     "the fallback must not be document.body, which always contains the list");
   assert.match(panel, /rowLinksIn\(element\) <= 1/, "even the fallback must exclude the list");
-
-  // The scoring resolver may answer NULL, and that is what makes "nothing is
-  // mounted" expressible. Without it, everything asking WHO the panel is
-  // showing had to accept the loose fallback's answer, and mid-re-mount that
-  // answer is a container holding the list — the defect above, returning by the
-  // one door that was left open.
-  assert.match(panel, /let best = null;[\s\S]*?return best;\s*\}\s*function applicantPanel\(\)/,
-    "the strict resolver returns null when nothing qualifies");
-  assert.match(panel, /function applicantPanel\(\) \{\s*const mounted = mountedApplicantPanel\(\);/,
-    "and the loose one is built on it, so there is one scoring rule");
-  assert.match(panel, /score < Applicants\.PANEL_MIN_SECTIONS/,
-    "with the same section bar the arrival policy judges a mounted panel by");
 
   // One row link is fine — the panel legitimately links to the application it
   // is showing. Two or more is a list.
@@ -1041,322 +1029,22 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("async function loadEveryApplicantRow"));
 
   // The live defect: waiting for the address to change and the DOM to go quiet
   // meant the scan started on the previous applicant's panel or on an empty
   // one, so every row after the first had no name, role or company.
+  assert.match(source, /function panelIdentity\(\)/, "the panel must have a fingerprint");
+  assert.match(select, /const before = panelIdentity\(\)/, "taken before the click");
+  assert.match(select, /waitFor\(\(\) => panelIdentity\(\) !== before/, "and waited on after it");
   assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
   assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
-
-  // And the defect after it: a TEXT fingerprint, which the teardown alone
-  // satisfies. LinkedIn re-mounts the detail column several applicants into a
-  // run; nothing scores two sections while it does, so `applicantPanel()` fell
-  // back to a container holding the applicant list and the fingerprint duly
-  // "changed" — a half-built shell reported as an applicant who had arrived.
-  assert.match(source, /function panelIdentity\(panel = mountedApplicantPanel\(\)\)/,
-    "the panel's identity must be asked of a MOUNTED panel");
-  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function panelSectionCount"));
-  assert.ok(!/innerText/.test(identity), "identity must never be built from the panel's text");
-  assert.match(identity, /application \? `id:\$\{application\}` : ""/, "the application id is the identity");
-  assert.match(identity, /profile \? `in:\$\{profile\}` : ""/, "with the member's own slug beside it");
-
-  // Arrival is "this applicant, mounted", decided by the tested pure policy.
-  assert.match(select, /const expected = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
-    "the row states which applicant is expected, from its own href");
-  assert.match(select, /describeApplicantArrival\(expected, before\)/, "and arrival is judged against it");
-  assert.match(source, /function describeApplicantArrival\(expected, previousIdentity\) \{[\s\S]{0,600}?Applicants\.describePanelArrival\(\{/,
-    "the adapter reads the DOM; the core decides");
-  assert.match(source, /const panel = mountedApplicantPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
-    "and 'nothing is mounted' must be expressible, so the STRICT resolver is used");
-
-  // Three steps, in order: teardown, then arrival, then settle-and-confirm.
-  assert.ok(
-    select.indexOf("applicant-panel-teardown") < select.indexOf("const arrival = await waitFor"),
-    "teardown is waited for first, so arrival cannot be satisfied by the panel already on screen"
-  );
-  assert.ok(
-    select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
-    "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
-  );
-  assert.match(select, /if \(!arrival \|\| !settled\.arrived\) \{[\s\S]{0,200}?return false;/,
-    "either half failing is a row that did not open");
 
   // A row that never opened is a skip, not a record — scanning anyway would
   // save the previous applicant a second time under this row's identity.
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
   assert.match(run, /const opened = await selectApplicantRow\(row\)/, "the result must be checked");
   assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
-  // "Could not open" covers a row that never responded AND a panel that mounted
-  // somebody else. Only the second means the column was re-mounted underneath
-  // the run, so the verdict's reason is carried to the recruiter.
-  assert.match(run, /state\.lastArrival\?\.reason/, "the reason a row did not open must be reported");
-});
-
-test("a re-mounted panel is not mistaken for the next applicant arriving", () => {
-  const ARRIVAL = Applicants.PANEL_ARRIVAL;
-  const arrival = (patch) => Applicants.describePanelArrival({
-    expected: "111", applicationId: "111", identity: "id:111", previousIdentity: "id:222",
-    sections: 4, connected: true, ...patch
-  });
-
-  // The happy case: this applicant, hydrated.
-  assert.equal(arrival({}).state, ARRIVAL.ARRIVED);
-  assert.equal(arrival({}).arrived, true);
-
-  // THE DEFECT. Mid-re-mount there is no panel at all — and the old text
-  // fingerprint read that as "a different applicant has arrived", because the
-  // resolver fell back to a container holding the list and the text changed.
-  assert.equal(arrival({ connected: false }).state, ARRIVAL.TORN_DOWN);
-  assert.equal(arrival({ connected: false }).arrived, false);
-
-  // A shell that has painted but not hydrated is not an arrival either. The bar
-  // is the same one the panel resolver itself qualifies on.
-  assert.equal(arrival({ sections: 1 }).state, ARRIVAL.MOUNTING);
-  assert.equal(arrival({ sections: Applicants.PANEL_MIN_SECTIONS }).state, ARRIVAL.ARRIVED);
-
-  // The previous applicant still on screen, and somebody else entirely, are
-  // different facts and must not be reported as the same one: only the second
-  // means LinkedIn opened a row other than the one that was clicked.
-  assert.equal(arrival({ applicationId: "222", identity: "id:222" }).state, ARRIVAL.PREVIOUS);
-  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).state, ARRIVAL.OTHER);
-  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).arrived, false);
-
-  // A row whose href carries no parseable id still has to be walkable, so the
-  // link fingerprint stands in — it can only say "nobody new is here yet",
-  // which is weaker than the id test and never a guess.
-  const unnumbered = (patch) => Applicants.describePanelArrival({
-    expected: "", applicationId: "", previousIdentity: "in:linkedin.com/in/asha", sections: 3, connected: true, ...patch
-  });
-  assert.equal(unnumbered({ identity: "in:linkedin.com/in/asha" }).state, ARRIVAL.PREVIOUS,
-    "a panel that has not changed applicant has not arrived");
-  assert.equal(unnumbered({ identity: "in:linkedin.com/in/bhavna" }).state, ARRIVAL.ARRIVED);
-
-  // A mounted panel that rendered no id at all is accepted rather than stalling
-  // the run — stated in the verdict, so nothing pretends it was checked.
-  const unchecked = Applicants.describePanelArrival({
-    expected: "111", applicationId: "", identity: "", previousIdentity: "id:222", sections: 3, connected: true
-  });
-  assert.equal(unchecked.state, ARRIVAL.ARRIVED);
-  assert.match(unchecked.reason, /no id was rendered/);
-});
-
-test("a re-mount of the hiring view pauses reading rather than blending two applicants", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
-
-  // THE REPORT: the whole page area flashes several applicants into a run.
-  // LinkedIn re-mounts its hiring view — both columns, the list, the pager and
-  // the detail panel — and `livePanel()` happily hands back whichever panel is
-  // mounted afterwards. The accumulator is merge-only, so anything read from
-  // then on is folded into the record being built: one record, two people.
-  const watch = source.slice(source.indexOf("function createPanelWatch"), source.indexOf("async function settlePanel"));
-  assert.match(watch, /new MutationObserver\(/, "the surface is watched, not polled");
-  assert.match(watch, /if \(watch\.scheduled\) return;/, "with the routeObserver's one-boolean-and-out callback");
-  assert.match(watch, /const replaced = !watch\.held\.isConnected \|\| application !== watch\.applicationId;/,
-    "and a replacement is decided structurally: the node detached, or the panel links to somebody else");
-  assert.ok(!/innerText/.test(watch), "never from the panel's text");
-  assert.match(watch, /watch\.lastAt = Date\.now\(\)/, "a replacement restarts the quiet timer");
-
-  // The hot path must cost NO LAYOUT. `mountedApplicantPanel()` takes innerText
-  // on every candidate and `panelIdentity()` calls isVisible(); either one runs
-  // several times a second for the whole of every scan, on the recruiter's own
-  // page. That is the forced reflow `applicantRows()` had its name getter made
-  // lazy for. Deciding WHO is on screen stays at the read boundaries, where it
-  // was already being paid for.
-  const detector = watch.slice(watch.indexOf("const check = () => {"), watch.indexOf("watch.observer = new MutationObserver"));
-  assert.ok(!/mountedApplicantPanel\(\)/.test(detector), "the detector must not re-score every container");
-  assert.ok(!/panelIdentity\(/.test(detector), "nor call anything that forces a layout");
-
-  // A re-mount is a BURST. Resuming on the first sign of a panel resumes into
-  // the middle of the next teardown, so the debounce is the whole mechanism.
-  const settle = source.slice(source.indexOf("async function settlePanel"), source.indexOf("function assertSameApplicant"));
-  assert.match(settle, /Applicants\.nextRemountStep\(\{/, "the policy is the tested pure one");
-  assert.match(settle, /if \(step\.action === "continue"\) return livePanel\(panel\);/,
-    "and costs nothing when the surface has not moved");
-  assert.match(settle, /if \(step\.action === "give-up"\) throw remountedError/,
-    "a surface that never settles must still end this applicant");
-
-  // Only OTHER throws: torn-down and half-mounted are waits, and a re-mount
-  // showing the SAME applicant is the ordinary case a merge-only accumulator
-  // handles correctly by re-reading them.
-  const same = source.slice(source.indexOf("function assertSameApplicant"), source.indexOf("* The applicant list column"));
-  assert.match(same, /if \(seen\.state !== Applicants\.PANEL_ARRIVAL\.OTHER\) return;/,
-    "only a different applicant is fatal");
-  assert.match(same, /throw remountedError\(/, "and it is fatal to the record");
-
-  // Every point the scan reads is guarded, and the disclosures re-throw it for
-  // the opposite reason to `hidden`: a hidden page loses a field off the RIGHT
-  // person; a re-mount means the reading is of somebody else.
-  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function currentChallenge"));
-  assert.ok((scan.match(/await settlePanel\(watch, live\)/g) || []).length >= 3,
-    "the position walk, the region reveal and the final read all settle first");
-  assert.ok((scan.match(/assertSameApplicant\(watch\)/g) || []).length >= 3, "and all confirm who is on screen");
-  const finish = source.slice(source.indexOf("async function finishApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
-  assert.equal((finish.match(/if \(error\?\.stopped \|\| error\?\.remounted\) throw error;/g) || []).length, 2,
-    "both disclosures re-throw a re-mount rather than warning and saving anyway");
-  assert.match(finish, /assertSameApplicant\(watch\);[\s\S]{0,700}?Applicants\.buildApplicantRecord\(/,
-    "and the last word before anything is kept is who the page was showing");
-  assert.match(finish, /if \(watch\?\.settled\) \{[\s\S]{0,300}?addWarning\(/,
-    "a re-mount the reader waited out is said on the record");
-
-  // The watcher is per-extraction and disposed, or every applicant leaves a
-  // MutationObserver on the recruiter's page for the rest of the session.
-  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("async function finishApplicant"));
-  assert.match(extract, /const watch = createPanelWatch\(panel, expectedApplicant\)/, "one watcher per applicant");
-  assert.match(extract, /finally \{[\s\S]{0,400}?watch\.disconnect\(\);/, "disposed on every path");
-  assert.match(extract, /const expectedApplicant = panelApplicationId\(mountedApplicantPanel\(\)\) \|\| context\.applicationId/,
-    "and who the extraction belongs to is fixed once, from the panel's own link first");
-
-  // ONE applicant the surface would not hold still for must never end a run
-  // over 665 of them.
-  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
-  assert.match(run, /if \(error\?\.remounted\) \{[\s\S]{0,400}?state\.run\.failed \+= 1;[\s\S]{0,400}?continue;/,
-    "a re-mounted row is one failure and the walk goes on");
-  assert.ok(!/if \(error\?\.remounted\) \{[\s\S]{0,300}?break;/.test(run), "never a break");
-
-  // A missing list is very often a list being REBUILT — the same event. Through
-  // 3.7.9 that null spent one of the run's three inconclusive growths, so three
-  // re-mounts in a row ended a run with nothing wrong with it.
-  const grow = source.slice(source.indexOf("async function growApplicantList"));
-  assert.match(grow, /if \(!list\) list = await waitForApplicantList\(\);/, "the list is waited for before it is missing");
-  assert.match(source, /function waitForApplicantList\(timeoutMs = LIST_REMOUNT_TIMEOUT_MS\)/, "with its own bound");
-  assert.match(source, /return waitFor\(\(\) => applicantList\(\), \{ timeoutMs, pollMs: 200/,
-    "built on waitFor, so Stop and a hidden tab still come first");
-});
-
-test("the run's ledger lives in the worker, so a restart resumes instead of re-deciding", () => {
-  // Only outcomes that produced NO usable record are remembered. A collected
-  // applicant is already in the store, and `createCollectedIndex` is what skips
-  // them — writing them here would double the ledger to say the same thing.
-  const fresh = Applicants.createRunLedger({ runId: "run-1" });
-  assert.deepEqual(fresh.attempts, {});
-  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "collected" }).attempts, {});
-  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "failed" }).attempts, { "id:1": 1 });
-  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "unopened" }).attempts, { "id:1": 1 });
-  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "", outcome: "failed" }).attempts, {},
-    "a row with no key at all is not a row");
-
-  // THE DEFECT. A restart re-decided every row: invisible for rows genuinely
-  // saved, and an unbounded retry for a row that failed, because
-  // `isCollectedApplicant` deliberately refuses to count a record with nothing
-  // substantive on it. So the same bad row was tried again on every restart.
-  let ledger = Applicants.recordRunOutcome(fresh, { key: "id:7", outcome: "failed" });
-  assert.deepEqual(Applicants.exhaustedRunRows(ledger), [],
-    "one failure is not enough — a restart IS a genuine second chance");
-  ledger = Applicants.recordRunOutcome(ledger, { key: "id:7", outcome: "failed" });
-  assert.deepEqual(Applicants.exhaustedRunRows(ledger), ["id:7"],
-    "but only one, or a row that will never work owns every restart");
-  assert.equal(Applicants.RUN_LEDGER.MAX_ROW_ATTEMPTS, 2);
-
-  // Merging is what the worker does with each streamed report. Counts take the
-  // MAXIMUM, not the sum: a report says where the run has got to, so a message
-  // delivered twice must not count a row twice.
-  const merged = Applicants.mergeRunLedger(
-    { runId: "run-1", attempts: { "id:7": 2, "id:8": 1 }, totals: { collected: 10, failed: 2 } },
-    { runId: "run-1", attempts: { "id:8": 1, "id:9": 1 }, totals: { collected: 12, failed: 2 } }
-  );
-  assert.deepEqual(merged.attempts, { "id:7": 2, "id:8": 1, "id:9": 1 });
-  assert.equal(merged.totals.collected, 12, "progress continues rather than restarting at zero");
-  assert.equal(merged.totals.failed, 2);
-  assert.equal(
-    Applicants.mergeRunLedger({ runId: "run-1", totals: { collected: 12 } }, { runId: "run-1", totals: { collected: 3 } })
-      .totals.collected,
-    12,
-    "and never goes backwards on a late or duplicate report"
-  );
-
-  // A DIFFERENT run id replaces outright. `armAutoRun` mints one per deliberate
-  // press, so pressing Collect Every Applicant again asks for the whole job
-  // again — including the rows the previous run gave up on.
-  const replaced = Applicants.mergeRunLedger(
-    { runId: "run-1", attempts: { "id:7": 2 }, totals: { collected: 10 } },
-    { runId: "run-2", attempts: {}, totals: { collected: 0 } }
-  );
-  assert.deepEqual(replaced.attempts, {}, "a new instruction is a new ledger");
-  assert.equal(replaced.totals.collected, 0);
-
-  // Bounded, and a truncation is STATED rather than silently dropped: it means
-  // some rows will be re-decided, which is a fact about how the run behaves.
-  let full = Applicants.createRunLedger({ runId: "run-1" });
-  const attempts = {};
-  for (let index = 0; index < Applicants.RUN_LEDGER.LIMIT; index += 1) attempts[`id:${index}`] = 1;
-  full = Applicants.createRunLedger({ runId: "run-1", attempts });
-  const overflowed = Applicants.recordRunOutcome(full, { key: "id:new", outcome: "failed" });
-  assert.equal(Object.keys(overflowed.attempts).length, Applicants.RUN_LEDGER.LIMIT);
-  assert.equal(overflowed.truncated, true);
-  // A row already in a full ledger still counts up — the cap is on how many
-  // rows are tracked, never on how far a tracked one may be retried.
-  assert.equal(Applicants.recordRunOutcome(full, { key: "id:0", outcome: "failed" }).attempts["id:0"], 2);
-});
-
-test("the ledger is streamed to the worker and handed back with the claim", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
-  const messages = await readFile(resolve(root, "src/messages.ts"), "utf8");
-
-  assert.match(messages, /RUN_PROGRESS: "PV_APPLICANT_RUN_PROGRESS"/, "the message must be declared");
-
-  // Armed with a fresh ledger, because a fresh run id means a fresh ledger.
-  assert.match(worker, /ledger: Applicants\.createRunLedger\(\{ runId, updatedAt: now \}\)/,
-    "arming a run creates its ledger");
-  // Handed back with the claim, so a restarted execution begins knowing what
-  // its predecessors already tried.
-  assert.match(worker, /tracking: \{ \.\.\.claimed\.tracking, ledger: Applicants\.createRunLedger\(claimed\.entry\.ledger\) \}/,
-    "and the claim hands it back");
-  // The same run-token check the lifecycle report applies: a replaced closure
-  // must not write progress into an instruction that has moved on.
-  const record = worker.slice(worker.indexOf("async function recordRunProgress"), worker.indexOf("async function autoRunFor"));
-  assert.match(record, /String\(entry\.runId \|\| ""\) !== reportedRun/, "a stale run id must not write");
-  assert.match(record, /Applicants\.mergeRunLedger\(entry\.ledger,/, "and merging is the tested pure rule");
-  assert.match(worker, /if \(type === APPLICANT_MESSAGES\.RUN_PROGRESS\)/, "the worker must route it");
-
-  // The adapter hydrates from it and streams every terminal outcome into it.
-  const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("async function runEveryApplicant"));
-  assert.match(run, /const ledger = Applicants\.createRunLedger\(tracking\?\.ledger\)/, "a run starts from the stored ledger");
-  assert.match(run, /for \(const key of Applicants\.exhaustedRunRows\(ledger\)\) processed\.add\(key\)/,
-    "rows that have spent every attempt are already done");
-  assert.match(run, /collected: ledger\.totals\.collected/, "and the counters continue rather than restarting at zero");
-  const reports = [...run.matchAll(/reportProgress\(key, "(\w+)"\)/g)].map((match) => match[1]);
-  assert.ok(reports.includes("collected"), "a collected row moves the totals");
-  assert.ok(reports.includes("unopened"), "a row that would not open is remembered");
-  assert.ok(reports.includes("failed"), "and so is a failure");
-  assert.ok(reports.length >= 4, `every terminal outcome must report (found ${reports.length})`);
-
-  // Fire-and-forget: a run must never stall because the worker was asleep. The
-  // ledger is an optimisation over the collected index, not a source of truth.
-  assert.match(run, /if \(sent\?\.catch\) sent\.catch\(\(\) => undefined\)/, "the report is never awaited");
-  assert.ok(!/await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_RUN_PROGRESS"/.test(run),
-    "and never awaited anywhere");
-});
-
-test("a re-mount settles by going quiet, and a burst is not several settles", () => {
-  const step = (patch) => Applicants.nextRemountStep({
-    replacements: 1, acknowledged: 0, sinceLastMs: 5000, waitedMs: 100, mounted: true, ...patch
-  });
-
-  // Nothing moved: the caller reads on, and this costs one comparison.
-  assert.equal(step({ replacements: 0 }).action, "continue");
-  assert.equal(step({ replacements: 3, acknowledged: 3 }).action, "continue");
-
-  // Moved, and settled: quiet for longer than the debounce.
-  assert.equal(step({}).action, "resume");
-
-  // THE POINT. A re-mount is a burst — unmount, shell, hydrate — so resuming on
-  // the first sign of a panel resumes into the middle of the next teardown.
-  assert.equal(step({ sinceLastMs: Applicants.REMOUNT.DEBOUNCE_MS - 1 }).action, "wait");
-  assert.equal(step({ sinceLastMs: Applicants.REMOUNT.DEBOUNCE_MS }).action, "resume");
-
-  // Nothing mounted is a wait however quiet it has been: "no panel" is not a
-  // panel that settled.
-  assert.equal(step({ mounted: false }).action, "wait");
-
-  // And it is bounded, because a surface that re-mounts forever must still end
-  // this applicant rather than hold a 665-row run.
-  assert.equal(step({ waitedMs: Applicants.REMOUNT.MAX_WAIT_MS, mounted: false }).action, "give-up");
-  assert.match(step({ waitedMs: Applicants.REMOUNT.MAX_WAIT_MS }).reason, /kept re-mounting/);
-  // The give-up beats every other answer except "nothing happened" — a surface
-  // that has not moved is never given up on.
-  assert.equal(step({ replacements: 0, waitedMs: Applicants.REMOUNT.MAX_WAIT_MS }).action, "continue");
 });
 
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
@@ -1536,21 +1224,10 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   // a 665-applicant job in the first dozen rows and called it done.
   assert.match(grow, /quiet \+= 1;\s*\n\s*if \(quiet < LIST_QUIET_PASSES\) continue;/,
     "the bottom has to be confirmed, not believed on sight");
-
-  // 3.7.9 INVERTS THE ORDER, on request: "I prefer no scrolling and then go to
-  // next page." The confirmation now guards the NO-PAGER path only, and that is
-  // where it was always doing the work — it exists for an infinite-scroll list
-  // whose next slice arrives late, where "nothing new yet" is not "nothing
-  // more". On a PAGINATED list the rest of the applicants are on page two by
-  // construction, so once the column is at its end more scrolling cannot produce
-  // anybody and three quiet passes plus a nudge per page boundary is exactly the
-  // scrolling being complained about.
   assert.ok(
-    grow.indexOf("const pager =") < grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;"),
-    "the pager is offered first, so a paginated list turns the page instead of scrolling"
+    grow.indexOf("if (quiet < LIST_QUIET_PASSES) continue;") < grow.indexOf("const pager ="),
+    "and confirmed BEFORE the pager is consulted, or the confirmation buys nothing"
   );
-  assert.match(grow, /if \(!pager\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*quiet \+= 1;/,
-    "and the patient confirmation still guards the case with no pager — a slow slice must not end the walk");
   assert.match(grow, /quiet = 0;/, "a fruitless page click earns the same confirmation over again");
   assert.match(grow, /const live = applicantList\(\) \|\| list;/,
     "the list is re-resolved per pass — a detached container reports the range it had when it was unmounted");
@@ -2093,9 +1770,9 @@ test("a stopped run can be started again without reloading the page", async () =
     "and nothing may SET it from a sample — that is how a lost race poisoned an applicant permanently"
   );
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
-  assert.match(run, /^\s*async function extractAllApplicants\(options = \{\}, tracking = null\) \{\s*beginRun\(\);/,
+  assert.match(run, /^\s*async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*beginRun\(\);/,
     "a run must begin by clearing both flags");
-  assert.ok(!/async function extractAllApplicants\([^)]*\) \{\s*state\.aborted = false;\s/.test(source),
+  assert.ok(!/async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*state\.aborted = false;\s*\n/.test(source),
     "clearing the stop flag alone is what left the run unstartable");
   assert.match(source, /if \(type === "PV_APPLICANT_EXTRACT"\) \{\s*\n\s*beginRun\(\);/,
     "and so must a single applicant");
@@ -2672,22 +2349,15 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   assert.match(select, /inContainer: Boolean\(list && list\.contains\(row\.control\)\)/, "proven inside the left list");
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "and clicked exactly once per applicant");
 
-  // 3 + 5. After the click it WAITS for the right panel to be showing THIS
-  //    applicant, mounted, then lets it finish hydrating and asks again. No
-  //    second click can happen while a profile is still loading, because the
-  //    caller only advances on the resolved value.
-  //
-  //    Amended in 3.7.10 with rule 9g, which it locks: "wait for the right
-  //    panel" is unchanged and is the permanent clause — what changed is that a
-  //    text fingerprint was never a way to tell whether the right panel was
-  //    there, since the teardown alone satisfied it.
-  assert.match(select, /const before = panelIdentity\(heldPanel\);[\s\S]{0,120}?click\(\)/,
+  // 3 + 5. After the click it WAITS for the right panel to become a different
+  //    applicant, then lets it finish mounting. No second click can happen while
+  //    a profile is still loading, because the caller only advances on the
+  //    resolved value.
+  assert.match(select, /const before = panelIdentity\(\);[\s\S]{0,200}?click\(\)/,
     "the panel's identity is taken before the click");
-  assert.ok(!/panelIdentity\(\) !== before/.test(select),
-    "and 'the fingerprint differs' must not come back: a teardown satisfies it");
-  assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
-    "the click is followed by waiting for THIS applicant to be mounted");
-  assert.match(select, /await waitForDomQuiet\([\s\S]{0,400}?return true;/,
+  assert.match(select, /await waitFor\(\(\) => panelIdentity\(\) !== before/,
+    "and the click is followed by waiting for the panel to actually change");
+  assert.match(select, /await waitForDomQuiet\([\s\S]{0,80}?return Boolean\(changed\);/,
     "then the panel is allowed to finish mounting before the caller proceeds");
 
   // The caller does not re-click an applicant already shown, and treats a row

@@ -97,14 +97,6 @@
     extracting: null,
     running: null,
     run: Applicants.createRunState(),
-    /**
-     * Why the last row open ended the way it did.
-     *
-     * A row that will not open is otherwise indistinguishable from a row that
-     * opened somebody else, and both are reported as "could not open" — which
-     * is the sentence that tells a recruiter nothing. The verdict names which.
-     */
-    lastArrival: null,
     /** Set by Stop. Every loop checks it before it does anything else. */
     aborted: false,
     /**
@@ -683,19 +675,7 @@
    * came back named "Applicants". One row link is allowed, because the panel
    * legitimately links to the application it is showing; two or more is a list.
    */
-  /**
-   * The panel, **only when one is genuinely mounted** — null while LinkedIn is
-   * between applicants.
-   *
-   * This is the strict half of `applicantPanel()`, split out because two callers
-   * want opposite things from a torn-down panel. A scan in progress wants
-   * *something* to keep reading, so it takes the loose answer below. Anything
-   * deciding **who the panel is showing** wants the truth, and "no panel is
-   * mounted" is a truth the loose answer cannot express: its last resort is a
-   * container that holds the applicant list, and the first line of that
-   * container's text is the list's own heading.
-   */
-  function mountedApplicantPanel() {
+  function applicantPanel() {
     const candidates = [
       ...document.querySelectorAll("main,[role='main'],section,[class*='applicant'],[class*='profile-card'],[class*='detail']")
     ].filter((element) => element instanceof Element && isVisible(element) && !isExcludedContext(element));
@@ -707,7 +687,7 @@
       if (rowLinksIn(element) > 1) continue;
       const keys = new Set(headingsIn(element).map((heading) => heading.key).filter(Boolean));
       const score = keys.size;
-      if (score < Applicants.PANEL_MIN_SECTIONS) continue;
+      if (score < 2) continue;
       const size = (element.innerText || "").length;
       if (score > bestScore || (score === bestScore && size < bestSize)) {
         best = element;
@@ -715,12 +695,7 @@
         bestSize = size;
       }
     }
-    return best;
-  }
-
-  function applicantPanel() {
-    const mounted = mountedApplicantPanel();
-    if (mounted) return mounted;
+    if (best) return best;
 
     // Nothing qualified. Fall back to the widest container that is still not
     // the list, rather than to `document.body`, which always contains it.
@@ -741,169 +716,6 @@
    */
   function livePanel(panel) {
     return panel && panel.isConnected ? panel : applicantPanel();
-  }
-
-  // ------------------------------------------------------------- re-mounting
-  // THE REPORT, with a screenshot: the whole page area flashes several
-  // applicants into a run. It is not a browser reload — that would take this
-  // script with it — it is LinkedIn's own app tearing the hiring view out and
-  // building it again: both columns, the list, its pager and the detail panel.
-  //
-  // `livePanel()` above already re-resolves a detached node, which is why the
-  // scan does not simply die. What it cannot do is notice that the node it
-  // handed back belongs to somebody ELSE, and a merge-only accumulator will
-  // happily fold that person's sections into the record it is building. So the
-  // surface is watched, reading pauses while it moves, and who is on screen is
-  // checked before anything is kept.
-
-  /** A burst of mutation costs one check, not one per node. */
-  const PANEL_WATCH_SETTLE_MS = 120;
-  /** How often the settle loop re-asks while the surface is moving. */
-  const PANEL_WATCH_POLL_MS = 150;
-
-  /** A re-mount that landed on a different applicant. Fatal to the record, not to the run. */
-  function remountedError(message) {
-    const error = new Error(message);
-    error.remounted = true;
-    return error;
-  }
-
-  /**
-   * Watch for the hiring surface being replaced underneath a read.
-   *
-   * Deliberately the same shape as `state.routeObserver`: on a page that mutates
-   * constantly the callback must be one boolean and out, with the real work on a
-   * short timer. No polling while the page is idle.
-   *
-   * **And what the timer asks has to be cheap, which rules out the obvious
-   * check.** `mountedApplicantPanel()` scores every candidate container and
-   * takes `innerText` on each, and `panelIdentity()` calls `isVisible()`, so
-   * both force a synchronous layout — several times a second, throughout every
-   * scan, on the recruiter's own page. That is the same forced-reflow cost
-   * `applicantRows()` had its name getter made lazy for.
-   *
-   * So detection asks two questions that cost no layout: **is the node we were
-   * reading still attached**, and **does the panel still link to the same
-   * application**. The first is the whole-view re-mount this exists for — the
-   * container is rebuilt, so the node we held detaches. The second catches a
-   * swap performed in place. Deciding *who* is on screen stays where it was
-   * already being paid for: `settlePanel` and `assertSameApplicant`, at the
-   * boundaries between reads.
-   *
-   * A replacement does not resume anything. It **restarts a quiet timer**, which
-   * is what makes `nextRemountStep` able to tell "it settled" from "it is still
-   * going", because a re-mount is a burst rather than an event.
-   */
-  function createPanelWatch(panel, expected = "") {
-    const watch = {
-      held: panel || null,
-      /** The applicant this whole extraction belongs to. Never re-derived. */
-      expected: cleanText(expected),
-      /** The last application the held panel linked to. Read with no layout. */
-      applicationId: panelApplicationId(panel),
-      replacements: 0,
-      acknowledged: 0,
-      /** For the record: how often it moved, and how often reading had to wait. */
-      detected: 0,
-      settled: 0,
-      lastAt: 0,
-      scheduled: false,
-      observer: null
-    };
-
-    const check = () => {
-      if (!watch.held) return;
-      const application = watch.held.isConnected ? panelApplicationId(watch.held) : "";
-      const replaced = !watch.held.isConnected || application !== watch.applicationId;
-      if (!replaced) return;
-      watch.replacements += 1;
-      watch.detected += 1;
-      watch.lastAt = Date.now();
-      watch.applicationId = application;
-    };
-
-    watch.observer = new MutationObserver(() => {
-      if (watch.scheduled) return;
-      watch.scheduled = true;
-      setTimeout(() => {
-        watch.scheduled = false;
-        check();
-      }, PANEL_WATCH_SETTLE_MS);
-    });
-    watch.observer.observe(document.documentElement, { childList: true, subtree: true });
-    watch.disconnect = () => {
-      try {
-        watch.observer.disconnect();
-      } catch {
-        // Already gone with the document it was watching.
-      }
-    };
-    return watch;
-  }
-
-  /**
-   * The panel to read next — after waiting out a re-mount, if there was one.
-   *
-   * Costs nothing when the surface has not moved: `nextRemountStep` answers
-   * `continue` and this is `livePanel()` with an extra comparison. When it HAS
-   * moved, reading stops until `REMOUNT.DEBOUNCE_MS` passes with no further
-   * replacement — resuming on the first sign of a panel would resume into the
-   * middle of the next teardown.
-   *
-   * Bounded by `REMOUNT.MAX_WAIT_MS`, because a surface that re-mounts forever
-   * must still end this applicant rather than hold the whole run.
-   */
-  async function settlePanel(watch, panel) {
-    if (!watch) return livePanel(panel);
-    const startedAt = Date.now();
-    for (;;) {
-      const mounted = mountedApplicantPanel();
-      const step = Applicants.nextRemountStep({
-        replacements: watch.replacements,
-        acknowledged: watch.acknowledged,
-        sinceLastMs: watch.lastAt ? Date.now() - watch.lastAt : Number.MAX_SAFE_INTEGER,
-        waitedMs: Date.now() - startedAt,
-        mounted: Boolean(mounted)
-      });
-      if (step.action === "continue") return livePanel(panel);
-      if (step.action === "give-up") throw remountedError(step.reason);
-      if (step.action === "resume") {
-        watch.acknowledged = watch.replacements;
-        watch.held = mounted;
-        // Re-based on what is actually on screen now, so the next replacement is
-        // measured from here rather than from the panel that has already gone.
-        watch.applicationId = panelApplicationId(mounted);
-        watch.settled += 1;
-        return mounted;
-      }
-      // Still moving. `assertRunnable` keeps Stop and a hidden tab ahead of it.
-      assertRunnable();
-      await wait(PANEL_WATCH_POLL_MS);
-    }
-  }
-
-  /**
-   * Refuse to keep reading somebody else.
-   *
-   * The one thing a merge-only accumulator cannot survive. `livePanel()` hands
-   * back whatever is mounted, which after a re-mount may be a different
-   * applicant entirely, and every section read from then on would be folded into
-   * the record being built — a person whose name, history and resume come from
-   * two people. Rule 6 makes that strictly worse than no record at all, so it is
-   * a failure for this row and the walk moves on.
-   *
-   * Only `OTHER` throws. A torn-down or half-mounted panel is a *wait*, which
-   * `settlePanel` has already done, and a re-mount showing the SAME applicant is
-   * the ordinary case — the accumulator is merge-only, so re-reading them is
-   * exactly right.
-   */
-  function assertSameApplicant(watch) {
-    if (!watch) return;
-    const seen = describeApplicantArrival(watch.expected, "");
-    if (seen.state !== Applicants.PANEL_ARRIVAL.OTHER) return;
-    throw remountedError(
-      `The hiring surface re-mounted onto a different applicant while this one was being read (${seen.reason}).`
-    );
   }
 
   /**
@@ -3190,7 +3002,7 @@
     return live;
   }
 
-  async function scanApplicantPanel(panel, accumulator, diagnostics, budget, watch = null) {
+  async function scanApplicantPanel(panel, accumulator, diagnostics, budget) {
     let live = livePanel(panel);
     let target = chooseScrollTarget(live);
     const originalY = currentScrollTop(target);
@@ -3237,15 +3049,8 @@
         scrollPanelTo(scan.position, target);
         await waitForDomQuiet(320, 2400);
         // The column is re-resolved on every step, because a re-mounted panel
-        // answers with the text it held when it was detached — and, since the
-        // whole hiring view can be rebuilt mid-read, reading WAITS here while
-        // that is happening and refuses to continue on somebody else. The scan
-        // is where the sections come from, so this is the guard that matters.
-        live = await settlePanel(watch, live);
-        assertSameApplicant(watch);
-        // A re-mount replaces the scroll container too, so a target chosen from
-        // the old one addresses a node that is no longer on the page.
-        if (watch && !target?.isConnected) target = chooseScrollTarget(live) || target;
+        // answers with the text it held when it was detached.
+        live = livePanel(live);
         snapshotPanel(live, accumulator, diagnostics);
       }
 
@@ -3263,8 +3068,7 @@
       // outside it, came through. That is the whole "current role and current
       // company are still empty" report.
       await revealNestedRegions(live, accumulator, diagnostics);
-      live = await settlePanel(watch, live);
-      assertSameApplicant(watch);
+      live = livePanel(live);
 
       // And the panel again, because a nested region that has just been walked
       // mounts content the panel did not have when it settled — which extends
@@ -3289,8 +3093,7 @@
       // A final read from the top, once everything below has hydrated.
       scrollPanelTo(0, target);
       await waitForDomQuiet(300, 1600);
-      live = await settlePanel(watch, live);
-      assertSameApplicant(watch);
+      live = livePanel(live);
       snapshotPanel(live, accumulator, diagnostics);
     } finally {
       // Hand the panel back where the recruiter left it, on every path.
@@ -3363,48 +3166,17 @@
     // expander again after the walk costs the same eight clicks in total.
     const expansion = createExpansionBudget();
 
-    // WHO this extraction belongs to, fixed now and never re-derived. The panel's
-    // own link first — the address bar moves ahead of the render on this surface
-    // — and everything read from here on has to still be them.
-    const expectedApplicant = panelApplicationId(mountedApplicantPanel()) || context.applicationId || "";
-    const watch = createPanelWatch(panel, expectedApplicant);
-    diagnostics.expectedApplicant = expectedApplicant;
-
-    try {
-      if (options.expand !== false) {
-        await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
-      }
-      if (options.scan !== false) {
-        const walked = await scanApplicantPanel(
-          panel, accumulator, diagnostics, options.expand === false ? null : expansion, watch
-        );
-        panel = walked.panel || panel;
-      } else snapshotPanel(panel, accumulator, diagnostics);
-
-      return await finishApplicant({ panel, accumulator, diagnostics, context, sourceUrl, options, watch });
-    } finally {
-      // A watcher outliving its extraction would keep a MutationObserver on the
-      // recruiter's page for the rest of the session, and there is one per
-      // applicant.
-      watch.disconnect();
-      diagnostics.remounts = { detected: watch.detected, settled: watch.settled };
+    if (options.expand !== false) {
+      await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
     }
-  }
+    if (options.scan !== false) {
+      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
+      panel = walked.panel || panel;
+    } else snapshotPanel(panel, accumulator, diagnostics);
 
-  /**
-   * The disclosures, the resume and the record — the half of an extraction that
-   * runs once the panel has been walked.
-   *
-   * Split out so the whole of it sits inside one `try/finally` that disposes the
-   * re-mount watcher, rather than that `finally` having to wrap the function's
-   * every return path by hand.
-   */
-  async function finishApplicant({ panel, accumulator, diagnostics, context, sourceUrl, options, watch }) {
     // The overlays are opened on whatever the panel is now, not on the node the
-    // extraction started with — a detached one contains no control at all — and
-    // never while the surface is still re-mounting.
-    panel = await settlePanel(watch, panel);
-    assertSameApplicant(watch);
+    // extraction started with — a detached one contains no control at all.
+    panel = livePanel(panel);
     // The one call that also records the full section scan: what was looked
     // for, every heading the page actually rendered, where each section was
     // found and what nothing named at all.
@@ -3426,17 +3198,11 @@
     // was visible is kept. `stopped` is still re-thrown, always: rule 13a means
     // a Stop ends the work, and it is the one interruption that must not be
     // downgraded into a warning on a saved record.
-    //
-    // `remounted` is the SECOND such interruption and is re-thrown for the
-    // opposite reason to `hidden`: a hidden page loses a field off the right
-    // person, while a re-mount onto a different applicant means what is being
-    // read is somebody else's. Warning about that and saving anyway is exactly
-    // the blended record rule 6 forbids.
     if (options.contact !== false) {
       try {
         await openContactAndCollect(panel, accumulator, diagnostics);
       } catch (error) {
-        if (error?.stopped || error?.remounted) throw error;
+        if (error?.stopped) throw error;
         if (error?.hidden) accumulator.addWarning("contact: the page was hidden while the disclosure was open");
         else accumulator.addWarning(`contact: ${error?.message || error}`);
       }
@@ -3453,8 +3219,7 @@
     if (options.resume !== false) {
       try {
         // Closing the contact disclosure can re-mount the column underneath it.
-        panel = await settlePanel(watch, panel);
-        assertSameApplicant(watch);
+        panel = livePanel(panel);
         // The name the record will carry, which is the name the file is saved
         // under. It is settled by now: the qualification explanations that
         // corroborate it were read on the very first snapshot.
@@ -3465,27 +3230,10 @@
         // take the tab away. The resume is left as whatever it was resolved to
         // — `link_only` or `not_attempted`, never a guess (rule 6) — and the
         // person, their history and their verdicts are still saved.
-        if (error?.stopped || error?.remounted) throw error;
+        if (error?.stopped) throw error;
         if (error?.hidden) accumulator.addWarning("resume: the page was hidden while the viewer was open");
         else accumulator.addWarning(`resume: ${error?.message || error}`);
       }
-    }
-
-    // The last word before anything is kept. Everything above reads from the
-    // page; this asks whether the page was still showing the person the record
-    // is about. A file saved under the wrong applicant's name is the failure
-    // this is here to make impossible.
-    assertSameApplicant(watch);
-
-    // Said on the record, not only in the console. A re-mount the reader had to
-    // wait out is the difference between "this applicant looks thin" and "the
-    // surface was rebuilt three times while they were being read", and the
-    // second one is a fact about LinkedIn that no later investigation can
-    // recover from a stored record that does not mention it.
-    if (watch?.settled) {
-      accumulator.addWarning(
-        `the hiring surface re-mounted ${watch.settled} time(s) while this applicant was read; reading paused and resumed`
-      );
     }
 
     const record = Applicants.buildApplicantRecord({
@@ -3535,115 +3283,26 @@
   // row of the list. Never parallel, never a tab per applicant, and the stop
   // flag is checked before every single row.
 
-  /**
-   * The application the panel is showing, from the panel's OWN link first.
-   *
-   * The address bar is the second source and never the only one, because on this
-   * surface it moves ahead of the render: LinkedIn routes the id in the moment a
-   * row is clicked, while the column it names is still being built. Asking the
-   * panel is asking the thing whose content is about to be read.
-   *
-   * `applicantPanel()` legitimately holds one application link — the one it is
-   * showing — which is exactly why the resolver refuses a candidate holding two.
-   */
-  function panelApplicationId(panel) {
-    if (panel?.isConnected) {
-      for (const anchor of panel.querySelectorAll("a[href]")) {
-        if (!isApplicantRowLink(anchor)) continue;
-        const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
-        if (id) return id;
-      }
-    }
-    return Applicants.parseHiringContext(location.href).applicationId || "";
+  /** A fingerprint of who the detail panel is currently showing. */
+  function panelIdentity() {
+    const panel = applicantPanel();
+    const text = cleanText(panel?.innerText || "");
+    const { applicationId } = Applicants.parseHiringContext(location.href);
+    return `${applicationId || ""}|${text.length}|${text.slice(0, 300)}`;
   }
-
-  /**
-   * Who the panel is showing — built from links, never from its text.
-   *
-   * The old fingerprint was two thirds `innerText`, so a teardown, a spinner and
-   * a re-render of the same person all read as "a different applicant arrived".
-   * Everything here is an identifier: the application id and the member's own
-   * `/in/` slug. A panel that re-mounts showing the same person produces the
-   * same identity, which is the entire point.
-   */
-  function panelIdentity(panel = mountedApplicantPanel()) {
-    const live = panel?.isConnected ? panel : null;
-    const application = panelApplicationId(live);
-    let profile = "";
-    if (live) {
-      const anchor = [...live.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
-      if (anchor) profile = Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "");
-    }
-    return [application ? `id:${application}` : "", profile ? `in:${profile}` : ""].filter(Boolean).join("|");
-  }
-
-  /** How many distinct applicant sections have hydrated in the panel. */
-  function panelSectionCount(panel) {
-    if (!panel?.isConnected) return 0;
-    return new Set(headingsIn(panel).map((heading) => heading.key).filter(Boolean)).size;
-  }
-
-  /**
-   * Is the panel showing `expected`, and has it finished mounting?
-   *
-   * The DOM half of `Applicants.describePanelArrival` — this reads the page, the
-   * core decides. `mountedApplicantPanel()` rather than `applicantPanel()` on
-   * purpose: the loose resolver answers with a container that holds the
-   * applicant list when nothing is mounted, and "the list is on screen" must
-   * never be able to look like "the applicant arrived".
-   */
-  function describeApplicantArrival(expected, previousIdentity) {
-    const panel = mountedApplicantPanel();
-    return Applicants.describePanelArrival({
-      expected,
-      applicationId: panel ? panelApplicationId(panel) : "",
-      identity: panelIdentity(panel),
-      previousIdentity,
-      sections: panelSectionCount(panel),
-      connected: Boolean(panel)
-    });
-  }
-
-  /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 4000;
-  /** How long the applicant that was asked for has to mount before the row is skipped. */
-  const PANEL_ARRIVAL_TIMEOUT_MS = 12000;
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
    *
-   * TWO defects, one after the other, and the second is what this replaces.
+   * The live defect: this waited for the address to change and then for the DOM
+   * to go quiet. Neither means the panel has re-rendered — LinkedIn routes
+   * without a full navigation, and the DOM is briefly quiet between tearing the
+   * old applicant down and mounting the new one. So the scan started on the
+   * previous applicant's panel or on an empty one, which is why every row after
+   * the first came back with no role, no company and no name.
    *
-   * First it waited for the address to change and the DOM to go quiet. Neither
-   * means the panel re-rendered — LinkedIn routes without a navigation, and the
-   * DOM is briefly quiet *between* tearing the old applicant down and mounting
-   * the new one — so the scan started on the previous applicant or on an empty
-   * column.
-   *
-   * Then it waited for a text fingerprint to differ from the one taken before
-   * the click. That is satisfied by the teardown itself. Several applicants into
-   * a run LinkedIn re-mounts the whole detail column, and during that re-mount
-   * nothing scores two sections, so the panel resolver falls back to a container
-   * holding the applicant list — a large, very different piece of text. The
-   * fingerprint duly changed, the row was reported open, and the scan read a
-   * half-built shell or the list itself.
-   *
-   * What is waited for now is what was always meant: **the applicant this row
-   * leads to, mounted.** In three steps, because a re-mount has three phases and
-   * conflating them is what went wrong.
-   *
-   *   1. **Teardown** — the panel we were holding goes away, or stops being that
-   *      applicant. Best-effort and short: LinkedIn may swap content in place
-   *      fast enough that no torn-down state is ever observable, and that is not
-   *      a failure. It is here so that step 2 cannot be satisfied by the panel
-   *      that was already on screen.
-   *   2. **Arrival** — a mounted panel, at least `PANEL_MIN_SECTIONS` sections
-   *      hydrated, showing this row's own application id. Not "different from
-   *      before".
-   *   3. **Settle**, and then **confirm again**. A panel that arrives and is
-   *      immediately re-mounted underneath the quiet wait is precisely the case
-   *      this whole change is about, so the answer is re-read after the wait
-   *      rather than assumed to have survived it.
+   * The condition is now the only one that means anything: the panel's own
+   * fingerprint has changed from the one it had before the click.
    */
   async function selectApplicantRow(row) {
     const list = applicantList();
@@ -3656,37 +3315,19 @@
     if (!verdict.allowed) return false;
 
     const control = { element: row.control, verdict };
-    const expected = Applicants.parseHiringContext(row.href).applicationId || "";
-    const heldPanel = mountedApplicantPanel();
-    const before = panelIdentity(heldPanel);
+    const before = panelIdentity();
     control.element.click();
 
-    // 1. Teardown, best-effort: a null result here means the column was reused
-    //    in place, which the arrival test below handles on its own merits.
-    await waitFor(() => {
-      if (heldPanel && !heldPanel.isConnected) return true;
-      const now = mountedApplicantPanel();
-      return !now || panelIdentity(now) !== before;
-    }, { timeoutMs: PANEL_TEARDOWN_TIMEOUT_MS, pollMs: 120, label: "applicant-panel-teardown" });
-
-    // 2. Arrival: this applicant, mounted. `waitFor` returns the verdict itself,
-    //    so a timeout is a null and the row is skipped rather than scanned.
-    const arrival = await waitFor(() => {
-      const seen = describeApplicantArrival(expected, before);
-      return seen.arrived ? seen : null;
-    }, { timeoutMs: PANEL_ARRIVAL_TIMEOUT_MS, pollMs: 200, label: "applicant-panel" });
-
-    // 3. Then let it finish hydrating — a panel that has arrived is not a panel
-    //    that is complete; the scan's own quiet count takes it from here — and
-    //    re-ask, because a re-mount during that wait would otherwise go unseen.
+    const changed = await waitFor(() => panelIdentity() !== before, {
+      timeoutMs: 12000,
+      pollMs: 200,
+      label: "applicant-panel"
+    });
+    // Then let it finish mounting. A panel that changed is not a panel that has
+    // arrived: the sections hydrate after the shell, and the scan's own quiet
+    // count takes it from here.
     await waitForDomQuiet(450, 4000);
-    const settled = describeApplicantArrival(expected, before);
-    if (!arrival || !settled.arrived) {
-      state.lastArrival = settled;
-      return false;
-    }
-    state.lastArrival = settled;
-    return true;
+    return Boolean(changed);
   }
 
   /**
@@ -3907,14 +3548,6 @@
     }
   }
 
-  /** Long enough to cover a re-mount of the whole hiring view; short enough not to hide a real absence. */
-  const LIST_REMOUNT_TIMEOUT_MS = 6000;
-
-  /** The applicant list, waiting out a re-mount that has taken it away. */
-  function waitForApplicantList(timeoutMs = LIST_REMOUNT_TIMEOUT_MS) {
-    return waitFor(() => applicantList(), { timeoutMs, pollMs: 200, label: "applicant-list" });
-  }
-
   /** The walk ledger, for a run that grows the list instead of pre-walking it. */
   function createListWalk(diagnostics) {
     diagnostics.listScroll = {
@@ -3953,17 +3586,7 @@
     // the run before, so staleness could not show; now that an inconclusive stop
     // is retried, the value has to mean what it says.
     walk.stoppedBy = "running";
-    // A missing list is very often a list being REBUILT. The re-mount the panel
-    // watcher exists for takes the whole hiring view with it — the screenshot
-    // shows the entire page area flashing, both columns and the pager — so
-    // asking for the list during one of those milliseconds answers null, and
-    // through 3.7.9 that answer spent one of the run's three inconclusive
-    // growths. Three re-mounts in a row would end a run that had nothing wrong
-    // with it. Waiting is not a new bound: `waitForApplicantList` is `waitFor`,
-    // so Stop and a hidden tab still come first, and a list that genuinely is
-    // not there still returns `no-list` a moment later.
-    let list = applicantList();
-    if (!list) list = await waitForApplicantList();
+    const list = applicantList();
     if (!list) {
       walk.stoppedBy = "no-list";
       return applicantRows().length;
@@ -4040,31 +3663,24 @@
       }
       if (!atBottom) continue;
 
-      // AT THE BOTTOM OF THE LIST, WITH NOTHING NEW. Asked for outright: "I
-      // prefer no scrolling and then go to next page" — so the pager is offered
-      // HERE, before any further scrolling or waiting, rather than after
-      // `LIST_QUIET_PASSES` confirmations.
-      //
-      // The order matters and it is not merely a preference. This list is
-      // PAGINATED: page one holds its own rows and the rest are on page two, so
-      // once the run has finished every row in the DOM and the column is at its
-      // end, more scrolling cannot produce anybody — only the pager can. The
-      // quiet passes were written for the other arrangement, an infinite-scroll
-      // list whose next slice arrives late, where "nothing new yet" genuinely is
-      // not "nothing more". Spending three of them plus a nudge on every page
-      // boundary is the scrolling the recruiter is watching and does not want.
-      //
-      // So: when a pager exists, use it. When one does not, this may still be an
-      // infinite-scroll list, and the quiet confirmation below still applies in
-      // full — which is what keeps a slow slice from ending the walk early.
+      // At the bottom, and this pass revealed nothing. THE DEFECT THIS FIXES:
+      // that single observation used to be the whole verdict — one pass at the
+      // bottom with no pager in sight ended the walk, `extractAllApplicants` saw
+      // no further row and marked the run COMPLETED. A slow slice, or a scroll
+      // target with no range, therefore finished a 665-applicant job somewhere
+      // in the first dozen and reported it as done. The full walk has required
+      // `LIST_QUIET_PASSES` consecutive quiet passes since 3.7.8; this is the
+      // same rule on the on-demand path, which is the one a run actually uses.
+      quiet += 1;
+      if (quiet < LIST_QUIET_PASSES) continue;
+
+      // Genuinely settled at the bottom of this page. Is there another one?
+      // Without this the end of page one is indistinguishable from the end of
+      // the list.
       const pager = walk.fruitless < MAX_FRUITLESS_PAGINATION
         ? findApplicantPaginationControl(live)
         : null;
       if (!pager) {
-        // No page to turn. Confirm the bottom the patient way before believing
-        // it, exactly as before.
-        quiet += 1;
-        if (quiet < LIST_QUIET_PASSES) continue;
         walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
         break;
       }
@@ -4159,7 +3775,7 @@
     return false;
   }
 
-  async function extractAllApplicants(options = {}, tracking = null) {
+  async function extractAllApplicants(options = {}) {
     beginRun();
     // The list is NOT walked up front any more.
     //
@@ -4190,51 +3806,11 @@
       : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
-    // WHAT THIS EXECUTION'S PREDECESSORS ALREADY DECIDED, from the worker.
-    //
-    // The standing instruction and the saved applicants both already outlive
-    // this document; the run's own ledger did not, so a restart re-decided every
-    // row. That was invisible for rows genuinely saved — the collected index
-    // catches those — and an unbounded retry for a row that failed or would not
-    // open, because `isCollectedApplicant` deliberately refuses to count a
-    // record with nothing substantive on it. The totals come back too, so
-    // progress continues from where it was rather than restarting at zero in
-    // front of the recruiter.
-    const ledger = Applicants.createRunLedger(tracking?.ledger);
     state.run = Applicants.createRunState({
       state: Applicants.RUN_STATE.RUNNING,
       total: known,
-      collected: ledger.totals.collected,
-      failed: ledger.totals.failed,
-      skipped: ledger.totals.skipped,
-      alreadyCollected: ledger.totals.alreadyCollected,
       startedAt: new Date().toISOString()
     });
-
-    /**
-     * Tell the worker what just happened to a row.
-     *
-     * Fire-and-forget on purpose: a run must not stall because the worker was
-     * asleep, and the ledger is an optimisation over the collected index rather
-     * than a source of truth. Sent at the same cadence as `PV_APPLICANT_SAVE`,
-     * which is already one message per applicant.
-     */
-    const reportProgress = (key, outcome) => {
-      if (!jobId || !tracking?.runId) return;
-      const progress = Applicants.recordRunOutcome({ runId: tracking.runId }, { key, outcome });
-      progress.totals = {
-        collected: state.run.collected,
-        failed: state.run.failed,
-        skipped: state.run.skipped,
-        alreadyCollected: state.run.alreadyCollected
-      };
-      try {
-        const sent = chrome.runtime.sendMessage({ type: "PV_APPLICANT_RUN_PROGRESS", jobId, progress });
-        if (sent?.catch) sent.catch(() => undefined);
-      } catch {
-        // No worker to tell. The collected index still makes the next run correct.
-      }
-    };
 
     const results = [];
 
@@ -4264,12 +3840,6 @@
      * pause is the one case where the row still has to be done.
      */
     const processed = new Set();
-    // Seeded from the worker's ledger: rows this instruction has already spent
-    // all `RUN_LEDGER.MAX_ROW_ATTEMPTS` on. A restart is a genuine second chance
-    // at a row that failed — which is why the allowance is two rather than one —
-    // but only one, so a row failing for a reason that will never change cannot
-    // own every restart of the run.
-    for (const key of Applicants.exhaustedRunRows(ledger)) processed.add(key);
     const unprocessedRows = () => Applicants.unprocessedApplicantRows(applicantRows(), processed);
     const nextRow = () => unprocessedRows()[0] || null;
 
@@ -4483,15 +4053,8 @@
           if (!opened) {
             processed.add(key);
             state.run.skipped += 1;
-            // Named, not merely counted: "could not open" covers a row that
-            // never responded and a panel that mounted somebody else, and only
-            // the second one means LinkedIn re-mounted the column underneath
-            // the run. The arrival verdict is the one thing that tells them
-            // apart, so it is what the recruiter is shown.
-            const why = state.lastArrival?.reason ? ` (${state.lastArrival.reason})` : "";
-            state.run.lastError = `Could not open ${row.name || "the next applicant"}${why}.`;
+            state.run.lastError = `Could not open ${row.name || "the next applicant"}.`;
             state.run.index = processed.size;
-            reportProgress(key, "unopened");
             continue;
           }
         }
@@ -4502,10 +4065,6 @@
         // Added to the index as well as to the store, so a virtualized list
         // that renders the same row twice in one pass is not collected twice.
         if (rowId) collected.applications.add(rowId.toLowerCase());
-        // Nothing is added to the ledger's attempts for a success — the store
-        // and the collected index already say it — but the totals move, so a
-        // restart shows the recruiter continued progress rather than zero.
-        reportProgress(key, "collected");
       } catch (error) {
         if (error?.stopped) {
           state.run.state = Applicants.RUN_STATE.STOPPED;
@@ -4543,29 +4102,12 @@
             state.run.lastError =
               `The page kept going hidden while reading ${row.name || "this applicant"}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
             state.run.index = processed.size;
-            reportProgress(key, "failed");
           }
-          continue;
-        }
-        // A re-mount that landed on somebody else, and it is deliberately NOT a
-        // reason to stop: **one applicant the surface would not hold still for
-        // must never end a run over 665 of them.** The record was discarded
-        // rather than blended (rule 6), this row is recorded as failed so the
-        // walk cannot loop on it, and the next row is opened normally. It stays
-        // uncollected in the store, so a later run over this job picks it up.
-        if (error?.remounted) {
-          processed.add(key);
-          state.run.failed += 1;
-          state.run.lastError =
-            `${error.message} ${row.name || "This applicant"} was not saved; the run continued.`;
-          state.run.index = processed.size;
-          reportProgress(key, "failed");
           continue;
         }
         processed.add(key);
         state.run.failed += 1;
         state.run.lastError = error instanceof Error ? error.message : String(error);
-        reportProgress(key, "failed");
       }
       state.run.index = processed.size;
     }
@@ -4613,10 +4155,7 @@
       }
     };
     try {
-      // `tracking` carries the ledger as well as the run token, so the walk
-      // begins knowing what earlier executions of this same instruction already
-      // tried. Without it, a restart re-decides every row.
-      const result = await extractAllApplicants(options, tracking);
+      const result = await extractAllApplicants(options);
       const lifecycle = result.run?.state === Applicants.RUN_STATE.COMPLETED
         ? Applicants.AUTO_RUN_STATE.COMPLETED
         : Applicants.AUTO_RUN_STATE.INTERRUPTED;

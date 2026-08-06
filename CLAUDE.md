@@ -263,22 +263,9 @@ commands are unrecoverable.
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
-      the applicant that row leads to to be *mounted*, never for the address bar and never for the
-      panel's text to differ** (amended in 3.7.10) — LinkedIn routes without a navigation and the DOM
-      is briefly quiet between tearing the old applicant down and mounting the new one, so both of
-      those signals fire while the panel still shows the previous person. A text fingerprint is no
-      better and was the live defect: it is satisfied by the **teardown itself**. Several applicants
-      into a run LinkedIn re-mounts the whole detail column; during that re-mount nothing scores two
-      sections, `applicantPanel()` falls back to a container holding the applicant list, and the
-      fingerprint duly "changed" — so the row was reported open and the scan read a half-built shell
-      or the list. `selectApplicantRow` therefore waits in three steps —
-      **teardown** (best-effort and short, so arrival cannot be satisfied by the panel already on
-      screen), **arrival**, then **settle and confirm again** — and arrival is decided by
-      `Applicants.describePanelArrival()` from **identifiers only**: the application id on the panel's
-      own link (the address bar second, because it moves ahead of the render) and the member's `/in/`
-      slug, plus at least `PANEL_MIN_SECTIONS` (2) hydrated sections. `mountedApplicantPanel()` is the
-      strict resolver that may answer **null**, which is what makes "nothing is mounted" expressible
-      at all; `applicantPanel()` keeps the loose fallback for a scan already in flight. A row
+      `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a
+      navigation and the DOM is briefly quiet between tearing the old applicant down and mounting the
+      new one, so both of those signals fire while the panel still shows the previous person. A row
       that never opens is **skipped**, not scanned; scanning anyway saved the previous applicant a
       second time under this row's identity. Since 3.7.3 a row whose applicant is **already saved for
       this job is walked past without being clicked at all** — see "Collecting every applicant" below.
@@ -464,9 +451,7 @@ worker: `PV_GET_BUILD_INFO`, `PV_IMPORT_*`
 `PV_APPLICANT_COLLECT_ALL`, `PV_APPLICANT_AUTO_RUN` (3.7.6 — "was this job collected on purpose, and
 with what options", which is what makes returning to it restart the run rather than sit idle),
 `PV_APPLICANT_LIST`, `PV_APPLICANT_COLLECTED` (3.7.3 — one lean entry per
-stored applicant, which is what lets a run resume rather than start over),
-`PV_APPLICANT_RUN_PROGRESS` (3.7.10 — one terminal row outcome, streamed, so the run's own ledger
-outlives the document that built it), `PV_APPLICANT_CLEAR`,
+stored applicant, which is what lets a run resume rather than start over), `PV_APPLICANT_CLEAR`,
 `PV_APPLICANT_DIAGNOSTICS`, plus two that travel the other way — `PV_APPLICANT_SAVE` (streamed per
 finished applicant, so a run the user walks away from keeps everything already collected) and
 `PV_APPLICANT_DOWNLOAD_RESUME`.
@@ -738,18 +723,6 @@ ran. `LIST_GROW_PASSES` (16) covers roughly 8000px of scrolling, so treating bud
 the end of the list finished long jobs in the middle *and* stopped them ever resuming. Locked by
 `PERMANENT: only a walk that reached the list end may complete a run`.
 
-**The list is paged forward before it is scrolled again** (3.7.9). Asked for outright: *"I prefer no
-scrolling and then go to next page."* `growApplicantList` is still only called when the run has
-finished every row in the DOM — it never scrolls preemptively — but once the column is at its end
-with nothing new, the **pager is offered first**, before any further scrolling or waiting. The order
-is not merely a preference: this list is paginated, so the remaining applicants are on page two by
-construction and more scrolling cannot produce anybody. `LIST_QUIET_PASSES` was written for the
-opposite arrangement — an infinite-scroll list whose next slice arrives late, where "nothing new yet"
-is genuinely not "nothing more" — so it now guards the **no-pager** path only, in full, which is
-where it was always doing the work. Spending three quiet passes and a nudge on every page boundary is
-the scrolling the recruiter watches and does not want. `MAX_FRUITLESS_PAGINATION` still retires a
-pager that reveals nobody, and a fruitless click still earns its confirmation over again.
-
 **⚠ PERMANENT — the required flow, and the page never moves.** Stated by the user and binding:
 `click applicant in left list → wait for right panel → scroll right panel completely → extract →
 save → click next applicant`. Every clause of it is load-bearing.
@@ -759,15 +732,11 @@ save → click next applicant`. Every clause of it is load-bearing.
   and LinkedIn swaps only the right panel underneath.
 - **One click per applicant, and only a row of the left list** — `selectApplicantRow`, gated by
   `classifyApplicantControl` and proven inside the list (rule 9g), with exactly one `.click()`.
-- **Then it waits for the right panel** — for *that applicant* to be **mounted**, decided by
-  `Applicants.describePanelArrival()` from identifiers rather than from the address bar or the
-  panel's text (rule 9g, amended in 3.7.10), then for the DOM to go quiet so the shell has finished
-  mounting, and then it **asks again**, because a re-mount during that quiet wait is exactly what
-  this clause exists to survive. **Nothing may click again
+- **Then it waits for the right panel**, on `panelIdentity()` changing rather than on the address bar,
+  and then for the DOM to go quiet so the shell has finished mounting. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
   already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
-  rather than scanned as somebody else — with the arrival verdict's own reason on `state.run.lastError`,
-  so "would not open" and "opened somebody else" are distinguishable.
+  rather than scanned as somebody else.
 - **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
   `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
   document position and putting it back on the same frame. `scrollIntoView` stays the mechanism
@@ -805,76 +774,6 @@ was satisfied on the first read and the scan settled having seen one screenful.
   unmounted. The scroll target is re-chosen after the first paint for the same reason.
 - **The expander runs twice** — before the walk and again at the bottom, where late-mounted sections
   finally exist — sharing one `createExpansionBudget()`, so `MAX_EXPANSIONS` is still eight in total.
-
-## Surviving a re-mount of the hiring view (3.7.10)
-
-**The report, with a screenshot: the whole page area flashes several applicants into a run.** Not a
-browser reload — that would take the content script with it — but LinkedIn's own app tearing the
-hiring view out and building it again: **both columns, the list, its pager and the detail panel
-together**. The extension's answer is to *survive* it, never to prevent it, and never to keep reading
-through it.
-
-- **The panel is watched, not polled.** `createPanelWatch()` ([applicants.js](applicants.js)) uses the
-  same shape as `state.routeObserver` — a `MutationObserver` whose callback is one boolean and out,
-  with the real check on a 120 ms timer — and that check is structural: is the node we were holding
-  still attached, is anything mounted at all, is its identity the one we last saw. No text, and no
-  polling while the page is idle. One watcher per extraction, disposed in a `finally`.
-- **A replacement restarts a quiet timer; it never schedules a resume.** A re-mount is a *burst* —
-  unmount, shell, hydrate, sometimes twice — so resuming on the first sign of a panel resumes into
-  the middle of the next teardown. `Applicants.nextRemountStep()` (pure, tested) answers
-  `continue | wait | resume | give-up`, and only `REMOUNT.DEBOUNCE_MS` (450) with **no further
-  replacement** counts as settled. That is the same "the surface says when it is done, by going
-  quiet" rule the scan and discovery already settle on. Bounded by `REMOUNT.MAX_WAIT_MS` (12 s).
-- **`settlePanel()` costs nothing when nothing moved** — `nextRemountStep` answers `continue` and it
-  is `livePanel()` plus a comparison. It replaces the bare `livePanel()` at every point the scan
-  reads: each step of the position walk, after the nested-region reveal, before the final read,
-  before the disclosures and before the resume.
-- **`assertSameApplicant()` is what a merge-only accumulator cannot do without.** `livePanel()` hands
-  back whatever is mounted, and after a re-mount that may be a different applicant — every section
-  read from then on would be folded into the record being built, producing a person whose name,
-  history and resume come from two people. Only `PANEL_ARRIVAL.OTHER` throws (a torn-down or
-  half-mounted panel is a *wait*, which `settlePanel` has already done; a re-mount showing the **same**
-  applicant is the ordinary case, and re-reading them is exactly right for a merge-only accumulator).
-- **`remounted` is the second interruption that is re-thrown from the disclosures**, for the opposite
-  reason to `hidden`: a hidden page loses a field off the *right* person, while a re-mount onto a
-  different applicant means what is being read is *somebody else's*. Warning and saving anyway is the
-  blended record rule 6 forbids. The record is discarded; a `settled` count that did not change
-  applicant becomes a **warning on the record**, because "this applicant looks thin" and "the surface
-  was rebuilt three times while they were read" are not the same fact.
-- **One applicant the surface would not hold still for never ends the run.** The run loop records
-  `remounted` as a failure for that row and opens the next one; the applicant stays uncollected in the
-  store, so a later run over the job picks them up.
-- **A missing list is very often a list being rebuilt.** `growApplicantList()` waits for it
-  (`waitForApplicantList`, `LIST_REMOUNT_TIMEOUT_MS` 6 s) before reporting `no-list` — through 3.7.9
-  that null spent one of the run's three `MAX_INCONCLUSIVE_GROWTHS`, so three re-mounts in a row ended
-  a run with nothing wrong with it. Waiting adds no bound: it is `waitFor`, so Stop and a hidden tab
-  still come first.
-
-**The run's own ledger lives in the worker, not in the document** (3.7.10). Two of the three things a
-run knows already outlived the content script — the standing instruction (`createAutoRunEntry`) and
-the saved applicants (IndexedDB). The third, *what this execution had already decided about each
-row*, was a `Set` inside the document, so a restart re-decided every row. That was invisible for rows
-genuinely saved, because the collected index catches those; it was an **unbounded retry** for a row
-that failed or would not open, because `isCollectedApplicant` deliberately refuses to count a record
-with nothing substantive on it. So the same bad row was tried from scratch on every restart, forever,
-and nothing anywhere counted.
-
-- **Only unsuccessful outcomes are recorded**, and that is the whole economy of it: a collected
-  applicant is already in the store and the collected index is what skips them. On a 665-applicant
-  job the ledger is normally a handful of keys, capped at `RUN_LEDGER.LIMIT` (4000) with a
-  `truncated` flag rather than a silent drop.
-- **`RUN_LEDGER.MAX_ROW_ATTEMPTS` (2) is what makes it terminate.** A restart is a genuine second
-  chance at a row that failed — which is why it is two and not one — but only one, so a row failing
-  for a reason that will never change cannot own every restart.
-- **A deliberate press replaces the ledger.** `armAutoRun` mints a run id per press and
-  `mergeRunLedger` replaces outright on a different one: asking again means asking again, including
-  for those rows. Streamed reports merge by **maximum, never sum**, so a message delivered twice
-  cannot count a row twice, and the totals come back with the claim so progress continues rather than
-  restarting at zero in front of the recruiter.
-- **Fire-and-forget, and never awaited.** A run must not stall because the worker was asleep; the
-  ledger is an optimisation over the collected index, never a source of truth. The worker applies the
-  same run-token check as the lifecycle report, so a replaced closure cannot write into an
-  instruction that has moved on.
 
 **A run resumes; it never starts over.** `Applicants.createCollectedIndex()` is keyed on the
 `applicationId` in each row's own href, because that is the only identifier a row carries **before**
