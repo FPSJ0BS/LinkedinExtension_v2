@@ -4183,7 +4183,7 @@
     return false;
   }
 
-  async function extractAllApplicants(options = {}) {
+  async function extractAllApplicants(options = {}, tracking = null) {
     beginRun();
     // The list is NOT walked up front any more.
     //
@@ -4214,11 +4214,51 @@
       : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
+    // WHAT THIS EXECUTION'S PREDECESSORS ALREADY DECIDED, from the worker.
+    //
+    // The standing instruction and the saved applicants both already outlive
+    // this document; the run's own ledger did not, so a restart re-decided every
+    // row. That was invisible for rows genuinely saved — the collected index
+    // catches those — and an unbounded retry for a row that failed or would not
+    // open, because `isCollectedApplicant` deliberately refuses to count a
+    // record with nothing substantive on it. The totals come back too, so
+    // progress continues from where it was rather than restarting at zero in
+    // front of the recruiter.
+    const ledger = Applicants.createRunLedger(tracking?.ledger);
     state.run = Applicants.createRunState({
       state: Applicants.RUN_STATE.RUNNING,
       total: known,
+      collected: ledger.totals.collected,
+      failed: ledger.totals.failed,
+      skipped: ledger.totals.skipped,
+      alreadyCollected: ledger.totals.alreadyCollected,
       startedAt: new Date().toISOString()
     });
+
+    /**
+     * Tell the worker what just happened to a row.
+     *
+     * Fire-and-forget on purpose: a run must not stall because the worker was
+     * asleep, and the ledger is an optimisation over the collected index rather
+     * than a source of truth. Sent at the same cadence as `PV_APPLICANT_SAVE`,
+     * which is already one message per applicant.
+     */
+    const reportProgress = (key, outcome) => {
+      if (!jobId || !tracking?.runId) return;
+      const progress = Applicants.recordRunOutcome({ runId: tracking.runId }, { key, outcome });
+      progress.totals = {
+        collected: state.run.collected,
+        failed: state.run.failed,
+        skipped: state.run.skipped,
+        alreadyCollected: state.run.alreadyCollected
+      };
+      try {
+        const sent = chrome.runtime.sendMessage({ type: "PV_APPLICANT_RUN_PROGRESS", jobId, progress });
+        if (sent?.catch) sent.catch(() => undefined);
+      } catch {
+        // No worker to tell. The collected index still makes the next run correct.
+      }
+    };
 
     const results = [];
 
@@ -4248,6 +4288,12 @@
      * pause is the one case where the row still has to be done.
      */
     const processed = new Set();
+    // Seeded from the worker's ledger: rows this instruction has already spent
+    // all `RUN_LEDGER.MAX_ROW_ATTEMPTS` on. A restart is a genuine second chance
+    // at a row that failed — which is why the allowance is two rather than one —
+    // but only one, so a row failing for a reason that will never change cannot
+    // own every restart of the run.
+    for (const key of Applicants.exhaustedRunRows(ledger)) processed.add(key);
     const unprocessedRows = () => Applicants.unprocessedApplicantRows(applicantRows(), processed);
     const nextRow = () => unprocessedRows()[0] || null;
 
@@ -4469,6 +4515,7 @@
             const why = state.lastArrival?.reason ? ` (${state.lastArrival.reason})` : "";
             state.run.lastError = `Could not open ${row.name || "the next applicant"}${why}.`;
             state.run.index = processed.size;
+            reportProgress(key, "unopened");
             continue;
           }
         }
@@ -4479,6 +4526,10 @@
         // Added to the index as well as to the store, so a virtualized list
         // that renders the same row twice in one pass is not collected twice.
         if (rowId) collected.applications.add(rowId.toLowerCase());
+        // Nothing is added to the ledger's attempts for a success — the store
+        // and the collected index already say it — but the totals move, so a
+        // restart shows the recruiter continued progress rather than zero.
+        reportProgress(key, "collected");
       } catch (error) {
         if (error?.stopped) {
           state.run.state = Applicants.RUN_STATE.STOPPED;
@@ -4516,6 +4567,7 @@
             state.run.lastError =
               `The page kept going hidden while reading ${row.name || "this applicant"}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
             state.run.index = processed.size;
+            reportProgress(key, "failed");
           }
           continue;
         }
@@ -4531,11 +4583,13 @@
           state.run.lastError =
             `${error.message} ${row.name || "This applicant"} was not saved; the run continued.`;
           state.run.index = processed.size;
+          reportProgress(key, "failed");
           continue;
         }
         processed.add(key);
         state.run.failed += 1;
         state.run.lastError = error instanceof Error ? error.message : String(error);
+        reportProgress(key, "failed");
       }
       state.run.index = processed.size;
     }
@@ -4583,7 +4637,10 @@
       }
     };
     try {
-      const result = await extractAllApplicants(options);
+      // `tracking` carries the ledger as well as the run token, so the walk
+      // begins knowing what earlier executions of this same instruction already
+      // tried. Without it, a restart re-decides every row.
+      const result = await extractAllApplicants(options, tracking);
       const lifecycle = result.run?.state === Applicants.RUN_STATE.COMPLETED
         ? Applicants.AUTO_RUN_STATE.COMPLETED
         : Applicants.AUTO_RUN_STATE.INTERRUPTED;

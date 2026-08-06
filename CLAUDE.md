@@ -477,7 +477,9 @@ worker: `PV_GET_BUILD_INFO`, `PV_IMPORT_*`
 `PV_APPLICANT_COLLECT_ALL`, `PV_APPLICANT_AUTO_RUN` (3.7.6 — "was this job collected on purpose, and
 with what options", which is what makes returning to it restart the run rather than sit idle),
 `PV_APPLICANT_LIST`, `PV_APPLICANT_COLLECTED` (3.7.3 — one lean entry per
-stored applicant, which is what lets a run resume rather than start over), `PV_APPLICANT_CLEAR`,
+stored applicant, which is what lets a run resume rather than start over),
+`PV_APPLICANT_RUN_PROGRESS` (3.7.10 — one terminal row outcome, streamed, so the run's own ledger
+outlives the document that built it), `PV_APPLICANT_CLEAR`,
 `PV_APPLICANT_DIAGNOSTICS`, plus two that travel the other way — `PV_APPLICANT_SAVE` (streamed per
 finished applicant, so a run the user walks away from keeps everything already collected) and
 `PV_APPLICANT_DOWNLOAD_RESUME`.
@@ -848,6 +850,32 @@ through it.
   that null spent one of the run's three `MAX_INCONCLUSIVE_GROWTHS`, so three re-mounts in a row ended
   a run with nothing wrong with it. Waiting adds no bound: it is `waitFor`, so Stop and a hidden tab
   still come first.
+
+**The run's own ledger lives in the worker, not in the document** (3.7.10). Two of the three things a
+run knows already outlived the content script — the standing instruction (`createAutoRunEntry`) and
+the saved applicants (IndexedDB). The third, *what this execution had already decided about each
+row*, was a `Set` inside the document, so a restart re-decided every row. That was invisible for rows
+genuinely saved, because the collected index catches those; it was an **unbounded retry** for a row
+that failed or would not open, because `isCollectedApplicant` deliberately refuses to count a record
+with nothing substantive on it. So the same bad row was tried from scratch on every restart, forever,
+and nothing anywhere counted.
+
+- **Only unsuccessful outcomes are recorded**, and that is the whole economy of it: a collected
+  applicant is already in the store and the collected index is what skips them. On a 665-applicant
+  job the ledger is normally a handful of keys, capped at `RUN_LEDGER.LIMIT` (4000) with a
+  `truncated` flag rather than a silent drop.
+- **`RUN_LEDGER.MAX_ROW_ATTEMPTS` (2) is what makes it terminate.** A restart is a genuine second
+  chance at a row that failed — which is why it is two and not one — but only one, so a row failing
+  for a reason that will never change cannot own every restart.
+- **A deliberate press replaces the ledger.** `armAutoRun` mints a run id per press and
+  `mergeRunLedger` replaces outright on a different one: asking again means asking again, including
+  for those rows. Streamed reports merge by **maximum, never sum**, so a message delivered twice
+  cannot count a row twice, and the totals come back with the claim so progress continues rather than
+  restarting at zero in front of the recruiter.
+- **Fire-and-forget, and never awaited.** A run must not stall because the worker was asleep; the
+  ledger is an optimisation over the collected index, never a source of truth. The worker applies the
+  same run-token check as the lifecycle report, so a replaced closure cannot write into an
+  instruction that has moved on.
 
 **A run resumes; it never starts over.** `Applicants.createCollectedIndex()` is keyed on the
 `applicationId` in each row's own href, because that is the only identifier a row carries **before**

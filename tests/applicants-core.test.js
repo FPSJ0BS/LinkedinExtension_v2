@@ -1228,6 +1228,111 @@ test("a re-mount of the hiring view pauses reading rather than blending two appl
     "built on waitFor, so Stop and a hidden tab still come first");
 });
 
+test("the run's ledger lives in the worker, so a restart resumes instead of re-deciding", () => {
+  // Only outcomes that produced NO usable record are remembered. A collected
+  // applicant is already in the store, and `createCollectedIndex` is what skips
+  // them — writing them here would double the ledger to say the same thing.
+  const fresh = Applicants.createRunLedger({ runId: "run-1" });
+  assert.deepEqual(fresh.attempts, {});
+  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "collected" }).attempts, {});
+  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "failed" }).attempts, { "id:1": 1 });
+  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "id:1", outcome: "unopened" }).attempts, { "id:1": 1 });
+  assert.deepEqual(Applicants.recordRunOutcome(fresh, { key: "", outcome: "failed" }).attempts, {},
+    "a row with no key at all is not a row");
+
+  // THE DEFECT. A restart re-decided every row: invisible for rows genuinely
+  // saved, and an unbounded retry for a row that failed, because
+  // `isCollectedApplicant` deliberately refuses to count a record with nothing
+  // substantive on it. So the same bad row was tried again on every restart.
+  let ledger = Applicants.recordRunOutcome(fresh, { key: "id:7", outcome: "failed" });
+  assert.deepEqual(Applicants.exhaustedRunRows(ledger), [],
+    "one failure is not enough — a restart IS a genuine second chance");
+  ledger = Applicants.recordRunOutcome(ledger, { key: "id:7", outcome: "failed" });
+  assert.deepEqual(Applicants.exhaustedRunRows(ledger), ["id:7"],
+    "but only one, or a row that will never work owns every restart");
+  assert.equal(Applicants.RUN_LEDGER.MAX_ROW_ATTEMPTS, 2);
+
+  // Merging is what the worker does with each streamed report. Counts take the
+  // MAXIMUM, not the sum: a report says where the run has got to, so a message
+  // delivered twice must not count a row twice.
+  const merged = Applicants.mergeRunLedger(
+    { runId: "run-1", attempts: { "id:7": 2, "id:8": 1 }, totals: { collected: 10, failed: 2 } },
+    { runId: "run-1", attempts: { "id:8": 1, "id:9": 1 }, totals: { collected: 12, failed: 2 } }
+  );
+  assert.deepEqual(merged.attempts, { "id:7": 2, "id:8": 1, "id:9": 1 });
+  assert.equal(merged.totals.collected, 12, "progress continues rather than restarting at zero");
+  assert.equal(merged.totals.failed, 2);
+  assert.equal(
+    Applicants.mergeRunLedger({ runId: "run-1", totals: { collected: 12 } }, { runId: "run-1", totals: { collected: 3 } })
+      .totals.collected,
+    12,
+    "and never goes backwards on a late or duplicate report"
+  );
+
+  // A DIFFERENT run id replaces outright. `armAutoRun` mints one per deliberate
+  // press, so pressing Collect Every Applicant again asks for the whole job
+  // again — including the rows the previous run gave up on.
+  const replaced = Applicants.mergeRunLedger(
+    { runId: "run-1", attempts: { "id:7": 2 }, totals: { collected: 10 } },
+    { runId: "run-2", attempts: {}, totals: { collected: 0 } }
+  );
+  assert.deepEqual(replaced.attempts, {}, "a new instruction is a new ledger");
+  assert.equal(replaced.totals.collected, 0);
+
+  // Bounded, and a truncation is STATED rather than silently dropped: it means
+  // some rows will be re-decided, which is a fact about how the run behaves.
+  let full = Applicants.createRunLedger({ runId: "run-1" });
+  const attempts = {};
+  for (let index = 0; index < Applicants.RUN_LEDGER.LIMIT; index += 1) attempts[`id:${index}`] = 1;
+  full = Applicants.createRunLedger({ runId: "run-1", attempts });
+  const overflowed = Applicants.recordRunOutcome(full, { key: "id:new", outcome: "failed" });
+  assert.equal(Object.keys(overflowed.attempts).length, Applicants.RUN_LEDGER.LIMIT);
+  assert.equal(overflowed.truncated, true);
+  // A row already in a full ledger still counts up — the cap is on how many
+  // rows are tracked, never on how far a tracked one may be retried.
+  assert.equal(Applicants.recordRunOutcome(full, { key: "id:0", outcome: "failed" }).attempts["id:0"], 2);
+});
+
+test("the ledger is streamed to the worker and handed back with the claim", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const messages = await readFile(resolve(root, "src/messages.ts"), "utf8");
+
+  assert.match(messages, /RUN_PROGRESS: "PV_APPLICANT_RUN_PROGRESS"/, "the message must be declared");
+
+  // Armed with a fresh ledger, because a fresh run id means a fresh ledger.
+  assert.match(worker, /ledger: Applicants\.createRunLedger\(\{ runId, updatedAt: now \}\)/,
+    "arming a run creates its ledger");
+  // Handed back with the claim, so a restarted execution begins knowing what
+  // its predecessors already tried.
+  assert.match(worker, /tracking: \{ \.\.\.claimed\.tracking, ledger: Applicants\.createRunLedger\(claimed\.entry\.ledger\) \}/,
+    "and the claim hands it back");
+  // The same run-token check the lifecycle report applies: a replaced closure
+  // must not write progress into an instruction that has moved on.
+  const record = worker.slice(worker.indexOf("async function recordRunProgress"), worker.indexOf("async function autoRunFor"));
+  assert.match(record, /String\(entry\.runId \|\| ""\) !== reportedRun/, "a stale run id must not write");
+  assert.match(record, /Applicants\.mergeRunLedger\(entry\.ledger,/, "and merging is the tested pure rule");
+  assert.match(worker, /if \(type === APPLICANT_MESSAGES\.RUN_PROGRESS\)/, "the worker must route it");
+
+  // The adapter hydrates from it and streams every terminal outcome into it.
+  const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("async function runEveryApplicant"));
+  assert.match(run, /const ledger = Applicants\.createRunLedger\(tracking\?\.ledger\)/, "a run starts from the stored ledger");
+  assert.match(run, /for \(const key of Applicants\.exhaustedRunRows\(ledger\)\) processed\.add\(key\)/,
+    "rows that have spent every attempt are already done");
+  assert.match(run, /collected: ledger\.totals\.collected/, "and the counters continue rather than restarting at zero");
+  const reports = [...run.matchAll(/reportProgress\(key, "(\w+)"\)/g)].map((match) => match[1]);
+  assert.ok(reports.includes("collected"), "a collected row moves the totals");
+  assert.ok(reports.includes("unopened"), "a row that would not open is remembered");
+  assert.ok(reports.includes("failed"), "and so is a failure");
+  assert.ok(reports.length >= 4, `every terminal outcome must report (found ${reports.length})`);
+
+  // Fire-and-forget: a run must never stall because the worker was asleep. The
+  // ledger is an optimisation over the collected index, not a source of truth.
+  assert.match(run, /if \(sent\?\.catch\) sent\.catch\(\(\) => undefined\)/, "the report is never awaited");
+  assert.ok(!/await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_RUN_PROGRESS"/.test(run),
+    "and never awaited anywhere");
+});
+
 test("a re-mount settles by going quiet, and a burst is not several settles", () => {
   const step = (patch) => Applicants.nextRemountStep({
     replacements: 1, acknowledged: 0, sinceLastMs: 5000, waitedMs: 100, mounted: true, ...patch
@@ -1981,9 +2086,9 @@ test("a stopped run can be started again without reloading the page", async () =
     "and nothing may SET it from a sample — that is how a lost race poisoned an applicant permanently"
   );
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
-  assert.match(run, /^\s*async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*beginRun\(\);/,
+  assert.match(run, /^\s*async function extractAllApplicants\(options = \{\}, tracking = null\) \{\s*beginRun\(\);/,
     "a run must begin by clearing both flags");
-  assert.ok(!/async function extractAllApplicants\(options = \{\}\) \{\s*\n\s*state\.aborted = false;\s*\n/.test(source),
+  assert.ok(!/async function extractAllApplicants\([^)]*\) \{\s*state\.aborted = false;\s/.test(source),
     "clearing the stop flag alone is what left the run unstartable");
   assert.match(source, /if \(type === "PV_APPLICANT_EXTRACT"\) \{\s*\n\s*beginRun\(\);/,
     "and so must a single applicant");

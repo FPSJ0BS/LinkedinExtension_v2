@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0087",
+  "name": "Keep the run ledger in the worker, so a restart resumes instead of re-deciding every row",
+  "request": "Keep the run ledger in the worker, so a restart resumes instead of re-deciding every row",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T07:01:37.862Z",
+  "completedAt": "2026-08-06T07:07:23.803Z",
+  "startCommit": "e3d6b5c620b825b887636c33f7b411e5ebc9be4f",
+  "gitRef": "task/TASK-0087",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 429 tests, validate)"
+  ],
+  "result": "Two of the three things a run knows already outlived the content script: the standing instruction (createAutoRunEntry, in the worker) and the saved applicants (IndexedDB). The third - what THIS execution had already decided about each row - was a Set inside the document, so a restart re-decided every row. Invisible for rows genuinely saved, because createCollectedIndex catches those; an unbounded retry for a row that failed or would not open, because isCollectedApplicant deliberately refuses to count a record with nothing substantive on it. The same bad row was therefore tried from scratch on every restart, forever, and nothing anywhere counted. Added a run ledger held by the worker on the auto-run entry and streamed to by PV_APPLICANT_RUN_PROGRESS: createRunLedger / recordRunOutcome / mergeRunLedger / exhaustedRunRows, all pure and tested. Only unsuccessful outcomes are recorded - a collected applicant is already in the store and the collected index is what skips them - so a 665-row job normally stores a handful of keys, capped at RUN_LEDGER.LIMIT (4000) with a stated truncated flag rather than a silent drop. RUN_LEDGER.MAX_ROW_ATTEMPTS is 2, not 1, because a restart IS a genuine second chance at a row that failed - but only one, so a row failing for a reason that will never change cannot own every restart. A deliberate press mints a new run id and mergeRunLedger replaces outright, so asking again means asking again. Reports merge by maximum rather than sum, so a message delivered twice cannot count a row twice, and the totals return with the claim so progress continues instead of restarting at zero in front of the recruiter. Fire-and-forget and never awaited: a run must not stall because the worker was asleep, and the worker applies the same run-token check as the lifecycle report."
+}

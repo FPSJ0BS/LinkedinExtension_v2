@@ -1990,6 +1990,130 @@
     return LIST_STOP_CONCLUSIVE.includes(cleanText(stoppedBy));
   }
 
+  // -------------------------------------------------------------- the ledger
+  /**
+   * What a run has already tried and failed at — kept where the document that
+   * built it cannot take it away.
+   *
+   * **The gap this closes.** Two of the three things a run knows already outlive
+   * the content script: the standing instruction lives in the worker
+   * (`createAutoRunEntry`) and the saved applicants live in IndexedDB
+   * (`createCollectedIndex`). The third — *what this execution had already
+   * decided about each row* — lived only in a `Set` inside the document, so a
+   * restart re-decided every row. Rows genuinely saved were caught by the
+   * collected index, which is why this looked harmless; a row that **failed or
+   * would not open** was not, because `isCollectedApplicant` deliberately
+   * refuses to count a record with nothing substantive on it. So every restart
+   * tried those rows again from the top, and nothing anywhere counted how often.
+   *
+   * Only unsuccessful outcomes are recorded, and that is the whole economy of
+   * it: a collected applicant is already in the store and the collected index
+   * is what skips them, so writing them here would double the ledger to say the
+   * same thing. On a 665-applicant job the ledger is normally a handful of keys.
+   *
+   * `MAX_ROW_ATTEMPTS` is what makes it terminate. A restart is a fresh chance
+   * at a row that failed — that is worth having, and it is why the count is 2
+   * rather than 1 — but only one, so a row that fails for a reason that will
+   * never change cannot own every restart of the run. A **deliberate** press of
+   * Collect Every Applicant mints a new run id, which replaces the ledger
+   * outright: asking again means asking again, including for those rows.
+   */
+  const RUN_LEDGER = Object.freeze({
+    /** How many times one row may be tried across every restart of one instruction. */
+    MAX_ROW_ATTEMPTS: 2,
+    /** A ledger cannot grow without bound. A 665-row job never approaches this. */
+    LIMIT: 4000
+  });
+
+  function ledgerCount(value) {
+    return Math.max(0, Math.trunc(Number(value) || 0));
+  }
+
+  function createRunLedger(patch = {}) {
+    const source = patch && typeof patch === "object" ? patch : {};
+    const attempts = {};
+    const incoming = source.attempts && typeof source.attempts === "object" ? source.attempts : {};
+    for (const [key, value] of Object.entries(incoming)) {
+      const id = cleanText(key);
+      const count = ledgerCount(value);
+      if (id && count) attempts[id] = count;
+    }
+    const totals = source.totals && typeof source.totals === "object" ? source.totals : {};
+    return {
+      runId: cleanText(source.runId),
+      attempts,
+      totals: {
+        collected: ledgerCount(totals.collected),
+        failed: ledgerCount(totals.failed),
+        skipped: ledgerCount(totals.skipped),
+        alreadyCollected: ledgerCount(totals.alreadyCollected)
+      },
+      truncated: Boolean(source.truncated),
+      updatedAt: cleanText(source.updatedAt)
+    };
+  }
+
+  /** The outcomes worth remembering: the ones that produced no usable record. */
+  const RUN_LEDGER_OUTCOMES = Object.freeze(["failed", "unopened"]);
+
+  function recordRunOutcome(ledger, { key = "", outcome = "" } = {}) {
+    const base = createRunLedger(ledger);
+    const id = cleanText(key);
+    if (!id || !RUN_LEDGER_OUTCOMES.includes(cleanText(outcome))) return base;
+    const attempts = { ...base.attempts };
+    if (!(id in attempts) && Object.keys(attempts).length >= RUN_LEDGER.LIMIT) {
+      // Stated rather than silently dropped: a truncated ledger means some rows
+      // will be re-decided, and that is a fact about the run's behaviour.
+      return { ...base, truncated: true };
+    }
+    attempts[id] = (attempts[id] || 0) + 1;
+    return { ...base, attempts };
+  }
+
+  /**
+   * Fold one execution's report into the stored ledger.
+   *
+   * A different run id **replaces** rather than merges: `armAutoRun` mints one
+   * per deliberate press, so pressing the button again starts genuinely over.
+   * Counts take the maximum, not the sum, because a report is a statement of
+   * where the run has got to rather than a delta — a message delivered twice
+   * must not count a row twice.
+   */
+  function mergeRunLedger(existing, incoming) {
+    const current = createRunLedger(existing);
+    const update = createRunLedger(incoming);
+    if (update.runId && current.runId && update.runId !== current.runId) return update;
+
+    const attempts = { ...current.attempts };
+    let truncated = current.truncated || update.truncated;
+    for (const [key, count] of Object.entries(update.attempts)) {
+      if (!(key in attempts) && Object.keys(attempts).length >= RUN_LEDGER.LIMIT) {
+        truncated = true;
+        continue;
+      }
+      attempts[key] = Math.max(attempts[key] || 0, count);
+    }
+    const totals = {};
+    for (const field of ["collected", "failed", "skipped", "alreadyCollected"]) {
+      totals[field] = Math.max(current.totals[field], update.totals[field]);
+    }
+    return {
+      runId: update.runId || current.runId,
+      attempts,
+      totals,
+      truncated,
+      updatedAt: update.updatedAt || current.updatedAt
+    };
+  }
+
+  /** The rows this instruction has already spent all its attempts on. */
+  function exhaustedRunRows(ledger, { maxAttempts = RUN_LEDGER.MAX_ROW_ATTEMPTS } = {}) {
+    const base = createRunLedger(ledger);
+    return Object.entries(base.attempts)
+      .filter(([, count]) => count >= Number(maxAttempts))
+      .map(([key]) => key);
+  }
+
   /**
    * What the runner should do next.
    *
@@ -2036,6 +2160,7 @@
     applicantRowKey, unprocessedApplicantRows,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     REMOUNT, nextRemountStep,
+    RUN_LEDGER, RUN_LEDGER_OUTCOMES, createRunLedger, recordRunOutcome, mergeRunLedger, exhaustedRunRows,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement

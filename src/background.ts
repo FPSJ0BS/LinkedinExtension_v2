@@ -1489,9 +1489,43 @@ async function armAutoRun(jobId: string, options: any, tabId = 0): Promise<any> 
   const runs = await readAutoRuns();
   const now = nowIso();
   const runId = createApplicantRunId();
-  runs[key] = Applicants.createAutoRunEntry({ options, now, runId, tabId });
+  // A fresh run id means a fresh ledger, and that is the point of minting one
+  // per deliberate press: pressing Collect Every Applicant again asks for the
+  // whole job again, including the rows a previous run gave up on.
+  runs[key] = {
+    ...Applicants.createAutoRunEntry({ options, now, runId, tabId }),
+    ledger: Applicants.createRunLedger({ runId, updatedAt: now })
+  };
   await chrome.storage.local.set({ [AUTO_RUN_KEY]: runs }).catch(() => undefined);
   return runs[key];
+}
+
+/**
+ * One execution's report of what it has decided about which rows.
+ *
+ * The content script's own `processed` set dies with its document, so a restart
+ * used to re-decide every row — harmless for rows genuinely saved, since the
+ * collected index catches those, and an unbounded retry for a row that failed
+ * or would not open, since `isCollectedApplicant` deliberately refuses to count
+ * a record with nothing substantive on it.
+ *
+ * The same run-token check the lifecycle report applies: a replaced closure must
+ * not write progress into an instruction that has moved on.
+ */
+async function recordRunProgress(jobId: string, progress: any): Promise<any> {
+  const key = String(jobId || "").trim();
+  if (!key) return { ok: true, changed: false, reason: "no-job-id" };
+  const runs = await readAutoRuns();
+  const entry = runs[key];
+  if (!entry) return { ok: true, changed: false, reason: "not-armed" };
+  const reportedRun = String(progress?.runId || "");
+  if (!reportedRun || String(entry.runId || "") !== reportedRun) {
+    return { ok: true, changed: false, reason: "stale-run" };
+  }
+  const ledger = Applicants.mergeRunLedger(entry.ledger, { ...progress, updatedAt: nowIso() });
+  runs[key] = { ...entry, ledger };
+  await chrome.storage.local.set({ [AUTO_RUN_KEY]: runs }).catch(() => undefined);
+  return { ok: true, changed: true, rows: Object.keys(ledger.attempts).length };
 }
 
 /**
@@ -1550,7 +1584,10 @@ async function autoRunFor(jobId: string, tabId = 0): Promise<any> {
     armed: true,
     options: claimed.entry.options || {},
     armedAt: claimed.entry.armedAt || "",
-    tracking: claimed.tracking
+    // Handed back with the claim, so the restarted execution begins knowing what
+    // its predecessors already tried — rather than walking the whole list again
+    // and re-failing on the same rows.
+    tracking: { ...claimed.tracking, ledger: Applicants.createRunLedger(claimed.entry.ledger) }
   };
 }
 
@@ -2024,6 +2061,10 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
 
   if (type === APPLICANT_MESSAGES.RUN_LIFECYCLE) {
     return settleAutoRunFor(String(message?.jobId || ""), message?.tracking || {});
+  }
+
+  if (type === APPLICANT_MESSAGES.RUN_PROGRESS) {
+    return recordRunProgress(String(message?.jobId || ""), message?.progress || {});
   }
 
   if (type === APPLICANT_MESSAGES.CLEAR) {
