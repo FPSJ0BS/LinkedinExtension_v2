@@ -688,9 +688,29 @@ questions, and the second costs hours where the first costs a walk down the list
   resume-after-a-reload. The only difference is what happens to a row: `Applicants.buildApplicantListRecord()`
   is built from the row itself and streamed to the store with `PV_APPLICANT_SAVE`, one at a time as
   it is read, exactly as the full run streams a finished applicant.
-- **Nothing is opened, so nothing is clicked but the pager.** `selectApplicantRow` and
-  `extractApplicant` are not reached. The list pass presses **fewer** controls than the full run, so
-  rule 9's budget is unchanged and no control is added.
+- **It opens each applicant, lets the panel load and walks it to the bottom before moving on**
+  (`revealApplicantProfile`, 3.7.10 — requested outright: *"slow down on every profile, let it load
+  fully, scroll to its bottom, then move onto the next"*). It is the full run's **movement** without
+  the full run's **reading**: the same single gated row click (rule 9g), the same wait for the panel
+  to be showing that applicant, and the same `scanApplicantPanel` walk — so "loaded" and "scrolled to
+  the bottom" mean here exactly what they mean there, rather than a second, thinner idea of both.
+  **The saved name still comes from the list row, never from the opened panel**: opening is for
+  loading, not for reading. The accumulator the walk fills is discarded, and that is not waste — the
+  walk's stop rule *is* "the panel stopped producing new content", and only the accumulator's own
+  signature can answer it.
+- **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel` gates
+  `expandCollapsedSections` on, so the eight expander clicks a full extraction may spend are never
+  spent here: **one click per applicant** — the row itself — plus the pager. `extractApplicant` and
+  everything it drives is untouched and is still the only path a full collection takes.
+- **A profile that would not open never loses the person.** The name came from the row and is
+  unaffected, so it is still saved and the failure is named in `lastError`. A hidden page is a pause
+  with the same `MAX_HIDDEN_RETRIES` bound the full run applies, or a panel that reliably hides the
+  tab would re-run one applicant for as long as the tab is left alone.
+- **It paces itself** (`LIST_PROFILE_PACE_MS`), because a run walks hundreds of panels back to back
+  on the recruiter's own session and the connections importer has paced between profiles since 3.3.
+  ⚠ This makes a pass cost **tens of seconds per applicant** rather than a millisecond — a
+  665-applicant job is hours, not minutes. That is what makes the listed-index skip below load-bearing
+  rather than an optimisation.
 - **The name and the two ids, and deliberately nothing else.** The row also renders a headline and a
   location; taking them would mean deciding that line two is the headline and line three is the
   location — positional guessing on generated markup, which rule 11 refuses and rule 6 makes worse

@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0100",
+  "name": "The list pass opens each applicant, lets the panel load and walks it to the bottom",
+  "request": "The list pass opens each applicant, lets the panel load and walks it to the bottom",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T09:40:05.653Z",
+  "completedAt": "2026-08-06T09:44:34.700Z",
+  "startCommit": "e85e410ec78c34d4d4c82c03b420a699b8c10c3a",
+  "gitRef": "task/TASK-0100",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Requested: on the same Collect Applicant List button, slow down on every profile - let it load fully, scroll to its bottom, then move to the next, across every page, until all are explored or the user stops it - while still saving only the name. revealApplicantProfile() is the full run's MOVEMENT without the full run's READING: the same single gated row click (rule 9g), the same wait for the panel to be showing that applicant, and the same scanApplicantPanel walk the collection uses - which is what makes 'loaded fully' and 'scrolled to the bottom' mean here exactly what they mean there, rather than a second thinner idea of both. It presses nothing extra: budget: null is the flag scanApplicantPanel gates expandCollapsedSections on, so the eight expander clicks a full extraction may spend are never spent, leaving one click per applicant plus the pager, and rule 9's per-file budget untouched. extractApplicant and everything it drives is still untouched and still the only path a full collection takes. The saved name still comes from the LIST ROW and never from the opened panel - opening is for loading, not for reading - and the accumulator the walk fills is discarded, which is not waste because the walk's stop rule IS 'the panel stopped producing new content' and only the accumulator's signature can answer it. A profile that would not open never loses the person: the name came from the row and is saved anyway, with the failure named. A hidden page is a pause with the same MAX_HIDDEN_RETRIES bound the full run applies, since a panel that reliably hides the tab would otherwise re-run one applicant forever. Paced by LIST_PROFILE_PACE_MS because it was asked for and because the connections importer has paced between profiles since 3.3. The existing test asserted 'no row is clicked' and would have kept passing purely because the click moved one function away, so it was rewritten to assert what the pass now actually does."
+}

@@ -1185,7 +1185,7 @@ test("a run that stopped short on the job it is still showing continues itself",
     "which is the guard the delay exists for");
 });
 
-test("the list pass collects every applicant's name across every page, opening nobody", async () => {
+test("the list pass opens every applicant across every page and saves only the name", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
 
@@ -1277,9 +1277,41 @@ test("the list pass collects every applicant's name across every page, opening n
   // once, this one is the per-row work.
   const pass = run.slice(run.lastIndexOf("if (options.listOnly === true) {"), run.indexOf("if (collected.has({ applicationId: rowId"));
   assert.ok(pass.length > 200, "the list-pass branch must be found, not an empty slice");
-  assert.ok(!/selectApplicantRow/.test(pass), "no row is clicked");
-  assert.ok(!/extractApplicant\(/.test(pass), "and no panel is read");
+  assert.ok(!/extractApplicant\(/.test(pass), "no panel is READ");
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
+
+  // Since 3.7.10 it DOES open each applicant and walk their panel to the bottom
+  // before moving on — requested outright — and only the name is still saved.
+  // The walk is there so every profile is genuinely reached and rendered, not
+  // so that more is read from it.
+  assert.match(pass, /await revealApplicantProfile\(row, rowId\)/, "each applicant is opened and walked");
+  // From the pace constant, so the doc comment above the function — which is
+  // where the click budget is reasoned about — is inside the slice.
+  const reveal = source.slice(source.indexOf("const LIST_PROFILE_PACE_MS"), source.indexOf("async function extractAllApplicants"));
+  assert.match(reveal, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
+  assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
+  assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
+  assert.match(reveal, /await scanApplicantPanel\(applicantPanel\(\), accumulator, diagnostics, null\)/,
+    "walked by the SAME scan a full collection uses, so 'loaded' and 'scrolled to the bottom' mean one thing");
+  // `null` for the expansion budget is what keeps this to one click per
+  // applicant: it is the flag `scanApplicantPanel` gates the expander on, so
+  // the eight clicks a full extraction may spend are never spent here.
+  assert.match(reveal, /expandCollapsedSections/,
+    "and the reason the expander is not run must be stated where the budget is passed");
+
+  // The name still comes from the ROW, never from the opened panel: opening is
+  // for loading, not for reading.
+  assert.match(pass, /name: row\.name,/, "the saved name is the row's");
+  assert.ok(!/findApplicantName|accumulator\.snapshot\(\)/.test(pass), "nothing is taken out of the panel");
+
+  // A panel that would not open must not lose the person: the name came from
+  // the row and is unaffected.
+  assert.match(pass, /opened = false;[\s\S]{0,1200}?type: "PV_APPLICANT_SAVE"/,
+    "a profile that would not open still saves the name");
+  // And a hidden page is a pause with the SAME bound the full run applies, or a
+  // panel that reliably hides the tab re-runs one applicant forever.
+  assert.match(pass, /if \(error\?\.hidden\) \{[\s\S]{0,900}?hiddenRetries > MAX_HIDDEN_RETRIES/,
+    "a hidden page pauses, bounded");
   assert.match(pass, /type: "PV_APPLICANT_SAVE", record/, "each name is saved as it is read");
   assert.match(pass, /processed\.add\(key\)/, "and the row is retired by identity, like every other outcome");
   // A row the policy refused is skipped, never saved — and never left pending,

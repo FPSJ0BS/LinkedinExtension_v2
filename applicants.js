@@ -3857,6 +3857,52 @@
     return false;
   }
 
+  /**
+   * A breath between applicants on a list pass.
+   *
+   * Asked for outright — "slow down on every profile" — and it is also simply
+   * politer: a run walks hundreds of panels back to back on the recruiter's own
+   * session, and the connections importer has paced itself between profiles
+   * since 3.3 for the same reason. Small, because the walk below is already the
+   * bulk of the time.
+   */
+  const LIST_PROFILE_PACE_MS = 900;
+
+  /**
+   * Open this row's applicant, let the panel finish loading, walk it to the
+   * bottom — and read nothing out of it.
+   *
+   * **Requested: "let the profile load fully, scroll to its bottom, then move on
+   * to the next one … still we are only saving the name."** So this is the full
+   * run's own movement without the full run's reading: the same single gated row
+   * click (rule 9g), the same wait for the panel to be showing that applicant,
+   * and the same `scanApplicantPanel` walk that the collection uses — which is
+   * what makes "loaded fully" and "scrolled to the bottom" mean here exactly
+   * what they mean there, rather than a second, thinner idea of both.
+   *
+   * **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel`
+   * gates `expandCollapsedSections` on, so the eight expander clicks a full
+   * extraction may spend are never spent here: one click per applicant, the row
+   * itself, and rule 9's per-file budget is untouched.
+   *
+   * The accumulator it fills is thrown away, and that is not waste — the walk's
+   * stop rule *is* "the panel stopped producing new content", and the only thing
+   * that can answer it is the accumulator's own signature. A walk with nothing
+   * to measure would settle on the first screenful.
+   */
+  async function revealApplicantProfile(row, rowId) {
+    const openId = Applicants.parseHiringContext(location.href).applicationId || "";
+    // Not re-clicked when the panel is already showing them — the same test the
+    // full run makes, and it costs no extra click either way.
+    if (!rowId || rowId !== openId) {
+      if (!(await selectApplicantRow(row))) return { opened: false, stoppedBy: "" };
+    }
+    const accumulator = Applicants.createApplicantAccumulator();
+    const diagnostics = { snapshots: 0, totals: {}, sections: [] };
+    const walked = await scanApplicantPanel(applicantPanel(), accumulator, diagnostics, null);
+    return { opened: true, stoppedBy: walked?.stoppedBy || "", snapshots: diagnostics.snapshots };
+  }
+
   async function extractAllApplicants(options = {}) {
     beginRun();
     // The list is NOT walked up front any more.
@@ -4126,14 +4172,15 @@
 
       // ---------------------------------------------------------- list pass
       // "Collect all the applicants like we did in connections": the whole
-      // list, across every page, one at a time, saving each person's name —
-      // and opening nobody.
+      // list, across every page, one at a time, saving each person's name.
       //
-      // Every clause below the panel is deliberately not reached. Nothing is
-      // clicked but the pager (rule 9h), which the growth walk already owns, so
-      // this pass presses FEWER controls than the full one rather than more.
-      // `extractApplicant` and everything it drives is untouched and still the
-      // only path for the full collection — it is simply not called here.
+      // Since 3.7.10 it also **opens each applicant, lets the panel load and
+      // walks it to the bottom before moving on**, which was asked for
+      // outright. Only the name is still saved: the walk is there so every
+      // profile is genuinely reached and rendered, not so that more is read
+      // from it. `extractApplicant` and everything it drives is untouched and
+      // still the only path for the full collection — it is simply not called
+      // here.
       //
       // Rows this pass has already listed were retired in bulk above, against
       // `createListedIndex` rather than `createCollectedIndex` — every record a
@@ -4171,13 +4218,66 @@
           continue;
         }
         state.run.currentName = record.applicant.name;
-        // Saved one at a time, as it is read — the same streaming the full run
-        // uses, and for the same reason: a pass the recruiter walks away from
-        // keeps every name it had already reached.
+        state.run.updatedAt = new Date().toISOString();
+
+        // Open them, let the panel load, walk it to the bottom. The name is
+        // already known from the row, so nothing here decides whether this
+        // person is saved — only whether their profile was reached.
+        let opened = true;
+        try {
+          opened = (await revealApplicantProfile(row, rowId)).opened;
+        } catch (error) {
+          if (error?.stopped) {
+            state.run.state = Applicants.RUN_STATE.STOPPED;
+            break;
+          }
+          if (error?.hidden) {
+            // A hidden page is a PAUSE. Left unprocessed and unsaved, so this
+            // row is done properly once the page is renderable again — with the
+            // same bound the full run applies, because a disclosure or a viewer
+            // that reliably hides the tab would otherwise re-run one applicant
+            // for as long as the tab is left alone.
+            state.run.lastError = error.message;
+            const resumed = await waitForVisibleAgain();
+            if (!resumed) {
+              state.run.state = Applicants.RUN_STATE.STOPPED;
+              break;
+            }
+            showPageNotice("Profile Vault resumed — continuing where it left off.");
+            beginRun();
+            hiddenRetries = key === retryingKey ? hiddenRetries + 1 : 1;
+            retryingKey = key;
+            if (hiddenRetries > MAX_HIDDEN_RETRIES) {
+              processed.add(key);
+              state.run.failed += 1;
+              state.run.lastError =
+                `The page kept going hidden while reading ${record.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
+              state.run.index = processed.size;
+            }
+            continue;
+          }
+          // A panel that would not open or would not scroll. The NAME came from
+          // the list row and is unaffected, so it is still saved — losing a
+          // person from the list because their panel misbehaved would defeat
+          // the one thing this pass is for.
+          opened = false;
+          state.run.lastError = error instanceof Error ? error.message : String(error);
+        }
+        if (!opened && !state.run.lastError) {
+          state.run.lastError =
+            `Could not open ${record.applicant.name}'s profile; the name from their list row was still saved.`;
+        }
+
+        // Saved one at a time — the same streaming the full run uses, and for
+        // the same reason: a pass the recruiter walks away from keeps every
+        // name it had already reached.
         try {
           await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
           results.push(record);
           state.run.collected += 1;
+          // Added to the index as well as to the store, so a virtualized list
+          // that renders the same row twice in one pass is not walked twice.
+          if (rowId) collected.applications.add(rowId.toLowerCase());
         } catch (error) {
           state.run.failed += 1;
           state.run.lastError = error instanceof Error ? error.message : String(error);
@@ -4185,6 +4285,9 @@
         processed.add(key);
         state.run.index = processed.size;
         state.run.updatedAt = new Date().toISOString();
+        // A breath before the next one, and a Stop lands on the next row's
+        // `assertRunnable()` a moment later.
+        await wait(LIST_PROFILE_PACE_MS);
         continue;
       }
 
