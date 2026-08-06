@@ -3990,24 +3990,33 @@
    * stored applicant rather than the records themselves.
    */
   /**
-   * Who this job already has records for.
+   * Who this job already has a **usable** record for.
    *
-   * `listOnly` decides WHICH question is asked of the same payload, and the two
-   * are genuinely different. A full run asks "is this person **collected**",
-   * because a record with nothing substantive on it is a run that failed on them
-   * and must be tried again. A list pass asks "do I already **have** them",
-   * because every record it writes is name-only — so the collected test always
-   * answers no, and a resumed pass would re-walk the entire job.
+   * **One question, asked the same way by both commands** — and that is a change
+   * from 3.7.10's first cut, which gave the list pass its own "do I already
+   * *have* them" index. That existed for one reason: the list pass wrote
+   * name-only records, which `isCollectedApplicant` correctly refuses to call
+   * collected, so a resumed pass would have re-walked the whole job. The moment
+   * that pass started writing full records, the reason evaporated — and what was
+   * left was actively harmful.
+   *
+   * **THE DEFECT IT CAUSED, reported directly: "it is skipping those profiles
+   * too which I switch in the middle."** A scan interrupted by the tab going to
+   * the background now saves what it read, deliberately, so nothing is lost. But
+   * a "do I have them" index counts that partial as done — so the very
+   * applicants that were left half-read were the ones the next pass walked
+   * straight past, freezing them at whatever had loaded. `isCollectedApplicant`
+   * is exactly the test that tells those apart: it wants one substantive field,
+   * so a full read is skipped and a thin one is tried again.
    */
-  async function loadCollectedIndex(jobId, { listed = false } = {}) {
-    const build = listed ? Applicants.createListedIndex : Applicants.createCollectedIndex;
+  async function loadCollectedIndex(jobId) {
     try {
       const reply = await chrome.runtime.sendMessage({ type: "PV_APPLICANT_COLLECTED", jobId: jobId || "" });
-      return build(reply?.entries || [], { jobId: jobId || "" });
+      return Applicants.createCollectedIndex(reply?.entries || [], { jobId: jobId || "" });
     } catch {
       // The worker being unreachable must never mean "collect everything
       // again"; an empty index simply skips nobody.
-      return build([], { jobId: jobId || "" });
+      return Applicants.createCollectedIndex([], { jobId: jobId || "" });
     }
   }
 
@@ -4057,13 +4066,11 @@
    * collapsed is an incomplete history, and history is what `current_role`,
    * `current_company` and `total_experience` are derived from.
    *
-   * ⚠ **The two whole-job commands now do the same thing.** `Collect Applicant
-   * List` and `Collect Every Applicant` differ only in which "already have
-   * them" index they consult (`createListedIndex` vs `createCollectedIndex`),
-   * and with full records being written even that distinction has almost no
-   * effect. Left as two deliberately rather than quietly removing one: the
-   * recruiter has been pressing the first one throughout, and which of them to
-   * keep is their call, not a side effect of this change.
+   * ⚠ **The two whole-job commands now do the same thing**, and since the
+   * have-them index was retired they no longer differ even in what they skip.
+   * Left as two deliberately rather than quietly removing one: the recruiter has
+   * been pressing the first one throughout, and which of them to keep is their
+   * call, not a side effect of this change.
    */
   const FULL_APPLICANT_OPTIONS = Object.freeze({});
 
@@ -4112,10 +4119,9 @@
     // walks past those rows without opening them; `recollect` is the way to ask
     // for the whole list again on purpose.
     const jobId = Applicants.parseHiringContext(location.href).jobId || "";
-    const listed = options.listOnly === true;
     const collected = options.recollect === true
       ? Applicants.createCollectedIndex([], { jobId })
-      : await loadCollectedIndex(jobId, { listed });
+      : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
     // The job header, read ONCE for a list pass and attached to every row.
@@ -4355,21 +4361,19 @@
 
       // ---------------------------------------------------------- list pass
       // "Collect all the applicants like we did in connections": the whole
-      // list, across every page, one at a time, saving each person's name.
+      // list, across every page, one at a time.
       //
-      // Since 3.7.10 it also **opens each applicant, lets the panel load and
-      // walks it to the bottom before moving on**, which was asked for
-      // outright. Only the name is still saved: the walk is there so every
-      // profile is genuinely reached and rendered, not so that more is read
-      // from it. `extractApplicant` and everything it drives is untouched and
-      // still the only path for the full collection — it is simply not called
-      // here.
+      // Built up in stages on request and now the full read — it opens each
+      // applicant, lets the panel load, walks it to the bottom, presses the
+      // contact disclosure and downloads the resume. What still distinguishes it
+      // from the branch below is only that the row's own name is kept as a
+      // floor, so a panel that resolves no name cannot leave the column this
+      // pass exists for empty.
       //
-      // Rows this pass has already listed were retired in bulk above, against
-      // `createListedIndex` rather than `createCollectedIndex` — every record a
-      // list pass writes is name-only, which is deliberately *not* "collected",
-      // so the collected test always answers no and a resumed pass would walk
-      // the whole job again. `options.recollect` is how to ask for it anyway.
+      // Rows already **collected** were retired in bulk above — one substantive
+      // field, `isCollectedApplicant`, so a run interrupted half way through
+      // somebody is tried again rather than frozen at what had loaded.
+      // `options.recollect` asks for the whole list regardless.
       if (options.listOnly === true) {
         // Rule 12a and rule 13a inside the loop, not between items: a hidden
         // tab renders nothing, so its rows are not worth reading, and a Stop

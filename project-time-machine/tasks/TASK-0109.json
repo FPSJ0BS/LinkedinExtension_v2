@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0109",
+  "name": "Never skip an applicant whose record is incomplete, including a partially read one",
+  "request": "Never skip an applicant whose record is incomplete, including a partially read one",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-06T11:27:02.342Z",
+  "completedAt": "2026-08-06T11:31:55.580Z",
+  "startCommit": "efa4efe051ebb3d1aa74d700adf3f5289b276f0b",
+  "gitRef": "task/TASK-0109",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 429 tests, validate)"
+  ],
+  "result": "Reported: it skips the first profile, and it skips the profiles I switch away from in the middle. The second one I caused two tasks ago. TASK-0099 gave the list pass its own createListedIndex - 'do I already HAVE them' - for one reason: that pass wrote name-only records, which isCollectedApplicant correctly refuses to call collected, so a resumed pass would have re-walked the whole job. TASK-0107 made that pass write FULL records, so the reason evaporated; TASK-0108 then made an interrupted scan SAVE what it had read, and a have-them index counts that partial as done. Put together, the exact applicants left half-read by a tab switch became the ones the next pass walked straight past, frozen at whatever had loaded - which is precisely what was reported. createListedIndex is removed, along with the anyRecord flag it needed on createCollectedIndex and the { listed } parameter on loadCollectedIndex; both commands now ask the one question that actually distinguishes these cases, isCollectedApplicant, so a complete read is skipped and a thin or partial one is tried again. The worker still sends every stored entry with the verdict beside it rather than filtering on it - the index applies the verdict, the worker only reports - so nothing about the payload changed. Two stale comments naming the removed index were corrected rather than left to mislead, and the test that asserted the two indexes stay distinguishable is replaced by one asserting a partial record is never skipped."
+}
