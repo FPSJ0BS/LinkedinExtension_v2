@@ -522,6 +522,64 @@ test("a connections command resets a terminal run and never refuses in silence",
   }
 });
 
+// Reported against a 19,000-connection account: enumerating the whole list before
+// reading a single profile is hours of scrolling with nothing collected, and an
+// interruption in that window leaves a long list and no profiles.
+test("Start Full Collection hands over to extraction as soon as there is a batch, and keeps discovering", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  assert.match(worker, /const HANDOVER_PENDING_ROWS = \d+;/, "how little is enough to begin must be named");
+  assert.match(worker, /handoverAtPending = 0/, "and it must be OFF unless a caller asks for it");
+  // Checked after the pass is persisted, so nothing handed over is only in memory.
+  assert.match(
+    worker,
+    /Queue\.queueStats\(enqueued\.items\)\.pending >= handoverAtPending[\s\S]{0,120}?stoppedBy = "handover"/,
+    "the handover is decided on rows already written to the queue"
+  );
+
+  const full = worker.slice(worker.indexOf("async function startCollectingWorkflow"));
+  const fullBody = full.slice(0, full.indexOf("\n// ---"));
+  assert.match(fullBody, /handoverAtPending: HANDOVER_PENDING_ROWS/,
+    "Start Full Collection must stop discovering once it has enough to start");
+  assert.match(fullBody, /autoDiscover: true/,
+    "and must leave the rest of the list to the drain loop");
+
+  // Discover Connections Only is the command whose whole purpose is the full
+  // list, so it must NOT take the shortcut.
+  const only = worker.slice(worker.indexOf("async function discoveryOnlyWorkflow"));
+  const onlyBody = only.slice(0, only.indexOf("\n// ---"));
+  assert.ok(!/handoverAtPending/.test(onlyBody),
+    "Discover Connections Only must still enumerate the whole list");
+});
+
+test("an early handover is 'enough to begin', never 'that is the whole list'", () => {
+  // The distinction the interleave rests on: handing over must not mark the list
+  // exhausted, or the drain loop would treat a part-read account as finished and
+  // the run would stop thousands of connections early.
+  let session = { ...Queue.createSession(), autoDiscover: true, discoveryExhausted: false };
+  assert.equal(Queue.shouldContinueAutoDiscovery(session), true,
+    "a run that handed over early must keep asking for more");
+
+  // Growth resets the fruitless budget; a barren pass spends it. That bound is
+  // what stops the top-up looping forever, and it is unchanged by the handover.
+  session = Queue.registerDiscoveryGrowth(session, "t1");
+  assert.equal(Queue.shouldContinueAutoDiscovery(session), true);
+  for (let attempt = 0; attempt < Queue.MAX_FRUITLESS_DISCOVERY; attempt += 1) {
+    session = Queue.registerFruitlessDiscovery(session, "t2");
+  }
+  assert.equal(Queue.shouldContinueAutoDiscovery(session), false,
+    "and a list with nothing left to give still ends the run");
+
+  // The drain loop's route back to discovery is what makes the interleave legal.
+  assert.ok(
+    Queue.canTransitionCollection(
+      Queue.COLLECTION_STATE.MOVING_TO_NEXT_PROFILE,
+      Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS
+    ),
+    "extraction must be able to go back for more of the list"
+  );
+});
+
 test("manual extraction runs over the saved queue without re-enumerating the list", async () => {
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const branch = worker.slice(worker.indexOf("if (type === IMPORT_MESSAGES.START)"));

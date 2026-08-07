@@ -1431,11 +1431,12 @@ illegal move, which is what makes a service-worker wake-up idempotent instead of
 (`PV_IMPORT_START_COLLECTING`, also reachable from the popup) runs `startCollectingWorkflow()`:
 
 1. `rememberOrigin(sender)` records the window and extension tab it was clicked from.
-2. Check the LinkedIn session; open LinkedIn's own sign-in page and pause if signed out.
-3. `resolveConnectionsTab()` opens or reuses **one** Connections tab **in that same window** and
-   makes it the active tab. A tab already on the page is re-activated, never reloaded.
-4. Enumerate the whole list, persisting every pass.
-5. Stop on stable bottom + reconciliation → `connections_complete`.
+2. `revealConnectionsTab()` opens or reuses **one** Connections tab **in that same window**, makes it
+   the active tab and **raises its window** (rule 12c). A tab already on the page is re-activated,
+   never reloaded. This happens *before* step 3, so the redirect is what the user sees.
+3. Check the LinkedIn session; open LinkedIn's own sign-in page and pause if signed out.
+4. Read the list, persisting every pass.
+5. Stop as soon as `HANDOVER_PENDING_ROWS` (25) are queued → `connections_complete`.
 6. `Tabs.ensureProfileTab()` opens or reuses **one** profile collector tab in the same window.
 7. It is activated.
 8. `Tabs.navigateProfileTab()` sends **that same tab** to each queued profile in turn.
@@ -1455,6 +1456,39 @@ illegal move, which is what makes a service-worker wake-up idempotent instead of
 
 The order of those steps is asserted by a test. It sets `autoDiscover: true`, so a queue that drains
 before the list settled keeps paging forward.
+
+**Discovery and extraction INTERLEAVE, and step 5 is where that starts (3.7.19).** Requested outright
+against a **19,000-connection** account: *"instead of collecting the connection list first, collect
+the list and collect them one by one at the same time."* Enumerating 19,000 rows before reading a
+single profile is hours of scrolling with nothing collected — and an interruption anywhere in that
+window leaves a long list and no profiles.
+
+- **The mechanism already existed; only the first handover was missing.** `discoverNextPage()`, the
+  drain loop's `shouldContinueAutoDiscovery` / `registerDiscoveryGrowth` /
+  `registerFruitlessDiscovery` bounds, `autoDiscover: true` and the legal move
+  `moving_to_next_profile → discovering_connections` have asked discovery for more whenever the queue
+  empties since 3.3. What `startCollectingWorkflow` did was run `runDiscovery` to a settled bottom
+  first. It now passes `handoverAtPending: HANDOVER_PENDING_ROWS` and returns `stoppedBy: "handover"`
+  the moment that many rows are queued.
+- **`HANDOVER_PENDING_ROWS` (25) is a floor, never a cap.** A pass that mounts 400 rows queues all
+  400; the number only decides how little is enough to get started, and the pass that satisfies it was
+  paid for either way. It is checked **after** the pass is persisted, so nothing handed over exists
+  only in memory.
+- **An early return is "enough to begin", never "that is the whole list".** It does not touch
+  `discoveryExhausted`, which is exactly what keeps the drain loop topping the queue up. Getting that
+  wrong would make a part-read account look finished and stop the run thousands of connections early.
+- **`Discover Connections Only` passes no handover budget** and still enumerates the whole list — it
+  is the command whose entire purpose is that — and a test asserts it never takes the shortcut.
+- **`connections_complete` is now the HAND-OVER, not the end of the list**, so both of its user-facing
+  strings were corrected: saying "complete" there is untrue for most of a large account's run.
+- **⚠ They interleave; they do not run at the same time, and they cannot.** Rule 12a: LinkedIn does
+  not render a hidden tab, so its DOM freezes and every "has it finished?" signal reads as finished.
+  Discovery needs the Connections tab painting and extraction needs the profile collector tab
+  painting, and only one tab of a window is active at a time. Alternating is the whole of what "at the
+  same time" can mean here, and rule 12's two-tab limit is unchanged.
+
+Locked by *"Start Full Collection hands over to extraction as soon as there is a batch, and keeps
+discovering"* and *"an early handover is 'enough to begin', never 'that is the whole list'"*.
 
 `Find All Connections` (`PV_IMPORT_DISCOVER_ALL`) enumerates the whole list and saves it; it never
 extracts. `Start Profile Extraction` (`PV_IMPORT_START`) runs over what is already saved and sets

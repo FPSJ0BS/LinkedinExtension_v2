@@ -1,5 +1,44 @@
 # CHANGELOG.md
 
+## 3.7.19 — the list and the profiles are collected together, not one after the other
+
+Requested outright against a **19,000-connection** account: *"instead of collecting the connection
+list first, collect the list and collect them one by one at the same time."*
+
+`Start Full Collection` ran `runDiscovery` to a settled bottom before reading a single profile. On
+19,000 connections that is hours of scrolling with nothing collected — and an interruption anywhere
+in that window leaves a long list and no profiles.
+
+**Almost all of the machinery was already there.** `discoverNextPage()`, `autoDiscover: true`, the
+legal move `moving_to_next_profile → discovering_connections`, and the drain loop's
+`shouldContinueAutoDiscovery` / `registerDiscoveryGrowth` / `registerFruitlessDiscovery` bounds have
+asked discovery for more whenever the queue empties since 3.3. The only thing missing was the
+**first** handover, so the run now:
+
+1. reads the list until `HANDOVER_PENDING_ROWS` (25) are queued — `stoppedBy: "handover"`,
+2. hands over and starts extracting,
+3. goes back for more of the list whenever the queue drains, for as long as the list keeps giving.
+
+Three things about it are deliberate:
+
+- **25 is a floor, never a cap.** A pass that mounts 400 rows queues all 400; the number only decides
+  how little is enough to get started, and that pass was paid for either way. It is checked **after**
+  the pass is persisted, so nothing handed over exists only in memory.
+- **An early return is "enough to begin", never "that is the whole list".** It leaves
+  `discoveryExhausted` alone, which is what keeps the top-up running. Getting that wrong would make a
+  part-read account look finished and stop the run thousands of connections early.
+- **`Discover Connections Only` is untouched** and still enumerates everything — that is its entire
+  purpose — and a test asserts it never takes the shortcut.
+
+`connections_complete` is now the hand-over rather than the end of the list, so both of its
+user-facing strings were corrected; "Connections list complete" is untrue for most of a large run.
+
+**⚠ They interleave; they do not run at the same time, and they cannot.** Rule 12a: LinkedIn does not
+render a hidden tab, so its DOM freezes and every "has it finished?" signal reads as finished.
+Discovery needs the Connections tab painting and extraction needs the profile collector tab painting,
+and only one tab of a window is active at a time. Alternating is the whole of what "at the same time"
+can mean here. Rule 12's two-tab limit is unchanged, and no new tab, click or control was added.
+
 ## 3.7.18 — a finished run no longer makes both connections buttons dead forever
 
 Reported as *"nothing is happening"* — after 3.7.17 raised the Connections window and it still did

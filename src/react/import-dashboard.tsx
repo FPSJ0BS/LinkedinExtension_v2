@@ -49,7 +49,7 @@ const COLLECTION_LABELS: Record<string, string> = {
   idle: "Idle",
   opening_connections: "Opening your Connections tab…",
   discovering_connections: "Reading your connections list…",
-  connections_complete: "Connections list complete",
+  connections_complete: "Starting extraction…",
   opening_profile_collector: "Opening the profile collector tab…",
   extracting_profile: "Reading a profile…",
   saving_profile: "Saving a profile…",

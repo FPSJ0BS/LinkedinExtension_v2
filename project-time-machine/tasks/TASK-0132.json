@@ -1,0 +1,42 @@
+{
+  "schema": 2,
+  "id": "TASK-0132",
+  "name": "Start Full Collection extracts while it is still discovering, instead of enumerating the whole list first",
+  "request": "Start Full Collection extracts while it is still discovering, instead of enumerating the whole list first",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T13:40:22.388Z",
+  "completedAt": "2026-08-07T13:43:31.568Z",
+  "startCommit": "a2668e197b5362ed7e1e323d7786aaacebe851fb",
+  "gitRef": "task/TASK-0132",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/import-queue-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-workflow.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 446 tests, validate)"
+  ],
+  "result": "Start Full Collection now extracts while it is still discovering. It ran runDiscovery to a settled bottom before reading a single profile, which on the reported 19,000-connection account is hours of scrolling with nothing collected and leaves a long list and no profiles if anything interrupts it. Almost all the machinery already existed: discoverNextPage(), autoDiscover:true, the legal move moving_to_next_profile -> discovering_connections, and the drain loop's shouldContinueAutoDiscovery / registerDiscoveryGrowth / registerFruitlessDiscovery bounds have asked discovery for more whenever the queue empties since 3.3. Only the FIRST handover was missing. runDiscovery takes handoverAtPending; once that many rows are queued it returns stoppedBy:'handover' and the workflow hands over, and the drain loop tops the queue up from then on. HANDOVER_PENDING_ROWS is 25 and is a floor not a cap - a pass that mounts 400 rows queues all 400 - and it is checked AFTER the pass is persisted so nothing handed over is only in memory. An early return deliberately does NOT touch discoveryExhausted: it means 'enough to begin', never 'that is the whole list', which is what keeps the top-up running and stops a part-read account looking finished. Discover Connections Only passes no handover budget and still enumerates everything, asserted by test. connections_complete is now the hand-over rather than the end of the list, so both of its user-facing strings were corrected in import-queue-core.js and import-dashboard.tsx. Discovery and extraction INTERLEAVE rather than run concurrently, and cannot do otherwise: rule 12a means a hidden tab's DOM freezes, discovery needs the Connections tab painting and extraction needs the profile collector tab painting, and only one tab of a window is active at a time. No new tab, click or control; rule 12's two-tab limit unchanged. CLAUDE.md's tab-workflow steps 2-5 updated (step 2 also now records the 3.7.17 reveal) plus a new section on the interleave; CHANGELOG.md 3.7.19. Two new tests: 'Start Full Collection hands over to extraction as soon as there is a batch, and keeps discovering' and 'an early handover is enough to begin, never that is the whole list'. Files: src/background.ts, src/import-queue-core.js, src/react/import-dashboard.tsx, tests/collector-workflow.test.js, CLAUDE.md, CHANGELOG.md."
+}

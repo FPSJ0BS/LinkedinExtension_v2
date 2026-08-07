@@ -86,6 +86,32 @@ const HEARTBEAT_PERIOD_MINUTES = 1;
 
 const MAX_DISCOVERY_PASSES = 400;
 
+/**
+ * How many queued connections are enough to start extracting.
+ *
+ * Reported against a 19,000-connection account: enumerating the whole list
+ * before reading a single profile means hours of scrolling with nothing
+ * collected, and any interruption in that window leaves a long list and no
+ * profiles. So the first discovery slice hands over as soon as there is a
+ * workable batch, and the run tops itself up from then on — the drain loop has
+ * asked discovery for more whenever the queue empties since 3.3
+ * (`discoverNextPage`, `autoDiscover`, `MOVING_TO_NEXT_PROFILE ->
+ * DISCOVERING_CONNECTIONS`), so this is the one handover that was missing rather
+ * than a new mechanism.
+ *
+ * It is a floor, never a cap: a pass that mounts 400 rows queues all 400. The
+ * number only decides how little is enough to get started, so it is small — the
+ * pass that satisfies it has already been paid for either way.
+ *
+ * ⚠ Discovery and extraction INTERLEAVE; they do not run at the same time, and
+ * they cannot. Rule 12a: LinkedIn does not render a hidden tab, so its DOM
+ * freezes and every "has it finished?" signal reads as finished. Discovery needs
+ * the Connections tab painting and extraction needs the profile collector tab
+ * painting, and only one tab of a window is active at a time. Alternating is the
+ * whole of what "at the same time" can mean here.
+ */
+const HANDOVER_PENDING_ROWS = 25;
+
 let loopRunning = false;
 /** Newest diagnostics from each surface, for the downloadable JSON report. */
 const diagnostics: { discovery: any; profile: any } = { discovery: null, profile: null };
@@ -567,10 +593,23 @@ async function discoverNextPage(): Promise<{ added: number; challenge?: any; hid
  * Repeats resumable discovery passes until the whole list has been enumerated:
  * every pass reads the rendered cards, scrolls on, waits for LinkedIn's lazy
  * loading, and uses an allowlisted pagination control when one is offered. The
- * accumulated list is written to IndexedDB after every pass, so the full set is
- * persisted before any extraction is allowed to start.
+ * accumulated list is written to IndexedDB after every pass, so nothing found is
+ * ever waiting on the pass after it.
+ *
+ * `handoverAtPending` is what lets Start Full Collection stop early and start
+ * extracting: once that many rows are queued, this returns `stoppedBy:
+ * "handover"` and the caller hands over, leaving the rest of the list to the
+ * drain loop. It is **off by default and zero for Discover Connections Only**,
+ * which is the command whose whole purpose is to enumerate everything.
+ * `discoveryExhausted` is untouched by it — an early return says "enough to
+ * begin", never "that is the whole list", and that distinction is what keeps
+ * `shouldContinueAutoDiscovery` topping the queue up afterwards.
  */
-async function runDiscovery(maxPasses = MAX_DISCOVERY_PASSES, generation = runGeneration): Promise<any> {
+async function runDiscovery(
+  maxPasses = MAX_DISCOVERY_PASSES,
+  generation = runGeneration,
+  { handoverAtPending = 0 }: { handoverAtPending?: number } = {}
+): Promise<any> {
   const tabId = await resolveConnectionsTab();
   await ensureContentScript(tabId, CONNECTION_SCRIPTS);
 
@@ -634,6 +673,14 @@ async function runDiscovery(maxPasses = MAX_DISCOVERY_PASSES, generation = runGe
     }
     if (nextDiscovery.exhausted) {
       stoppedBy = "settled";
+      break;
+    }
+    // Enough to begin. Checked AFTER the pass has been persisted, so the rows
+    // being handed over are on disk before anything is extracted, and only when
+    // the caller asked for a handover — Discover Connections Only passes 0 and
+    // still enumerates the whole list.
+    if (handoverAtPending > 0 && Queue.queueStats(enqueued.items).pending >= handoverAtPending) {
+      stoppedBy = "handover";
       break;
     }
     if (pass + 1 >= maxPasses) stoppedBy = "pass-budget";
@@ -1001,9 +1048,17 @@ async function startCollectingWorkflow(options: any = {}): Promise<void> {
     // Steps 2-3 already happened above, before the session check, so the tab is
     // on screen rather than merely resolved.
 
-    // Steps 4-5. Enumerate the whole list. Every pass is persisted as it goes.
+    // Steps 4-5. Read the list until there is a workable batch, NOT until the
+    // whole account has been enumerated: on a 19,000-connection account that
+    // second thing is hours of scrolling with nothing collected. The rest of the
+    // list is picked up by the drain loop, which has asked discovery for more
+    // whenever the queue empties since 3.3. Every pass is persisted as it goes.
     await moveCollectionTo(Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS);
-    const discovery = await runDiscovery(Number(options.maxPasses) || MAX_DISCOVERY_PASSES, generation);
+    const discovery = await runDiscovery(
+      Number(options.maxPasses) || MAX_DISCOVERY_PASSES,
+      generation,
+      { handoverAtPending: HANDOVER_PENDING_ROWS }
+    );
     if (!isCurrent(generation) || discovery.aborted) return;
     if (discovery.hidden) {
       await moveCollectionTo(Queue.COLLECTION_STATE.PAUSED_HIDDEN);
@@ -1080,6 +1135,8 @@ async function discoveryOnlyWorkflow(options: any = {}): Promise<void> {
       return;
     }
     await moveCollectionTo(Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS);
+    // No handover budget: this is the command whose entire purpose is to
+    // enumerate the whole list, so it still runs to a settled bottom.
     const discovery = await runDiscovery(Number(options.maxPasses) || MAX_DISCOVERY_PASSES, generation);
     if (!isCurrent(generation) || discovery.aborted) return;
     if (discovery.hidden) {

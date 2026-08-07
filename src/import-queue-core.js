@@ -169,7 +169,11 @@ export const COLLECTION_STATE_TEXT = Object.freeze({
   [COLLECTION_STATE.IDLE]: "Idle.",
   [COLLECTION_STATE.OPENING_CONNECTIONS]: "Opening your Connections page…",
   [COLLECTION_STATE.DISCOVERING_CONNECTIONS]: "Reading your connections list…",
-  [COLLECTION_STATE.CONNECTIONS_COMPLETE]: "Connections list complete. Starting extraction…",
+  // Since 3.7.19 this is the HANDOVER, not necessarily the end of the list:
+  // Start Full Collection begins extracting as soon as there is a workable batch
+  // and keeps reading the list as the queue drains, so saying "complete" here
+  // would be untrue for most of a large account's run.
+  [COLLECTION_STATE.CONNECTIONS_COMPLETE]: "Connections found. Starting extraction…",
   [COLLECTION_STATE.OPENING_PROFILE_COLLECTOR]: "Opening the profile collector tab…",
   [COLLECTION_STATE.EXTRACTING_PROFILE]: "Reading a profile…",
   [COLLECTION_STATE.SAVING_PROFILE]: "Saving a profile…",
