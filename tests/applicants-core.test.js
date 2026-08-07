@@ -1173,9 +1173,9 @@ test("the next applicant is only scanned once the panel is showing them", async 
 
   // And the defect after it, which cost every applicant their name: a TEXT
   // fingerprint, satisfied by the teardown alone.
-  assert.match(source, /function panelIdentity\(panel = mountedApplicantPanel\(\)\)/,
-    "the panel's identity must be asked of a MOUNTED panel");
-  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function panelSectionCount"));
+  assert.match(source, /function panelIdentity\(panel = arrivalPanel\(\)\)/,
+    "the panel's identity must be asked of a panel that can be identified");
+  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function arrivalPanel()"));
   assert.ok(!/innerText/.test(identity), "identity must never be built from the panel's text");
   assert.match(identity, /application \? `id:\$\{application\}` : ""/, "the application id is the identity");
   assert.match(identity, /profile \? `in:\$\{profile\}` : ""/, "with the member's own slug beside it");
@@ -1184,8 +1184,14 @@ test("the next applicant is only scanned once the panel is showing them", async 
   assert.match(select, /const expected = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
     "the row states which applicant is expected, from its own href");
   assert.match(select, /describeApplicantArrival\(expected, before\)/, "and arrival is judged against it");
-  assert.match(source, /const panel = mountedApplicantPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
-    "'nothing is mounted' must be expressible, so the STRICT resolver is used");
+  // "Nothing identifiable is on screen" must stay expressible, so the resolver
+  // may answer null — but it must be one this markup can actually satisfy.
+  // Requiring the STRICT resolver here is what made arrival unanswerable and
+  // stopped the run opening anybody after the first: it needs two hydrated
+  // section headings inside one container, and this surface routinely puts them
+  // outside the panel, which is why `buildSectionMap` widens page-wide at all.
+  assert.match(source, /const panel = arrivalPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
+    "arrival is asked of a panel that can be identified, and null is still an answer");
 
   // Three steps, in order: teardown, then arrival, then settle-and-confirm.
   assert.ok(
@@ -1196,10 +1202,19 @@ test("the next applicant is only scanned once the panel is showing them", async 
     select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
     "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
   );
-  assert.match(select, /return Boolean\(arrival\) && settled\.arrived;/, "either half failing is a row that did not open");
+  // And the verdict the caller acts on. Not "did the wait succeed" — that was
+  // the regression: `torn-down` and `mounting` mean "I could not tell", and
+  // treating them as "not here" skipped every applicant on markup whose section
+  // headings the strict panel resolver cannot see. Only a panel positively
+  // showing somebody else refuses the row; the record is guarded separately.
+  assert.match(select, /const refused = settled\.state === Applicants\.PANEL_ARRIVAL\.OTHER/,
+    "a third party refuses the row");
+  assert.match(select, /\|\| settled\.state === Applicants\.PANEL_ARRIVAL\.PREVIOUS;/,
+    "and so does the applicant that was already showing");
+  assert.match(select, /return !refused;/, "and nothing else does");
 
-  // A row that never opened is a skip, not a record — scanning anyway would
-  // save the previous applicant a second time under this row's identity.
+  // A row that came up as somebody else is a skip, not a record — scanning
+  // anyway would save that applicant a second time under this row's identity.
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
   assert.match(run, /const opened = await selectApplicantRow\(row\)/, "the result must be checked");
   assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
@@ -1512,6 +1527,43 @@ test("a record may only be built from the applicant that was asked for", async (
   // of location.href taken when the scan started.
   assert.match(extract, /context: expected \? \{ \.\.\.context, applicationId: expected \} : context/,
     "the record carries the expected application id");
+
+  // THE REGRESSION THAT FOLLOWED, and it is the other half of this rule: "it
+  // scrolls one profile, then stops at the second and does not even scroll it."
+  //
+  // Arrival was asked of `mountedApplicantPanel()` alone, which needs one
+  // container holding PANEL_MIN_SECTIONS *hydrated* section headings — and this
+  // surface routinely does not put them there, which is the whole reason
+  // `buildSectionMap()` widens page-wide. The strict resolver then answers null,
+  // every poll reads `torn-down`, arrival never happens, and `Boolean(arrival)
+  // && settled.arrived` skipped the applicant after the full timeout: unopened,
+  // unscrolled, saved as a bare name. The first applicant survived only because
+  // they were already on screen and so were never clicked.
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("const LIST_QUIET_PASSES"));
+  // Comments stripped for the two refusals: this function explains the defect in
+  // the very words the check greps for, so the prose would read as the code.
+  const selectCode = withoutComments(select);
+  assert.match(select, /const heldPanel = arrivalPanel\(\);/,
+    "the wait must start from a panel this markup can actually resolve");
+  assert.ok(!/mountedApplicantPanel\(\)/.test(selectCode),
+    "and never from the strict resolver alone, which answers null on the live markup");
+  assert.ok(!/Boolean\(arrival\) && settled\.arrived/.test(selectCode),
+    "an unconfirmed arrival must never be what skips a person");
+  assert.match(select, /const refused = settled\.state === Applicants\.PANEL_ARRIVAL\.OTHER\s*\n?\s*\|\| settled\.state === Applicants\.PANEL_ARRIVAL\.PREVIOUS;/,
+    "only a panel positively showing SOMEBODY ELSE refuses the row");
+  assert.match(select, /return !refused;/, "everything else is read, and the record guard decides");
+  // The panel's own id must not fall back to the address bar, which routes ahead
+  // of the render — that fallback is what made the id test vacuous and left the
+  // section count as the only thing deciding arrival.
+  const ownId = source.slice(source.indexOf("function panelOwnApplicationId"), source.indexOf("function panelMemberUrl"));
+  assert.ok(!/location\.href/.test(ownId), "the panel's own id is the panel's, never the address bar's");
+  assert.match(ownId, /return "";/, "and it says so rather than guessing");
+  // `arrivalPanel()` accepts the loose panel when it carries an identifier, and
+  // still refuses anything holding the list.
+  const arrivalPanel = source.slice(source.indexOf("function arrivalPanel()"), source.indexOf("/** How many distinct applicant sections"));
+  assert.match(arrivalPanel, /rowLinksIn\(loose\) > 1/, "the list must never look like an arrived applicant");
+  assert.match(arrivalPanel, /panelOwnApplicationId\(loose\) \|\| panelMemberUrl\(loose\)/,
+    "a loose panel qualifies only when it can be identified");
 
   // Bounded: refusing forever would let one unresolvable row hold the job.
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
@@ -1933,7 +1985,7 @@ test("a control in the list header can never retire the open applicant's row", a
   assert.match(source, /function hasApplicationHref\(anchor\)/, "the address test stands on its own");
   assert.match(link, /if \(!hasApplicationHref\(anchor\)\) return false;/,
     "and the row test is built on top of it rather than duplicating it");
-  const panelId = source.slice(source.indexOf("function panelApplicationId"), source.indexOf("function panelIdentity"));
+  const panelId = source.slice(source.indexOf("function panelOwnApplicationId"), source.indexOf("function panelMemberUrl"));
   assert.match(panelId, /if \(!hasApplicationHref\(anchor\)\) continue;/,
     "the panel's own id is read from the address, never through the row policy");
 });
@@ -2998,15 +3050,31 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
     "and 'the fingerprint differs' must not come back: a teardown satisfies it");
   assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
     "the click is followed by waiting for THIS applicant to be mounted");
-  assert.match(select, /await waitForDomQuiet\([\s\S]{0,400}?return Boolean\(arrival\) && settled\.arrived;/,
-    "then the panel is allowed to finish mounting before the caller proceeds");
+  assert.match(select, /await waitForDomQuiet\(450, 4000\);\s*\n\s*const settled = describeApplicantArrival\(expected, before\);/,
+    "then the panel is allowed to finish mounting, and is asked again");
 
-  // The caller does not re-click an applicant already shown, and treats a row
-  // that never opened as a skip rather than scanning whatever is on screen.
+  // Amended again in 3.7.11, and the permanent clause is untouched: the wait is
+  // still every bit of "wait for the right panel". What changed is what an
+  // UNANSWERABLE wait means. `Boolean(arrival) && settled.arrived` treated the
+  // two "I could not tell" verdicts — `torn-down` from a panel this cannot
+  // resolve, `mounting` from one whose headings it cannot see — as proof the
+  // applicant was not there, and skipped them. The run then opened nobody after
+  // the first and scrolled nothing. Only a panel positively showing SOMEBODY
+  // ELSE refuses the row now; "never scanned as somebody else" is enforced where
+  // it belongs, on the record, by a guard that checks three times.
+  assert.match(select, /settled\.state === Applicants\.PANEL_ARRIVAL\.OTHER/, "a third party refuses the row");
+  assert.match(select, /settled\.state === Applicants\.PANEL_ARRIVAL\.PREVIOUS/, "and so does the previous applicant");
+  assert.ok(!/Boolean\(arrival\) && settled\.arrived/.test(withoutComments(select)),
+    "but an unconfirmed arrival must never be what throws a person away");
+  assert.match(source, /function assertExpectedApplicant\(expected\)/,
+    "because the record - not the click - is what refuses the wrong applicant");
+
+  // The caller does not re-click an applicant already shown, and a row that came
+  // up as somebody else is skipped rather than scanned under this row's name.
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
   assert.match(run, /if \(!rowId \|\| rowId !== openId\) \{/, "an applicant already open is not clicked again");
   assert.match(run, /const opened = await selectApplicantRow\(row\);[\s\S]{0,400}?if \(!opened\) \{/,
-    "a row that did not open is skipped, never scanned as somebody else");
+    "a row that came up as somebody else is skipped, never scanned as them");
 
   // 4. Scrolling moves a column, never the recruiter's page.
   assert.match(source, /function anchorPage\(run\)/, "there is one helper that holds the page still");

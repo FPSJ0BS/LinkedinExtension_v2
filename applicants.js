@@ -750,32 +750,37 @@
   }
 
   /**
-   * The application the panel is showing, from the panel's OWN link first.
+   * The application the panel's OWN markup names, or `""`.
    *
-   * The address bar is the second source and never the only one, because on this
-   * surface it moves **ahead of the render**: LinkedIn routes the id the instant
-   * a row is clicked while the column it names is still being torn down and
-   * rebuilt. Asking the panel is asking the thing whose content is about to be
-   * read — which is the whole question.
-   *
-   * `applicantPanel()` legitimately holds one application link, the one it is
-   * showing, which is exactly why the resolver refuses a candidate holding two.
+   * **The address bar is deliberately not a fallback here**, and that was a live
+   * regression: it moves *ahead of the render*, so the instant a row is clicked
+   * it already says the new id while the column it names is still being torn down
+   * and rebuilt. Falling back to it made the arrival test vacuous — "is the panel
+   * showing the applicant we asked for" answered yes before the panel had
+   * changed at all — so the only thing left deciding arrival was the section
+   * count, which is the half this surface cannot be relied on to satisfy.
    *
    * Asked of the **address** (`hasApplicationHref`) rather than of the row policy
    * (`isApplicantRowLink`): the panel's own link is not a list row and is not
    * labelled like one — `View full profile`, `Resume`, or an icon with no text at
-   * all — so judging its label would refuse it and drop this back to the address
-   * bar, which is precisely the source the arrival test cannot rely on.
+   * all — so judging its label would refuse it and leave the panel unidentifiable.
    */
-  function panelApplicationId(panel) {
-    if (panel?.isConnected) {
-      for (const anchor of panel.querySelectorAll("a[href]")) {
-        if (!hasApplicationHref(anchor)) continue;
-        const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
-        if (id) return id;
-      }
+  function panelOwnApplicationId(panel) {
+    if (!panel?.isConnected) return "";
+    for (const anchor of panel.querySelectorAll("a[href]")) {
+      if (!hasApplicationHref(anchor)) continue;
+      const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
+      if (id) return id;
     }
-    return Applicants.parseHiringContext(location.href).applicationId || "";
+    return "";
+  }
+
+  /** The member the panel's own markup links to, canonical, or `""`. */
+  function panelMemberUrl(panel) {
+    if (!panel?.isConnected) return "";
+    const anchor = [...panel.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
+    if (!anchor) return "";
+    return Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "") || "";
   }
 
   /**
@@ -785,15 +790,42 @@
    * a re-render of the same person all read as "a different applicant arrived".
    * Everything here is an identifier.
    */
-  function panelIdentity(panel = mountedApplicantPanel()) {
+  function panelIdentity(panel = arrivalPanel()) {
     const live = panel?.isConnected ? panel : null;
-    const application = panelApplicationId(live);
-    let profile = "";
-    if (live) {
-      const anchor = [...live.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
-      if (anchor) profile = Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "");
-    }
+    const application = panelOwnApplicationId(live);
+    const profile = panelMemberUrl(live);
     return [application ? `id:${application}` : "", profile ? `in:${profile}` : ""].filter(Boolean).join("|");
+  }
+
+  /**
+   * A panel there is something to say about.
+   *
+   * **THE REGRESSION THIS EXISTS FOR: it scrolled the first profile and then
+   * never scrolled another.** Arrival was asked of `mountedApplicantPanel()`
+   * alone, which requires one container to hold `PANEL_MIN_SECTIONS` *hydrated*
+   * section headings — and this surface routinely does not put them there. That
+   * is not a suspicion: it is why `buildSectionMap()` widens page-wide for any
+   * section the panel did not hold, and why `deriveCurrentPosition` kept coming
+   * back empty before it did. When the strict resolver answers null, `connected`
+   * is false, every poll reads `torn-down`, arrival **never** happens, and the
+   * row is skipped after the full timeout — unopened, unscrolled, saved as a
+   * name and nothing else. The first applicant survived only because they were
+   * already on screen and so were never clicked.
+   *
+   * So the strict resolver is asked first and the loose one is accepted when it
+   * carries an identifier of its own — an application link or the member's
+   * `/in/` link. That is enough to answer *who* is on screen, which is the only
+   * question arrival actually asks; whether their sections have hydrated is a
+   * readiness question, and the scan's own reveal walk and quiet count already
+   * own it. A candidate holding more than one row link is still refused, so
+   * "the list is on screen" can never look like "the applicant arrived".
+   */
+  function arrivalPanel() {
+    const mounted = mountedApplicantPanel();
+    if (mounted) return mounted;
+    const loose = applicantPanel();
+    if (!loose?.isConnected || rowLinksIn(loose) > 1) return null;
+    return panelOwnApplicationId(loose) || panelMemberUrl(loose) ? loose : null;
   }
 
   /** How many distinct applicant sections have hydrated in the panel. */
@@ -806,16 +838,16 @@
    * Is the panel showing `expected`, and has it finished mounting?
    *
    * The DOM half of `Applicants.describePanelArrival` — this reads the page, the
-   * core decides. `mountedApplicantPanel()` rather than `applicantPanel()` on
-   * purpose: the loose resolver answers with a container holding the applicant
-   * list when nothing is mounted, and "the list is on screen" must never be able
-   * to look like "the applicant arrived".
+   * core decides. `arrivalPanel()` rather than `mountedApplicantPanel()`, because
+   * requiring the strict resolver made the verdict unanswerable on markup that
+   * does not put its section headings inside the panel; and rather than
+   * `applicantPanel()`, whose last resort is a container holding the list.
    */
   function describeApplicantArrival(expected, previousIdentity = "") {
-    const panel = mountedApplicantPanel();
+    const panel = arrivalPanel();
     return Applicants.describePanelArrival({
       expected,
-      applicationId: panel ? panelApplicationId(panel) : "",
+      applicationId: panelOwnApplicationId(panel),
       identity: panelIdentity(panel),
       previousIdentity,
       sections: panelSectionCount(panel),
@@ -3454,9 +3486,17 @@
   // flag is checked before every single row.
 
   /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 4000;
-  /** How long the applicant that was asked for has to mount before the row is skipped. */
-  const PANEL_ARRIVAL_TIMEOUT_MS = 15000;
+  const PANEL_TEARDOWN_TIMEOUT_MS = 1500;
+  /**
+   * How long the applicant that was asked for is given to mount.
+   *
+   * Time given to the panel, never a verdict on the applicant: a row whose
+   * arrival cannot be confirmed within it is read anyway (see below). Kept short
+   * enough that markup this cannot identify at all costs seconds per row rather
+   * than tens of them — a 665-applicant job is walked one at a time, so every
+   * second spent waiting for an answer that will not come is spent 665 times.
+   */
+  const PANEL_ARRIVAL_TIMEOUT_MS = 10000;
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
@@ -3485,10 +3525,18 @@
    *      fast enough that no torn-down state is observable, and that is not a
    *      failure. It is here so step 2 cannot be satisfied by the panel that was
    *      already on screen.
-   *   2. **Arrival** — a mounted panel, at least `PANEL_MIN_SECTIONS` sections
-   *      hydrated, showing this row's own application id. Not "different".
+   *   2. **Arrival** — a panel that can be identified, showing this row's own
+   *      application id or a different member from the one before it. Not
+   *      "different text".
    *   3. **Settle**, then **ask again**, because a panel that arrives and is
    *      re-mounted underneath the quiet wait is exactly what this surface does.
+   *
+   * And a **third** defect, which is what the returned value now answers for.
+   * Every verdict that was not an arrival skipped the applicant, including the
+   * two that mean only "I could not tell" — so on markup whose section headings
+   * the strict panel resolver cannot see, the run opened nobody after the first
+   * and scrolled nothing. Arrival is a wait; only a panel positively showing
+   * **somebody else** refuses the row.
    */
   async function selectApplicantRow(row) {
     const list = applicantList();
@@ -3502,7 +3550,7 @@
 
     const control = { element: row.control, verdict };
     const expected = Applicants.parseHiringContext(row.href).applicationId || "";
-    const heldPanel = mountedApplicantPanel();
+    const heldPanel = arrivalPanel();
     const before = panelIdentity(heldPanel);
     control.element.click();
 
@@ -3510,12 +3558,11 @@
     //    place, which the arrival test below handles on its own merits.
     await waitFor(() => {
       if (heldPanel && !heldPanel.isConnected) return true;
-      const now = mountedApplicantPanel();
+      const now = arrivalPanel();
       return !now || panelIdentity(now) !== before;
     }, { timeoutMs: PANEL_TEARDOWN_TIMEOUT_MS, pollMs: 120, label: "applicant-panel-teardown" });
 
-    // 2. Arrival: this applicant, mounted. `waitFor` returns the verdict, so a
-    //    timeout is a null and the row is skipped rather than scanned.
+    // 2. Arrival: this applicant, mounted.
     const arrival = await waitFor(() => {
       const seen = describeApplicantArrival(expected, before);
       return seen.arrived ? seen : null;
@@ -3527,7 +3574,29 @@
     await waitForDomQuiet(450, 4000);
     const settled = describeApplicantArrival(expected, before);
     state.lastArrival = settled;
-    return Boolean(arrival) && settled.arrived;
+    state.lastArrivalConfirmed = Boolean(arrival);
+
+    // **A row is refused ONLY when the panel is positively showing somebody
+    // else**, and this is the difference between a guard and a wall.
+    //
+    // It used to be `Boolean(arrival) && settled.arrived`, so every verdict that
+    // is not an arrival skipped the applicant — including the two that mean
+    // nothing more than *"I could not tell"*: `torn-down`, which is what an
+    // unresolvable panel answers on every single poll, and `mounting`, which is
+    // what a panel whose headings this cannot see answers forever. The run then
+    // walked the whole job opening nobody, scrolling nobody and saving a bare
+    // name per row, and the first applicant looked collected only because they
+    // were already on screen and so were never clicked.
+    //
+    // "I could not tell" is not a reason to throw a person away. It is a reason
+    // to read the panel and let `assertExpectedApplicant` refuse the *record* if
+    // it turns out to be the wrong person — which it checks three times, and
+    // which can only fire on a positive contradiction. So the wait above stays
+    // exactly as it was, and is now what it always should have been: time given
+    // to the panel, not a verdict on the applicant.
+    const refused = settled.state === Applicants.PANEL_ARRIVAL.OTHER
+      || settled.state === Applicants.PANEL_ARRIVAL.PREVIOUS;
+    return !refused;
   }
 
   /**

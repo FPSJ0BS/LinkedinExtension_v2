@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0117",
+  "name": "The arrival wait must be answerable on this markup, and must never be what stops a profile being read",
+  "request": "The arrival wait must be answerable on this markup, and must never be what stops a profile being read",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T02:55:58.645Z",
+  "completedAt": "2026-08-07T03:02:00.320Z",
+  "startCommit": "82365114ed7e174e3c306fbac8b280dbd009526d",
+  "gitRef": "task/TASK-0117",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "Reported: it scrolls one profile, then stops at the second and does not even scroll that. Arrival was asked of mountedApplicantPanel() alone, which needs one container holding two HYDRATED section headings - and this surface routinely holds none, which is the whole reason buildSectionMap widens page-wide. The strict resolver answers null, every poll reads torn-down, arrival never happens, and selectApplicantRow's 'Boolean(arrival) && settled.arrived' SKIPPED the applicant after the full timeout: unopened, unscrolled, saved as a bare name. The first survived only because it was already on screen and so was never clicked. Compounding it, panelOwnApplicationId fell back to location.href, which routes ahead of the render and answered 'yes, that is the applicant' before the panel changed - leaving the section count as the only real test. Three changes: the panel's own id is the panel's and answers '' rather than the address bar; arrivalPanel() takes the strict panel or the loose one when it carries an identifier of its own, still refusing anything holding more than one row link; and only OTHER or PREVIOUS - a panel positively showing somebody else - refuses the row, because torn-down and mounting mean 'I could not tell' and the answer to that is to read the panel and let assertExpectedApplicant refuse the RECORD, which it already checks three times. Timeouts cut to 10s/1.5s since every wasted second is spent once per applicant. Rule 9g and the PERMANENT flow clause were amended first, and the PERMANENT test locks the new verdict rather than being weakened."
+}

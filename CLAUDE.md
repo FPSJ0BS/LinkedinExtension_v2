@@ -291,17 +291,40 @@ commands are unrecoverable.
       `selectApplicantRow` now waits in three steps — **teardown** (best-effort and short, so arrival
       cannot be satisfied by the panel already on screen), **arrival**, then **settle and confirm
       again** — and arrival is decided by `Applicants.describePanelArrival()` from **identifiers
-      only**: the application id on the panel's own link (the address bar second, because it moves
-      ahead of the render) and the member's `/in/` slug, plus at least `PANEL_MIN_SECTIONS` (2)
-      hydrated sections. `mountedApplicantPanel()` is the strict resolver that may answer **null**,
-      which is what makes "nothing is mounted" expressible at all. **And waiting is not trusted on its
-      own** (rule 6): `extractApplicant` takes `expectApplicationId`, `assertExpectedApplicant()`
-      re-checks it before the scan, after it and immediately before the record is built, and a panel
-      showing somebody else throws rather than saving — bounded by `MAX_WRONG_APPLICANT_RETRIES` so
-      one unresolvable row cannot hold the job. A row that never opens is **skipped**, not scanned;
-      scanning anyway saved the previous applicant a
-      second time under this row's identity. Since 3.7.3 a row whose applicant is **already saved for
-      this job is walked past without being clicked at all** — see "Collecting every applicant" below.
+      only**: the application id on the panel's own link and the member's `/in/` slug, plus at least
+      `PANEL_MIN_SECTIONS` (2) hydrated sections. **And waiting is not trusted on its own** (rule 6):
+      `extractApplicant` takes `expectApplicationId`, `assertExpectedApplicant()` re-checks it before
+      the scan, after it and immediately before the record is built, and a panel showing somebody else
+      throws rather than saving — bounded by `MAX_WRONG_APPLICANT_RETRIES` so one unresolvable row
+      cannot hold the job. Since 3.7.3 a row whose applicant is **already saved for this job is walked
+      past without being clicked at all** — see "Collecting every applicant" below.
+
+      **⚠ The wait is time given to the panel, never a verdict on the applicant** (amended in 3.7.11,
+      and this half of the rule was written by breaking it). Two things made the arrival question
+      unanswerable on the live markup, and together they stopped the run reading anybody: the panel's
+      own id **fell back to the address bar**, which routes ahead of the render and therefore answers
+      "yes, this is the applicant you asked for" before the panel has changed at all — leaving the
+      section count as the only real test — and that count was taken from `mountedApplicantPanel()`,
+      the strict resolver, which needs one container holding two *hydrated* section headings and on
+      this surface **routinely holds none**. That is not a suspicion: it is exactly why
+      `buildSectionMap()` widens page-wide, and why `current_role` was empty before it did. The strict
+      resolver then answers `null`, every poll reads `torn-down`, arrival never happens — and the
+      caller's `Boolean(arrival) && settled.arrived` **skipped the applicant**. The reported symptom
+      was precise: *"it scrolls one profile, then stops at the second and does not even scroll it"* —
+      one profile, because the first applicant is already on screen and so is never clicked. Every
+      other row was walked past unopened, unscrolled, saved as a bare name.
+      So: `panelOwnApplicationId()` reads the panel's **own** markup and answers `""` rather than the
+      address bar; `arrivalPanel()` takes the strict panel when there is one and the loose panel when
+      it carries an identifier of its own (an application link or the member's `/in/` link), still
+      refusing anything holding more than one row link so "the list is on screen" cannot look like an
+      arrival; and **only `OTHER` or `PREVIOUS` — a panel positively showing somebody else — refuses
+      the row.** `torn-down` and `mounting` mean *"I could not tell"*, and the answer to that is to
+      read the panel and let `assertExpectedApplicant` refuse the **record**, which is the guard that
+      was already there and already checks three times. A row that comes up as somebody else is still
+      **skipped**, not scanned; scanning anyway saved the previous applicant a second time under this
+      row's identity. `PANEL_ARRIVAL_TIMEOUT_MS` is 10 s and the teardown 1.5 s, because a job is
+      walked one applicant at a time and every second spent waiting for an answer that will not come
+      is spent once per applicant.
 
    Connect, Follow, Message, InMail, Endorse, Remove connection, Withdraw, Invite, Report, Block,
    Send, Share, Accept, Ignore, and Save are permanently forbidden on every surface, and the hiring
@@ -920,8 +943,15 @@ save → click next applicant`. Every clause of it is load-bearing.
   (`assertExpectedApplicant`), because a wait is a race that can be lost and losing it saved three
   applicants under one name. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
-  already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
-  rather than scanned as somebody else — with the arrival verdict's own reason on `state.lastArrival`.
+  already shown is not re-clicked (`rowId !== openId`), and a row that came up as **somebody else**
+  is *skipped* rather than scanned as them — with the arrival verdict's own reason on
+  `state.lastArrival`.
+  **The wait is time given to the panel, not a verdict on the applicant** (3.7.11): a wait that
+  cannot be answered — `torn-down` from a panel this markup will not let it resolve, `mounting` from
+  one whose headings it cannot see — used to skip the person, and that stopped the run reading anybody
+  after the first. It reads them, and `assertExpectedApplicant` refuses the record if the panel turns
+  out to be somebody else. **Waiting for the right panel is permanent; skipping on an unanswerable
+  wait never was.** See rule 9g for the whole chain.
 - **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
   `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
   document position and putting it back on the same frame. `scrollIntoView` stays the mechanism
