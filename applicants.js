@@ -2213,6 +2213,77 @@
     return "";
   }
 
+  /**
+   * Watch this document's requests for the resume, while the viewer is open.
+   *
+   * **THE DEFECT THIS EXISTS FOR: "it saved the resume for seven profiles but
+   * not after that."** Not seven of anything the extension counts — there is no
+   * budget, no cap and no retirement anywhere on the resume path, and the worker
+   * refuses nothing after the seventh file. The limit is the browser's.
+   *
+   * `performance.getEntriesByType("resource")` reads the **resource timing
+   * buffer**, and that buffer holds 250 entries by default. When it is full the
+   * browser silently stops recording new ones — no error, no exception, no
+   * change in what the call returns. A run walks hundreds of applicants through
+   * ONE document without ever navigating (that is the whole of the permanent
+   * flow: click a row, LinkedIn swaps the panel), and an applicant costs a few
+   * dozen requests — avatars, logos, the panel's own fetches. So the buffer
+   * fills somewhere around the seventh applicant and from then on
+   * `fetchedResumeDocumentUrl` can never see the document request again. Every
+   * applicant after that comes back `no-document-url` → `link_only`: a link, a
+   * file name, and no file. Silently, because `link_only` is a legitimate
+   * outcome for an applicant whose resume genuinely has no address.
+   *
+   * A `PerformanceObserver` is not subject to that buffer at all — entries are
+   * delivered as they are created — so this cannot stop working however long the
+   * run goes on. It is still an **observation of what the page did** rather than
+   * a constructed address, so the widening rule is unchanged, and the decision is
+   * still `Applicants.isResumeDocumentUrl()`, which refuses a linkedin.com page
+   * address first.
+   *
+   * **`buffered: false` is deliberate and is this function's whole safety.** A
+   * buffered observer replays what is already in the timeline, which is the
+   * PREVIOUS applicant's document — one person's CV saved under another person's
+   * name, which is worse than no file at all (rule 6). Unbuffered, it can only
+   * ever see requests made after it was created, and it is created immediately
+   * before this applicant's viewer is opened. That is structurally stronger than
+   * `fetchedResumeDocumentUrl`'s `since` floor rather than a relaxation of it —
+   * and that floor still guards the fallback, which is kept for a browser where
+   * the observer cannot be constructed.
+   */
+  function watchResumeRequests() {
+    let found = "";
+    let observer = null;
+    try {
+      observer = new PerformanceObserver((list) => {
+        if (found) return;
+        for (const entry of list.getEntries() || []) {
+          const url = resumeUrlFrom(entry?.name);
+          if (url && Applicants.isResumeDocumentUrl(url)) {
+            found = url;
+            return;
+          }
+        }
+      });
+      observer.observe({ type: "resource", buffered: false });
+    } catch {
+      // No observer: the buffer fallback still answers, for as long as the
+      // browser is still filling it.
+      observer = null;
+    }
+    return {
+      watching: Boolean(observer),
+      url: () => found,
+      stop() {
+        try {
+          observer?.disconnect();
+        } catch {
+          // Already gone with the document. Not worth a run.
+        }
+      }
+    };
+  }
+
   /** The viewer LinkedIn mounted after the resume control was clicked. */
   function findResumeViewer() {
     for (const element of document.querySelectorAll("[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal,[class*='document-viewer'],[class*='resume']")) {
@@ -2522,10 +2593,16 @@
       // Stamped BEFORE the click so the request log can be read afterwards
       // without any chance of picking up the previous applicant's document.
       const openedAt = performance.now();
+      // And WATCHED from here, because the log the floor is applied to stops
+      // recording once it is full — which is the whole of "it saved the resume
+      // for seven profiles but not after that". See `watchResumeRequests`.
+      const requests = watchResumeRequests();
+      diagnostics.resume.watchingRequests = requests.watching;
       try {
         control.element.click();
         diagnostics.resume.clicked = true;
       } catch (error) {
+        requests.stop();
         accumulator.setResume({
           available: true,
           url: null,
@@ -2537,53 +2614,65 @@
         return;
       }
 
-      // Wait on a condition, not a duration: either the viewer mounted or the
-      // document URL appeared.
-      const viewer = await waitFor(() => findResumeViewer() || (findResumeDocumentUrl(null) ? panel : null), {
-        timeoutMs: RESUME_VIEWER_TIMEOUT_MS,
-        pollMs: OVERLAY.POLL_MS,
-        label: "resume-viewer"
-      });
-      overlay = findResumeViewer();
-      diagnostics.resume.opened = Boolean(viewer);
-      diagnostics.resume.openedViewer = Boolean(overlay);
+      // Everything from here to the document address is inside the observer's
+      // lifetime, and the `finally` is what guarantees it ends — on this path, on
+      // a Stop or a hidden page thrown out of a wait, or on a document that never
+      // arrives. A run walks hundreds of applicants through one document, so an
+      // observer left connected per applicant is a leak that grows with the job.
+      try {
+        // Wait on a condition, not a duration: either the viewer mounted or the
+        // document URL appeared.
+        const viewer = await waitFor(() => findResumeViewer() || (findResumeDocumentUrl(null) ? panel : null), {
+          timeoutMs: RESUME_VIEWER_TIMEOUT_MS,
+          pollMs: OVERLAY.POLL_MS,
+          label: "resume-viewer"
+        });
+        overlay = findResumeViewer();
+        diagnostics.resume.opened = Boolean(viewer);
+        diagnostics.resume.openedViewer = Boolean(overlay);
 
-      // Read the header immediately, then press Download immediately. A full PDF
-      // walk used to hold each applicant for up to half a minute even though the
-      // document link normally appears in the viewer shell or request log.
-      details = readResumeViewerDetails(overlay);
-      await clickResumeDownload(overlay, diagnostics);
+        // Read the header immediately, then press Download immediately. A full PDF
+        // walk used to hold each applicant for up to half a minute even though the
+        // document link normally appears in the viewer shell or request log.
+        details = readResumeViewerDetails(overlay);
+        await clickResumeDownload(overlay, diagnostics);
 
-      // Metadata below the fold is optional. Keep this walk shallow and bounded;
-      // it must never delay saving the link or advancing the applicant queue.
-      if (overlay && !details.filename) {
-        diagnostics.resume.scrolledSteps = await scrollResumeViewer(overlay);
-        const supplemental = readResumeViewerDetails(overlay);
-        details = {
-          filename: supplemental.filename || details.filename,
-          fileType: supplemental.fileType || details.fileType,
-          pages: supplemental.pages ?? details.pages,
-          text: supplemental.text || details.text
-        };
+        // Metadata below the fold is optional. Keep this walk shallow and bounded;
+        // it must never delay saving the link or advancing the applicant queue.
+        if (overlay && !details.filename) {
+          diagnostics.resume.scrolledSteps = await scrollResumeViewer(overlay);
+          const supplemental = readResumeViewerDetails(overlay);
+          details = {
+            filename: supplemental.filename || details.filename,
+            fileType: supplemental.fileType || details.fileType,
+            pages: supplemental.pages ?? details.pages,
+            text: supplemental.text || details.text
+          };
+        }
+
+        // Waited for properly rather than sampled once: the viewer mounts its shell
+        // first and fetches the document after, so a three-second look at the frame
+        // it appeared on is how every applicant came back `link_only` with no file.
+        //
+        // Three sources, in order of directness: what the viewer RENDERED, what it
+        // was OBSERVED fetching, and — only if no observer could be constructed —
+        // the request log. The last two are what save the canvas- and blob-based
+        // viewer, where the file's address is never written into any attribute at
+        // all; the observer is there because the log stops recording once it is
+        // full, which is what ended the downloads after seven applicants.
+        url = await waitFor(
+          () => findResumeDocumentUrl(overlay) || requests.url() || fetchedResumeDocumentUrl(openedAt),
+          { timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "resume-document" }
+        ) || "";
+        diagnostics.resume.foundInRequests = Boolean(url) && !findResumeDocumentUrl(overlay);
+        // The viewer may have mounted after the single sample above — a shell that
+        // appears only once the document arrives is common. Re-resolved so there is
+        // always something to close, because a preview left on screen is the very
+        // complaint this step exists to answer.
+        if (!overlay) overlay = findResumeViewer();
+      } finally {
+        requests.stop();
       }
-
-      // Waited for properly rather than sampled once: the viewer mounts its shell
-      // first and fetches the document after, so a three-second look at the frame
-      // it appeared on is how every applicant came back `link_only` with no file.
-      //
-      // Two sources, in order of directness: what the viewer RENDERED, then what
-      // it FETCHED. The second is what saves the canvas- and blob-based viewer,
-      // where the file's address is never written into any attribute at all.
-      url = await waitFor(
-        () => findResumeDocumentUrl(overlay) || fetchedResumeDocumentUrl(openedAt),
-        { timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "resume-document" }
-      ) || "";
-      diagnostics.resume.foundInRequests = Boolean(url) && !findResumeDocumentUrl(overlay);
-      // The viewer may have mounted after the single sample above — a shell that
-      // appears only once the document arrives is common. Re-resolved so there is
-      // always something to close, because a preview left on screen is the very
-      // complaint this step exists to answer.
-      if (!overlay) overlay = findResumeViewer();
     }
 
     // However the address was found — rendered in an attribute, or observed in

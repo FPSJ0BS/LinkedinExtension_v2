@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0122",
+  "name": "The resume request probe observes the document's requests instead of reading a buffer that stops recording",
+  "request": "The resume request probe observes the document's requests instead of reading a buffer that stops recording",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T04:43:16.924Z",
+  "completedAt": "2026-08-07T04:46:56.803Z",
+  "startCommit": "1ed0ee175a08bcee03d5f9d2544884bbe5515b60",
+  "gitRef": "task/TASK-0122",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 431 tests, validate)"
+  ],
+  "result": "Reported: the resume was saved for seven profiles and never after that. Nothing the extension counts stops at seven - there is no budget, cap or retirement on the resume path, and the worker refuses nothing after the seventh file. The limit is the browser's. fetchedResumeDocumentUrl reads performance.getEntriesByType('resource'), which is the resource timing buffer: it holds 250 entries and SILENTLY stops recording once full - no error, no exception, no change in what the call returns. A run walks hundreds of applicants through ONE document without ever navigating (the permanent flow is click a row, LinkedIn swaps the panel), and an applicant costs a few dozen requests, so the buffer fills around the seventh. From then on the document request can never be seen and every applicant comes back no-document-url -> link_only: a link, a file name and no file, silently, because link_only is a legitimate outcome for a resume that genuinely has no address. watchResumeRequests() is a PerformanceObserver, which is not subject to that buffer - entries are delivered as they are created - so it cannot stop working however long the run goes on. Still an observation of what the page did, still decided by isResumeDocumentUrl, so it can no more return a route than the attribute sweep can. buffered:false is its whole safety and is stronger than the since floor rather than a relaxation of it: a buffered observer would replay the PREVIOUS applicant's document, which is one person's CV under another person's name. It starts before the click and is disconnected in a finally, so a Stop or a hidden page thrown out of a wait cannot leak one per applicant; fetchedResumeDocumentUrl stays as the fallback for a browser with no observer, floor intact. Nothing else was touched: the guarded open, the click budget, the PERMANENT chain and its order are unchanged. The PERMANENT no-open test's 600-character proximity check was replaced by slicing the guarded block and asserting the click is inside it and nowhere else - the question the rule actually makes, and stronger than a distance that breaks on a comment while admitting a click moved just outside the guard."
+}

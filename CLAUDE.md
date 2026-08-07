@@ -715,6 +715,27 @@ on disk.
   through one without navigating, so unbounded it would save applicant one's CV under applicant two's
   name — worse than no file at all (rule 6). The floor is `performance.now()` stamped **before** the
   click, and the function refuses to answer without one.
+- **But that buffer stops recording, so the requests are OBSERVED rather than read back** (3.7.12).
+  Reported as *"it saved the resume for seven profiles but not after that"* — and there is no budget,
+  cap or retirement anywhere on the resume path that stops at seven, because the limit is the
+  browser's. The resource timing buffer holds **250 entries** and **silently** stops recording when
+  it is full: no error, no exception, no change in what the call returns. A run walks hundreds of
+  applicants through **one document** without ever navigating — that is the whole of the permanent
+  flow — and an applicant costs a few dozen requests, so the buffer fills around the seventh and
+  `fetchedResumeDocumentUrl` can never see a document request again. Every applicant after that is
+  `no-document-url` → `link_only`: a link, a file name, and no file, silently, because `link_only`
+  is a legitimate outcome for an applicant whose resume genuinely has no address.
+  `watchResumeRequests()` ([applicants.js](applicants.js)) is a `PerformanceObserver`, which is not
+  subject to that buffer at all — entries are delivered as they are created — so it cannot stop
+  working however long the run goes on. It is still an *observation of what the page did*, and
+  `isResumeDocumentUrl()` still decides, so it can no more return a route than the sweep can.
+  **`buffered: false` is its whole safety and is not optional:** a buffered observer replays what is
+  already in the timeline, which is the *previous* applicant's document. Unbuffered it can only ever
+  see requests made after it was created, immediately before this applicant's viewer is opened —
+  structurally stronger than the `since` floor rather than a relaxation of it. It starts before the
+  click and is disconnected in a `finally`, because a run walks hundreds of applicants through one
+  document and a leaked observer per applicant grows with the job. `fetchedResumeDocumentUrl` stays
+  as the fallback for a browser where no observer can be constructed, floor and all.
 - **A download Chrome interrupted is never reported as saved.** `downloadedFilePath` returned the
   requested path on `state === "interrupted"` and the caller still answered `downloaded`, so a
   `resume_file` named a path that is not on disk — and `mergeApplicantRecord`'s `keepDownload` then

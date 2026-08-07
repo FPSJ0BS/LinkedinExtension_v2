@@ -2353,7 +2353,7 @@ test("the resume document is found wherever the viewer rendered it", async () =>
 
   // And it is waited for, not sampled on the frame the viewer appeared.
   const step = source.slice(source.indexOf("async function collectResume"));
-  assert.match(step, /waitFor\(\s*\n\s*\(\) => findResumeDocumentUrl\(overlay\) \|\| fetchedResumeDocumentUrl\(openedAt\),\s*\n\s*\{ timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS/,
+  assert.match(step, /waitFor\(\s*\n\s*\(\) => findResumeDocumentUrl\(overlay\) \|\| requests\.url\(\) \|\| fetchedResumeDocumentUrl\(openedAt\),\s*\n\s*\{ timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS/,
     "the viewer mounts its shell before it fetches the document, within the fast resume budget");
 
   // The saved file is reported by where it is, not by Chrome's download id.
@@ -2384,9 +2384,39 @@ test("a viewer that never writes the address down is still read, from what it fe
   assert.match(finder, /if \(!Number\.isFinite\(since\)\) return "";/, "it must refuse to answer without a floor");
   assert.match(finder, /if \(!entry \|\| !\(entry\.startTime >= since\)\) continue;/, "and only ever see this applicant's own requests");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
-  assert.match(step, /const openedAt = performance\.now\(\);\s*\n\s*try \{\s*\n\s*control\.element\.click\(\)/,
+  assert.match(step, /const openedAt = performance\.now\(\);[\s\S]{0,600}?control\.element\.click\(\)/,
     "the floor is stamped before the click, so nothing earlier can be picked up");
   assert.ok(!/fetchedResumeDocumentUrl\(\)/.test(source), "it is never called without one");
+
+  // THE DEFECT, reported as "it saved the resume for seven profiles but not
+  // after that": no budget of ours stops at seven. The resource timing buffer
+  // holds 250 entries and SILENTLY stops recording when it is full, and a run
+  // walks hundreds of applicants through one document without ever navigating.
+  // A few dozen requests per applicant exhausts it around the seventh, after
+  // which `fetchedResumeDocumentUrl` can never see the document again and every
+  // applicant comes back `link_only` — a link, a file name and no file.
+  const watcher = source.slice(source.indexOf("function watchResumeRequests"), source.indexOf("/** The viewer LinkedIn mounted"));
+  assert.ok(watcher.length > 200, "observing the requests must be its own step");
+  assert.match(watcher, /new PerformanceObserver\(/,
+    "an observer is delivered every entry, so it cannot stop working part way through a run");
+  assert.match(watcher, /Applicants\.isResumeDocumentUrl\(url\)/,
+    "and the same one rule still decides what a file is, so it can no more return a route");
+  // The safety, and it is structurally stronger than the `since` floor rather
+  // than a relaxation of it: a buffered observer replays what is already in the
+  // timeline, which is the PREVIOUS applicant's document — one person's CV under
+  // another person's name, worse than no file at all (rule 6).
+  assert.match(watcher, /observer\.observe\(\{ type: "resource", buffered: false \}\)/,
+    "unbuffered, so it can only ever see requests made after this applicant's viewer was opened");
+  assert.match(watcher, /observer\?\.disconnect\(\)/, "and it must be stoppable");
+  // Started before the click, and always disconnected — a run walks hundreds of
+  // applicants through one document, so a leaked observer grows with the job.
+  assert.match(step, /const requests = watchResumeRequests\(\);[\s\S]{0,400}?control\.element\.click\(\)/,
+    "the watch starts before the click that makes the page fetch the file");
+  assert.match(step, /\} finally \{\s*\n\s*requests\.stop\(\);\s*\n\s*\}/,
+    "and ends on every path out, including a Stop or a hidden page thrown out of a wait");
+  // The log stays as the fallback for a browser with no observer, still floored.
+  assert.match(step, /requests\.url\(\) \|\| fetchedResumeDocumentUrl\(openedAt\)/,
+    "the observer answers first; the buffer is the fallback, and keeps its floor");
 });
 
 test("a resume that did not land is never recorded as saved", async () => {
@@ -3197,8 +3227,19 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
 
   // THE GUARD. Opening is inside `if (!url)`, so an address that was already
   // known means the viewer is never opened and the resume control never clicked.
-  assert.match(step, /if \(!url\) \{[\s\S]{0,600}?control\.element\.click\(\);/,
+  //
+  // Proven by SLICING the guarded block rather than by how few characters
+  // separate the guard from the click, which is what this asserted until 3.7.12.
+  // A distance is a proxy for "nothing intervenes" and it fails the wrong way:
+  // adding a comment or a statement inside the block — where it is safe — breaks
+  // it, while a click moved just outside the block, where it is not, would still
+  // sit within the distance. This asks the question the rule actually makes.
+  const guardedOpen = step.slice(step.indexOf("if (!url) {"), step.indexOf("// However the address was found"));
+  assert.ok(guardedOpen.length > 200, "the guarded block must be findable");
+  assert.match(guardedOpen, /control\.element\.click\(\);/,
     "the resume is opened ONLY when no address was found");
+  assert.ok(!/control\.element\.click\(\);/.test(step.replace(guardedOpen, "")),
+    "and there is no path outside that guard which opens it");
   assert.ok(
     step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
     "the address is looked for before the control is ever pressed"
