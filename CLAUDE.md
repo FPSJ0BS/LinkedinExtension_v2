@@ -743,6 +743,25 @@ questions, and the second costs hours where the first costs a walk down the list
   phrase: `NAME_CONTROL_PHRASE_PATTERN` was added when the *panel* path saved people under the same
   label. The list pass simply never asked; it asks now, and asks the **one** policy rather than
   growing a second list of its own.
+- **And it is refused before it is ever a row at all** (3.7.11), because rejecting it late was still
+  losing the applicant it collides with. `applicantRowKey` keys a row on the `applicationId` in its
+  own href — the only identifier a row carries before it is opened — and that header control's href
+  carries **the id the page is currently on**, so the control and the **open applicant's own row**
+  hash to one key. The control renders above the rows, so the walk reached it first, retired the key
+  on its terminal outcome, and `unprocessedApplicantRows` then filtered the real row out as already
+  finished with. The applicant whose panel was open when the run started was never opened, and since
+  a pager click leaves LinkedIn showing the new page's first applicant it was **one lost person per
+  page, silently, with no error anywhere** — exactly the reported "in every page's list the first
+  name is skipped". `Applicants.isApplicantRowLabel()` refuses a link whose own label is a control
+  phrase or page chrome, and `isApplicantRowLink()` consults it, so such a link never becomes a row
+  and can never claim a key. Judged on the **label**, never the href, because the two addresses are
+  genuinely identical. Judged on `textContent` rather than `innerText`, because this runs for every
+  anchor of every list scan and a layout flush per row is the exact cost the row's lazy name getter
+  exists to avoid. And **never on the `aria-label`**: "View Komal Sharma's application" is an
+  entirely plausible accessible name for a row and it leads with a verb, so judging it would refuse
+  every row on the page rather than one control. An **unlabelled** link is accepted and judged by its
+  href exactly as before — losing a real applicant is the failure being fixed, so a link this cannot
+  read is never one it refuses.
 - **The job header is read once per run**, not per row: it sits above both columns and does not
   change as the list is walked, so reading it per row would be hundreds of forced layouts for one
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.

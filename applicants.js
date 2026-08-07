@@ -655,7 +655,20 @@
   function isApplicantRowLink(anchor) {
     const href = anchor?.getAttribute?.("href") || anchor?.href || "";
     if (!href) return false;
-    return /applicationId=|\/applicants?\/\d/i.test(href);
+    if (!/applicationId=|\/applicants?\/\d/i.test(href)) return false;
+    // A control is not a row, however applicant-shaped its address is. The list
+    // links "Edit qualifications" in its own header at the applicationId the page
+    // is on, which is the SAME key the open applicant's row hashes to — so
+    // letting it in costs that applicant their turn, once per page and in
+    // silence. `isApplicantRowLabel` explains the whole chain.
+    //
+    // `textContent` rather than `innerText`, and never the `aria-label`. The
+    // first is because this runs for every anchor of every list scan and the
+    // row's name getter is lazy precisely because a layout flush per row is not.
+    // The second is because "View Komal Sharma's application" is an entirely
+    // plausible accessible name for a row, and it leads with a verb — judging it
+    // would refuse every row on the page rather than one control.
+    return Applicants.isApplicantRowLabel(cleanText(anchor.textContent));
   }
 
   /** How many applicant-list rows live inside this element. */

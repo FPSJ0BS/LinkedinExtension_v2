@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0115",
+  "name": "A control link in the applicant list is not a row, so it can never retire a real applicant's key",
+  "request": "A control link in the applicant list is not a row, so it can never retire a real applicant's key",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T02:40:42.941Z",
+  "completedAt": "2026-08-07T02:44:09.330Z",
+  "startCommit": "7eb64e1e11eff7cec528232a3acf4c5b57e14596",
+  "gitRef": "task/TASK-0115",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "The applicant list's own header control (\"Edit qualifications\") links at the applicationId the page is on, which is the SAME key applicantRowKey gives the open applicant's real row, so the control's turn retired that applicant and unprocessedApplicantRows filtered the real row out as done - one silently lost person per page. Applicants.isApplicantRowLabel() refuses a link whose own label is a control phrase or page chrome, and isApplicantRowLink() consults it, so it never becomes a row. Judged on the label (the two hrefs are identical), on textContent (no layout flush per anchor per scan), and never on the aria-label (a row's accessible name plausibly leads with a verb). An unlabelled link is accepted unchanged."
+}

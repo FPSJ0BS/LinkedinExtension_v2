@@ -2010,6 +2010,50 @@
     return createCollectedIndex(records, { jobId, anyRecord: true });
   }
 
+  /**
+   * How long a label may be before it is a card rather than a control's name.
+   *
+   * A row's own link carries the whole card — the person, their headline, their
+   * location and the two match counts — so anything longer than a name is a row
+   * by construction and is never judged at all.
+   */
+  const ROW_LABEL_MAX_LENGTH = 80;
+
+  /**
+   * Could a link carrying this label be a row of the applicant list?
+   *
+   * THE LIVE DEFECT, and it is the whole of "the first applicant of every page is
+   * skipped". The list renders a control inside its own header — the live one is
+   * **"Edit qualifications"**, in "Here are all applicants to your job. Edit
+   * qualifications" — and its href carries the `applicationId` the page is
+   * currently on. `applicantRowKey` keys a row on exactly that id, because it is
+   * the only identifier a row carries before it is opened, so that control and
+   * the **open applicant's own row** hash to one key. The control renders above
+   * the rows, so the walk takes its turn first; every terminal outcome retires
+   * the key; and `unprocessedApplicantRows` then filters the real row out as
+   * already finished with. The applicant whose panel was open when the run
+   * started is never opened at all — and since a pager click leaves LinkedIn
+   * showing the new page's first applicant, it is one lost person per page,
+   * silently, with no error anywhere.
+   *
+   * Refused on the **label**, never on the href, because the two addresses are
+   * genuinely the same one: nothing about the link tells them apart. The text
+   * does, and this asks the one policy that already knows this exact phrase —
+   * `NAME_CONTROL_PHRASE_PATTERN`, written when the *panel* path saved people
+   * under this same label — rather than growing a second list of controls beside
+   * it. `NAME_CHROME_PATTERN` comes with it for the same reason, so a `Resume` or
+   * `Contact info` link rendered inside a row cannot be mistaken for the row.
+   *
+   * **An unlabelled link is accepted**, and deliberately: it is judged by its
+   * href exactly as before. Losing a real applicant is the failure being fixed
+   * here, so a link this cannot read is never one it refuses.
+   */
+  function isApplicantRowLabel(value) {
+    const text = cleanText(value);
+    if (!text || text.length > ROW_LABEL_MAX_LENGTH) return true;
+    return !NAME_CONTROL_PHRASE_PATTERN.test(text) && !NAME_CHROME_PATTERN.test(text);
+  }
+
   /** Stable identity available on a row before its applicant is opened. */
   function applicantRowKey(row = {}) {
     const applicationId = parseHiringContext(row.href || "").applicationId;
@@ -2098,7 +2142,7 @@
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex, createListedIndex,
-    applicantRowKey, unprocessedApplicantRows,
+    isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement

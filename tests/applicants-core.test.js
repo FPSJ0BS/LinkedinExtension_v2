@@ -1735,6 +1735,77 @@ test("the run walks the list by identity, so a position can never address the wr
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
 });
 
+test("a control in the list header can never retire the open applicant's row", async () => {
+  // THE REPORT, with the recruiter's own table beside the live list: "in every
+  // page's list the first name is being skipped every time ... as soon as I
+  // start the extension the first profile gets skipped."
+  //
+  // The list renders a control INSIDE itself — "Here are all applicants to your
+  // job. Edit qualifications" — whose href carries the applicationId the page is
+  // currently on. `applicantRowKey` keys a row on exactly that id, so the
+  // control and the OPEN APPLICANT'S OWN ROW hash to one key. The control
+  // renders above the rows, so the walk reaches it first, every terminal outcome
+  // retires the key, and `unprocessedApplicantRows` then filters the real row
+  // out as already finished with. One person lost per page, in silence.
+  const openId = "25550787924";
+  const control = { href: `https://www.linkedin.com/hiring/jobs/4123/applicants/${openId}/`, name: "Edit qualifications" };
+  const openRow = { href: `https://www.linkedin.com/hiring/jobs/4123/applicants/${openId}/`, name: "Komal Sharma" };
+  const nextRow = { href: "https://www.linkedin.com/hiring/jobs/4123/applicants/25550787925/", name: "Neha Singh" };
+
+  // The collision itself, stated rather than assumed — this is why the label has
+  // to decide, and why the href never can.
+  assert.equal(Applicants.applicantRowKey(control), Applicants.applicantRowKey(openRow),
+    "the control and the open applicant's row are the same address, so they are one key");
+
+  // The defect, reproduced: let the control in and the applicant it collides
+  // with is never offered again.
+  const processed = new Set([Applicants.applicantRowKey(control)]);
+  assert.deepEqual(
+    Applicants.unprocessedApplicantRows([control, openRow, nextRow], processed).map((row) => row.name),
+    ["Neha Singh"],
+    "a control that takes a turn takes the open applicant's turn with it"
+  );
+
+  // The fix: it is refused before it can ever become a row.
+  assert.equal(Applicants.isApplicantRowLabel("Edit qualifications"), false, "a control phrase is a thing to press");
+  assert.equal(Applicants.isApplicantRowLabel("Resume"), false, "and so is chrome rendered inside a row");
+  assert.equal(Applicants.isApplicantRowLabel("Contact info"), false);
+  assert.equal(Applicants.isApplicantRowLabel("Komal Sharma"), true, "a person is a row");
+  assert.equal(Applicants.isApplicantRowLabel("Komal Sharma · 2nd"), true, "degree badge and all");
+  // A row's own link carries the whole card, which is longer than any name and
+  // is a row by construction. It must never be judged as a label.
+  assert.equal(
+    Applicants.isApplicantRowLabel(
+      "Komal Sharma · 2nd Human Resource Manager | MBA in HR & Marketing Noida, Uttar Pradesh, India 7/7 Must-have 2/2 Preferred"
+    ),
+    true,
+    "the whole card is not a control label"
+  );
+  // Losing a real applicant is the failure this fixes, so a link with nothing to
+  // read is judged by its href exactly as before — never refused.
+  assert.equal(Applicants.isApplicantRowLabel(""), true, "an unlabelled link keeps the old verdict");
+  assert.equal(Applicants.isApplicantRowLabel("   "), true);
+  // A bare verb stays a row: `Edit` is a real given name, and the control
+  // pattern deliberately needs a second word before it calls something a control.
+  assert.equal(Applicants.isApplicantRowLabel("Edit"), true, "a bare verb may still be a person");
+
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const link = source.slice(source.indexOf("function isApplicantRowLink"), source.indexOf("function rowLinksIn"));
+  assert.match(link, /Applicants\.isApplicantRowLabel\(cleanText\(anchor\.textContent\)\)/,
+    "the adapter delegates to the one policy rather than growing a second list of controls");
+  // Comments stripped before the two refusals below, because this file explains
+  // the defect in the very words the check greps for — the prose naming what
+  // must not be read would otherwise read as reading it.
+  const code = withoutComments(link);
+  // `innerText` would force a layout for every anchor of every list scan, which
+  // is the exact cost the row's lazy name getter exists to avoid.
+  assert.ok(!/innerText/.test(code), "no forced layout per anchor per scan");
+  // And never the accessible name: "View Komal Sharma's application" is an
+  // entirely plausible aria-label for a row, and it leads with a verb — judging
+  // it would refuse every row on the page rather than one control.
+  assert.ok(!/aria-label/.test(code), "the accessible name must not be judged");
+});
+
 test("the bottom of the panel is reached without knowing which container scrolls", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
 
