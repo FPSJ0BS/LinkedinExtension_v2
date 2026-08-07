@@ -1105,11 +1105,21 @@ test("the resume is downloaded, not previewed, whenever the page already has the
 
 test("the detail panel can never be a container that holds the applicant list", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const panel = source.slice(source.indexOf("function applicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
+  const panel = source.slice(source.indexOf("function mountedApplicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
 
   // The live defect: a wrapper around both columns satisfies "two sections", so
   // it won, and the first line of its text was the list's heading.
   assert.match(panel, /if \(rowLinksIn\(element\) > 1\) continue/, "a container holding the list must be refused");
+
+  // The scoring resolver may answer NULL, and that is what makes "nothing is
+  // mounted" expressible. Without it, everything asking WHO the panel shows had
+  // to accept the loose fallback's answer — a container holding the list.
+  assert.match(panel, /let best = null;[\s\S]*?return best;\s*\}\s*function applicantPanel\(\)/,
+    "the strict resolver returns null when nothing qualifies");
+  assert.match(panel, /function applicantPanel\(\) \{\s*const mounted = mountedApplicantPanel\(\);/,
+    "and the loose one is built on it, so there is one scoring rule");
+  assert.match(panel, /score < Applicants\.PANEL_MIN_SECTIONS/,
+    "with the same section bar the arrival policy judges a mounted panel by");
   assert.ok(!/return best \|\| document\.querySelector\("main"\) \|\| document\.body;\s*\n\s*}\s*\n\s*\/\*\* A link/.test(source),
     "the fallback must not be document.body, which always contains the list");
   assert.match(panel, /rowLinksIn\(element\) <= 1/, "even the fallback must exclude the list");
@@ -1154,16 +1164,39 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("async function loadEveryApplicantRow"));
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
 
   // The live defect: waiting for the address to change and the DOM to go quiet
-  // meant the scan started on the previous applicant's panel or on an empty
-  // one, so every row after the first had no name, role or company.
-  assert.match(source, /function panelIdentity\(\)/, "the panel must have a fingerprint");
-  assert.match(select, /const before = panelIdentity\(\)/, "taken before the click");
-  assert.match(select, /waitFor\(\(\) => panelIdentity\(\) !== before/, "and waited on after it");
+  // meant the scan started on the previous applicant's panel or on an empty one.
   assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
   assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
+
+  // And the defect after it, which cost every applicant their name: a TEXT
+  // fingerprint, satisfied by the teardown alone.
+  assert.match(source, /function panelIdentity\(panel = mountedApplicantPanel\(\)\)/,
+    "the panel's identity must be asked of a MOUNTED panel");
+  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function panelSectionCount"));
+  assert.ok(!/innerText/.test(identity), "identity must never be built from the panel's text");
+  assert.match(identity, /application \? `id:\$\{application\}` : ""/, "the application id is the identity");
+  assert.match(identity, /profile \? `in:\$\{profile\}` : ""/, "with the member's own slug beside it");
+
+  // Arrival is "this applicant, mounted", decided by the tested pure policy.
+  assert.match(select, /const expected = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
+    "the row states which applicant is expected, from its own href");
+  assert.match(select, /describeApplicantArrival\(expected, before\)/, "and arrival is judged against it");
+  assert.match(source, /const panel = mountedApplicantPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
+    "'nothing is mounted' must be expressible, so the STRICT resolver is used");
+
+  // Three steps, in order: teardown, then arrival, then settle-and-confirm.
+  assert.ok(
+    select.indexOf("applicant-panel-teardown") < select.indexOf("const arrival = await waitFor"),
+    "teardown is waited for first, so arrival cannot be satisfied by the panel already on screen"
+  );
+  assert.ok(
+    select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
+    "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
+  );
+  assert.match(select, /return Boolean\(arrival\) && settled\.arrived;/, "either half failing is a row that did not open");
 
   // A row that never opened is a skip, not a record — scanning anyway would
   // save the previous applicant a second time under this row's identity.
@@ -1325,7 +1358,8 @@ test("the list pass opens every applicant across every page and takes what the p
   const reveal = source.slice(source.indexOf("const VISIBLE_ONLY_OPTIONS"), source.indexOf("async function extractAllApplicants"));
   assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false, contact: false, resume: false \}\)/,
     "nothing behind a button is opened: no expander, no contact disclosure, no resume viewer");
-  assert.match(reveal, /await extractApplicant\(VISIBLE_ONLY_OPTIONS\)/, "and the reading rule is the shared one");
+  assert.match(reveal, /await extractApplicant\(\{ \.\.\.VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId \}\)/,
+    "and the reading rule is the shared one, told which applicant it is for");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
   assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
   assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
@@ -1384,7 +1418,8 @@ test("the list pass opens every applicant across every page and takes what the p
   // The profile extraction is STOPPED, never removed: `extractApplicant` and
   // everything it drives is still here and still the only path for a full run.
   assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
-  assert.match(run, /const \{ record \} = await extractApplicant\(options\);/, "and still be what a full run calls");
+  assert.match(run, /const \{ record \} = await extractApplicant\(\{ \.\.\.options, expectApplicationId: rowId \}\);/,
+    "and still be what a full run calls — with the same protection, since it has the same exposure");
 
   // The job header is read ONCE. It sits above both columns and does not change
   // as the list is walked, so reading it per row would be hundreds of forced
@@ -1401,6 +1436,90 @@ test("the list pass opens every applicant across every page and takes what the p
   // list pass as a list pass rather than starting to open people.
   assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading the applicant list/,
     "and rides the same command, so the auto-run remembers it");
+});
+
+test("a record may only be built from the applicant that was asked for", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const ARRIVAL = Applicants.PANEL_ARRIVAL;
+
+  // THE DEFECT, from the recruiter's own table: three different people in the
+  // list (Komal Sharma, Neha Singh, Mahak Ayani) all stored as "Komal Sharma",
+  // the one open when the run started.
+  //
+  // The chain, and the last link is the surprising one. The row click routes the
+  // address bar at once, so each record was keyed to the RIGHT application —
+  // that is why there were three rows and not one. But the panel had not
+  // re-rendered, and the wait was "the text differs from before the click",
+  // which the TEARDOWN alone satisfies. So the scan read the stale panel;
+  // `chooseApplicantName` then arbitrated with `nameFromExplanations` —
+  // LinkedIn's qualification prose — which on that panel says "Komal Sharma
+  // has…" repeatedly. The wrong name therefore won as the CORROBORATED one, and
+  // `addName` latches a corroborated name against every later read.
+  const stale = Applicants.chooseApplicantName(
+    [
+      { value: "Neha Singh", source: "list-row" },
+      { value: "Komal Sharma", source: "portrait-alt" }
+    ],
+    Applicants.nameFromExplanations([
+      "Komal Sharma holds a Bachelor of Business Administration.",
+      "Komal Sharma has knowledge of employment laws."
+    ])
+  );
+  assert.equal(stale.name, "Komal Sharma", "the policy trusts the prose — correctly, on the right panel");
+  assert.equal(stale.corroborated, true, "and marks it corroborated, which then latches it");
+  const latched = Applicants.createApplicantAccumulator();
+  latched.addName(stale.name, true);
+  latched.addName("Neha Singh", false);
+  assert.equal(latched.snapshot().header.name, "Komal Sharma",
+    "so no later read can correct it — the panel has to be right in the first place");
+
+  // Hence the fix is upstream of the name policy, and it is identity.
+  assert.equal(Applicants.describePanelArrival({
+    expected: "111", applicationId: "222", identity: "id:222", previousIdentity: "id:222",
+    sections: 6, connected: true
+  }).state, ARRIVAL.PREVIOUS, "a fully hydrated panel is still the WRONG panel if it is the previous applicant");
+  assert.equal(Applicants.describePanelArrival({
+    expected: "111", applicationId: "999", identity: "id:999", previousIdentity: "id:222",
+    sections: 6, connected: true
+  }).state, ARRIVAL.OTHER, "and a third party is nameable as such");
+  assert.equal(Applicants.describePanelArrival({
+    expected: "111", applicationId: "111", identity: "id:111", previousIdentity: "id:222",
+    sections: 6, connected: true
+  }).arrived, true);
+  // Torn down and half-mounted are WAITS, not arrivals — the two states the old
+  // text fingerprint reported as "a new applicant is here".
+  assert.equal(Applicants.describePanelArrival({ expected: "111", connected: false }).state, ARRIVAL.TORN_DOWN);
+  assert.equal(Applicants.describePanelArrival({
+    expected: "111", applicationId: "111", sections: 1, connected: true
+  }).state, ARRIVAL.MOUNTING);
+
+  // Waiting is a race that can be lost, so the record is refused as well.
+  assert.match(source, /function wrongApplicantError\(reason\)/, "a wrong panel is its own kind of error");
+  assert.match(source, /function assertExpectedApplicant\(expected\)/, "and the check is one named rule");
+  const guard = source.slice(source.indexOf("function assertExpectedApplicant"), source.indexOf("* Collect the applicant currently open"));
+  assert.match(guard, /if \(!cleanText\(expected\)\) return;/, "a caller that named nobody asserts nothing");
+  assert.match(guard, /if \(seen\.state !== Applicants\.PANEL_ARRIVAL\.OTHER\) return;/,
+    "only a DIFFERENT applicant throws — torn-down and mounting are waits");
+
+  // Checked at every point where the panel could have changed underneath it,
+  // and the last one is immediately before the record is built.
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
+  assert.ok((extract.match(/assertExpectedApplicant\(expected\)/g) || []).length >= 3,
+    "before the scan, after it, and before the record is built");
+  assert.match(extract, /assertExpectedApplicant\(expected\);\s*const record = Applicants\.buildApplicantRecord\(\{/,
+    "the last word is immediately before the record exists");
+  // And the record is keyed to the applicant that was ASKED for, not to a read
+  // of location.href taken when the scan started.
+  assert.match(extract, /context: expected \? \{ \.\.\.context, applicationId: expected \} : context/,
+    "the record carries the expected application id");
+
+  // Bounded: refusing forever would let one unresolvable row hold the job.
+  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
+  assert.match(run, /const MAX_WRONG_APPLICANT_RETRIES = 2;/, "the retry is bounded");
+  assert.equal((run.match(/if \(error\?\.wrongApplicant\)/g) || []).length, 2,
+    "and both the list pass and the full run handle it");
+  assert.match(run, /state\.run\.failed \+= 1;[\s\S]{0,300}?rather than save the wrong name/,
+    "exhausting the retries is a failure, never a save");
 });
 
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
@@ -1804,6 +1923,19 @@ test("a control in the list header can never retire the open applicant's row", a
   // entirely plausible aria-label for a row, and it leads with a verb — judging
   // it would refuse every row on the page rather than one control.
   assert.ok(!/aria-label/.test(code), "the accessible name must not be judged");
+
+  // The label rule is a ROW rule and must not leak into "does this address name
+  // an application". The panel's own application link is the arrival test's best
+  // source, and it is labelled whatever LinkedIn labels it — `View full profile`,
+  // `Resume`, or an icon with no text at all. Judging it as a row would refuse
+  // it and drop `panelApplicationId` back to the address bar, which on this
+  // surface moves ahead of the render: exactly the source that cannot be trusted.
+  assert.match(source, /function hasApplicationHref\(anchor\)/, "the address test stands on its own");
+  assert.match(link, /if \(!hasApplicationHref\(anchor\)\) return false;/,
+    "and the row test is built on top of it rather than duplicating it");
+  const panelId = source.slice(source.indexOf("function panelApplicationId"), source.indexOf("function panelIdentity"));
+  assert.match(panelId, /if \(!hasApplicationHref\(anchor\)\) continue;/,
+    "the panel's own id is read from the address, never through the row policy");
 });
 
 test("the bottom of the panel is reached without knowing which container scrolls", async () => {
@@ -2856,11 +2988,17 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   //    applicant, then lets it finish mounting. No second click can happen while
   //    a profile is still loading, because the caller only advances on the
   //    resolved value.
-  assert.match(select, /const before = panelIdentity\(\);[\s\S]{0,200}?click\(\)/,
+  // Amended in 3.7.10 with rule 9g, which this locks: "wait for the right panel"
+  // is unchanged and is the permanent clause — what changed is that a text
+  // fingerprint was never a way to tell whether the right panel was there, since
+  // the teardown alone satisfied it.
+  assert.match(select, /const before = panelIdentity\(heldPanel\);[\s\S]{0,120}?click\(\)/,
     "the panel's identity is taken before the click");
-  assert.match(select, /await waitFor\(\(\) => panelIdentity\(\) !== before/,
-    "and the click is followed by waiting for the panel to actually change");
-  assert.match(select, /await waitForDomQuiet\([\s\S]{0,80}?return Boolean\(changed\);/,
+  assert.ok(!/panelIdentity\(\) !== before/.test(select),
+    "and 'the fingerprint differs' must not come back: a teardown satisfies it");
+  assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
+    "the click is followed by waiting for THIS applicant to be mounted");
+  assert.match(select, /await waitForDomQuiet\([\s\S]{0,400}?return Boolean\(arrival\) && settled\.arrived;/,
     "then the panel is allowed to finish mounting before the caller proceeds");
 
   // The caller does not re-click an applicant already shown, and treats a row

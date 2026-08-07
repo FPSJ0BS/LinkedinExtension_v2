@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0116",
+  "name": "Restore: a record may only be built from the applicant that was asked for",
+  "request": "Restore: a record may only be built from the applicant that was asked for",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T02:44:58.115Z",
+  "completedAt": "2026-08-07T02:47:32.376Z",
+  "startCommit": "275d3767296214086645b91faa42c9961206b5a2",
+  "gitRef": "task/TASK-0116",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "Restored the fix TASK-0114 had reversed, on top of TASK-0115. selectApplicantRow waited for the panel's TEXT fingerprint to differ from before the click, which the teardown alone satisfies - so the scan read the stale panel and chooseApplicantName arbitrated with LinkedIn's qualification prose naming the PREVIOUS person, which won as the corroborated name and was then latched by addName. Applicants.describePanelArrival() decides arrival from identifiers only (the application id on the panel's own link, the member's /in/ slug, PANEL_MIN_SECTIONS hydrated sections); mountedApplicantPanel() may answer null so 'nothing is mounted' is expressible; selectApplicantRow waits teardown then arrival then settles and asks again. And waiting is not trusted alone: extractApplicant takes expectApplicationId and assertExpectedApplicant() re-checks before the scan, after it and immediately before the record is built, throwing rather than saving, bounded by MAX_WRONG_APPLICANT_RETRIES, on both commands. New on top of the restore: hasApplicationHref() splits 'does this address name an application' from 'is this link a row', so TASK-0115's label rule cannot refuse the panel's own link and silently drop panelApplicationId back to the address bar."
+}
