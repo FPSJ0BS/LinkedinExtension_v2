@@ -282,7 +282,7 @@ commands are unrecoverable.
       of the two paths each applicant took. Locked by
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
-      how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
+      how the whole-job walk advances. It is a navigation click and nothing else. **Wait for
       the applicant that row leads to to be *mounted*, never for the address bar and never for the
       panel's text to differ** (amended in 3.7.10) — LinkedIn routes without a navigation and the DOM
       is briefly quiet between tearing the old applicant down and mounting the new one, so both of
@@ -749,7 +749,7 @@ on disk.
   puts one line per applicant in the console: where the address came from, whether the viewer closed,
   whether the file landed, and why not — the same discipline `logSectionScan` was written under.
 
-## The list pass — every applicant's name, across every page (3.7.10)
+## The whole-job walk — every applicant, across every page (3.7.10, amended in 3.7.13)
 
 **Requested outright: "collect all applications across multiple pages in sequence, one at a time,
 save the applicant's name, then the next one; page ends, then next page — like we did in
@@ -758,11 +758,25 @@ connections."** The connections surface has always had two separate commands for
 Profile Extraction** reads what was found. *Who applied* and *what is on their profile* are different
 questions, and the second costs hours where the first costs a walk down the list.
 
-- **`options.listOnly` is a branch of the one walk**, not a second walk. Same row loop, same identity
-  ledger, same `growApplicantList`, same pagination (rule 9h), same conclusive-stop rule, same
-  resume-after-a-reload. The only difference is what happens to a row: `Applicants.buildApplicantListRecord()`
-  is built from the row itself and streamed to the store with `PV_APPLICANT_SAVE`, one at a time as
-  it is read, exactly as the full run streams a finished applicant.
+**⚠ Collect Every Applicant was REMOVED in 3.7.13, and this is what remains.** Requested outright:
+*"remove Collect Every Applicant, its code and function and feature ... that will not affect any
+other button or any other feature."* It was never a second walk — `options.listOnly` chose between
+two **per-row bodies** inside one loop, and everything that makes a run a run was already shared:
+the row loop, the identity ledger, the roster and page boundary, `growApplicantList`, the pagination
+(rule 9h), the conclusive-stop rule, the collected index, the arrival guard, the auto-run and the
+reload-resume. By 3.7.11 the two bodies had converged as well — this one opens each applicant,
+discloses their contacts and saves their resume — leaving `expand: false` and the floor name as the
+only differences. So removing it removed **one branch and one button**, not a capability. The flag
+is still accepted and simply no longer read, so a run armed by the previous build resumes rather
+than falling into a branch that is gone. Locked by *"Collect Every Applicant is gone, and it took
+nothing else with it"*, which asserts both halves — the button and the branch are absent, and
+Collect This Applicant, Collect Applicant List, `extractApplicant`, the roster, the pager, the
+resume chain, the contact disclosure, the auto-run and the seven-click budget all still stand.
+
+- **There is one per-row path, and it is `extractApplicant`** — the same one `PV_APPLICANT_EXTRACT`
+  calls for a single applicant, so this surface has one reading rule and one click budget rather
+  than two that can drift. `Applicants.buildApplicantListRecord()` is built from the row itself and
+  streamed to the store with `PV_APPLICANT_SAVE` as the **floor** (see below).
 - **It opens each applicant, lets the panel load, walks it to the bottom and takes what the panel
   rendered** (`collectVisibleApplicant`, 3.7.10 — requested outright: *"slow down on every profile,
   let it load fully, scroll to its bottom, then move onto the next"*, then *"capture name, current
@@ -787,8 +801,8 @@ questions, and the second costs hours where the first costs a walk down the list
   already the slow part. Every control that is now pressed is one rule 9 names and gates
   individually, so the per-file click budget is untouched. `current_role`, `current_company` and
   `total_experience` are still `deriveCurrentPosition` and `totalExperienceFrom` over the Experience
-  cards the panel rendered, exactly as in a full collection: **one** definition of "current role" on
-  this surface rather than a second that can drift from it.
+  cards the panel rendered, exactly as when a single applicant is collected: **one** definition of
+  "current role" on this surface rather than a second that can drift from it.
 - **The row's own name is the FLOOR, and only when it is needed.** `extractApplicant` saves whatever
   the panel gave it; a row that never opened, or a panel that resolved no name, would otherwise
   leave the column the whole export is read by empty while the row plainly rendered it. Safe because
@@ -846,8 +860,9 @@ questions, and the second costs hours where the first costs a walk down the list
 - **The job header is read once per run**, not per row: it sits above both columns and does not
   change as the list is walked, so reading it per row would be hundreds of forced layouts for one
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.
-- **A listed applicant is not a collected one.** `isCollectedApplicant` needs one substantive field,
-  so a later full run still opens these people rather than walking past them forever.
+- **A record with nothing on it is not a collected one.** `isCollectedApplicant` needs one
+  substantive field, so a later run still opens the people a broken one left thin rather than
+  walking past them forever.
 - **One "already have them" question, asked the same way by both commands** (3.7.11). Both ask
   `createCollectedIndex` — "is this person **collected**", meaning the record carries at least one
   substantive field — and `createListedIndex`, the "do I already **have** them" variant the list pass
@@ -865,18 +880,22 @@ questions, and the second costs hours where the first costs a walk down the list
   stored entry with the verdict beside it rather than filtering on it — the index applies the verdict,
   the worker only reports — so nothing about the payload changed. `options.recollect` asks for the
   whole list again regardless.
-- **Two earlier changes are what make running it first safe**, and neither is incidental:
-  `saveApplicant` reconciles on `job.id + applicationId` (rule 14, v6) so the later full pass enriches
-  *this* record instead of creating a second one under a different hash, and `mergeApplicantRecord`
-  protects every scalar field by field (3.7.10) so a blank never erases a stored value.
-- **The profile extraction is stopped, never removed.** `extractApplicant` and everything it drives
-  is untouched and is still the only path a full run takes; the list pass simply does not call it. A
-  test asserts both halves.
-- Its own button, **Collect Applicant List**, beside Collect Every Applicant **on the Applicants page
-  and in the popup**. It rides `PV_APPLICANT_COLLECT_ALL`, so `listOnly` travels with the armed
-  options and returning to the tab resumes a list pass *as a list pass* rather than starting to open
-  people. Both whole-job commands in the popup share one handler (`runApplicantJob`), so the
-  close-only-on-`{ok, started}` discipline is one rule rather than two copies that can drift.
+- **Two earlier changes are what make a re-run safe**, and neither is incidental: `saveApplicant`
+  reconciles on `job.id + applicationId` (rule 14, v6) so a second pass enriches *this* record
+  instead of creating a second one under a different hash, and `mergeApplicantRecord` protects every
+  scalar field by field (3.7.10) so a blank never erases a stored value.
+- **The profile extraction was never the thing removed.** `extractApplicant` and everything it
+  drives is untouched, and since 3.7.13 it is what this walk calls for every applicant as well as
+  what `PV_APPLICANT_EXTRACT` calls for one. A test asserts there is exactly one of it.
+- Its own button, **Collect Applicant List**, on the Applicants page and in the popup — the only
+  whole-job command since 3.7.13. It rides `PV_APPLICANT_COLLECT_ALL`, so the armed options travel
+  with it and returning to the tab resumes the run. **`recollect` travels with it too**: it is a
+  property of a *run* — "walk past the people already saved, or open them again" — and never
+  belonged to one button, so when the button it was first added beside went, it moved rather than
+  being deleted. Unchecked it sends `false`, which is the walk's own default, so the surviving
+  button's behaviour is unchanged by default. The popup's `runApplicantJob` keeps the
+  close-only-on-`{ok, started}` discipline (see below), and deliberately stays separate from
+  `runImport`, which Collect This Applicant shares and which must never close the window.
 
 ## Collecting every applicant (3.7.3, amended in 3.7.4, 3.7.6 and 3.7.12)
 
@@ -1188,7 +1207,8 @@ point:
   challenge, a checkpoint or a page that stayed hidden past the wait, and rule 13 says those pause
   for a person.
 
-**Pressing Collect Every Applicant in the popup closes the popup** (3.7.7). The run happens on the
+**Pressing the whole-job command in the popup closes the popup** (3.7.7; it was Collect Every
+Applicant until 3.7.13 and is Collect Applicant List now). The run happens on the
 hiring tab, which the worker has just activated and focused, so a popup hanging over it covers the one
 thing the button was pressed to watch. It closes **only on `{ ok: true, started: true }`** — the
 worker's own proof that it resolved the tab, revealed it, got a matching-build `PV_APPLICANT_PING`,

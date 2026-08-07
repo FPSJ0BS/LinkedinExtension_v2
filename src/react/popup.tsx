@@ -296,37 +296,19 @@ class PopupApp extends React.Component {
   );
 
   /**
-   * Collect every applicant on this job, then get out of the recruiter's way.
+   * Every applicant on this job, one at a time, across every page.
    *
-   * This is the one command that closes the popup itself. The run happens on the
-   * hiring tab, which the worker has just activated and focused, so a popup left
-   * hanging over it is covering the very thing the user pressed the button to
-   * watch.
+   * The whole-job command on this surface. It is here as well as on the
+   * Applicants page because the popup is what the recruiter has open while they
+   * are *on* the hiring tab, which is the one place it is started from.
    *
-   * **Closed only once the run has actually started, never before.** The worker
-   * answers `{ ok: true, started: true }` only after it has resolved the hiring
-   * tab, revealed it, confirmed a matching-build content script answered
-   * `PV_APPLICANT_PING`, armed the standing auto-run instruction and dispatched
-   * `PV_APPLICANT_EXTRACT_ALL`. Anything short of that — a tab that could not be
-   * resolved, a content script that never answered — replies `ok: false`, and
-   * then the popup **stays open and shows the error**, because a window that
-   * vanishes on failure is a button that silently did nothing.
-   *
-   * It deliberately does not use `runImport`: that helper is shared with
-   * Start Collecting and Collect This Applicant, neither of which should close.
-   */
-  collectEveryApplicant = () => this.runApplicantJob(
-    {},
-    "Collecting every applicant on this job, one at a time…"
-  );
-
-  /**
-   * Every applicant's NAME, across every page, opening nobody.
-   *
-   * The same command and the same walk, with the panel step not taken — see
-   * "The list pass" in CLAUDE.md. It is here as well as on the Applicants page
-   * because the popup is what the recruiter has open while they are *on* the
-   * hiring tab, which is the one place a list pass is started from.
+   * **Collect Every Applicant was removed in 3.7.13** — it rode this same
+   * message, this same walk and this same handler, differing only in the flag
+   * below, and by then this pass opened each applicant, disclosed their contact
+   * details and saved their resume anyway. `listOnly: true` still travels with
+   * the armed options rather than being dropped, so a run armed by the previous
+   * build resumes as what it is instead of falling into a branch that no longer
+   * exists.
    */
   collectApplicantList = () => this.runApplicantJob(
     { listOnly: true },
@@ -336,8 +318,8 @@ class PopupApp extends React.Component {
   /**
    * Start a whole-job applicant command, then get out of the recruiter's way.
    *
-   * These are the commands that close the popup themselves. The run happens on
-   * the hiring tab, which the worker has just activated and focused, so a popup
+   * This is the command that closes the popup itself. The run happens on the
+   * hiring tab, which the worker has just activated and focused, so a popup
    * left hanging over it is covering the very thing the user pressed the button
    * to watch.
    *
@@ -401,9 +383,6 @@ class PopupApp extends React.Component {
           </button>
           <button className="primary" type="button" disabled={busy} onClick={this.collectApplicantList}>
             Collect Applicant List
-          </button>
-          <button className="primary" type="button" disabled={busy} onClick={this.collectEveryApplicant}>
-            Collect Every Applicant
           </button>
           <button className="secondary" type="button" onClick={this.openApplicants}>Review &amp; Export</button>
         </div>

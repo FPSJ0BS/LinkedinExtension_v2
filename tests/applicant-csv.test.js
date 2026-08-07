@@ -397,7 +397,6 @@ test("the applicants page offers every control the surface needs", async () => {
   for (const label of [
     "Collect This Applicant",
     "Collect Applicant List",
-    "Collect Every Applicant",
     "Stop",
     "Download CSV",
     "Download Selected",

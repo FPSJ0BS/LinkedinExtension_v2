@@ -196,28 +196,29 @@ class ApplicantsApp extends React.Component {
     "Collected. The row is in the table below."
   );
 
-  collectAll = () => this.command(
-    APPLICANT_MESSAGES.COLLECT_ALL,
-    this.state.recollect
-      ? "Collecting every applicant again, one at a time…"
-      : "Collecting the applicants not already saved, one at a time…",
-    "Running. You can close this page — each applicant is saved as it finishes.",
-    { options: { recollect: this.state.recollect } }
-  );
-
   /**
-   * Every applicant's NAME, across every page, opening nobody.
+   * Every applicant on this job, one at a time, across every page.
    *
-   * The same command and the same walk as Collect Every Applicant — including
-   * the pagination and the resume-after-a-reload — with the panel step not
-   * taken. `listOnly` travels with the armed options, so returning to the tab
-   * resumes a list pass as a list pass rather than starting to open people.
+   * **The whole-job command, and since 3.7.13 the only one.** Collect Every
+   * Applicant rode this same `COLLECT_ALL` message, this same walk and this same
+   * pagination, differing only in the `listOnly` flag — and by then this pass
+   * opened each applicant, walked their panel to the bottom, disclosed their
+   * contact details and saved their resume anyway, so the two commands did the
+   * same work under two names. The flag still travels with the armed options
+   * rather than being dropped, so a run armed by the previous build resumes as
+   * what it is instead of falling into a branch that no longer exists.
+   *
+   * `recollect` travels with it too. It is a property of a *run* — "walk past
+   * the people already saved, or open them again" — and never belonged to one
+   * button; unchecked it sends `false`, which is the walk's own default.
    */
   collectList = () => this.command(
     APPLICANT_MESSAGES.COLLECT_ALL,
-    "Reading the applicant list, page by page…",
-    "Running. Each name is saved as it is read — you can close this page.",
-    { options: { listOnly: true } }
+    this.state.recollect
+      ? "Reading the applicant list again, page by page, including the ones already saved…"
+      : "Reading the applicant list, page by page…",
+    "Running. Each applicant is saved as they are read — you can close this page.",
+    { options: { listOnly: true, recollect: this.state.recollect } }
   );
 
   stopEverything = () => this.command(
@@ -321,18 +322,14 @@ class ApplicantsApp extends React.Component {
             Collect This Applicant
           </button>
           {/*
-            The list pass, and its own button on purpose — the connections
-            surface has always had "Find All Connections" beside "Start Profile
-            Extraction" for exactly this reason. Reading 665 applicants' panels
-            takes hours; reading their rows takes a walk down the list, and
-            "who applied" is a different question from "what is on their
-            profile". Nothing is opened, so nothing is clicked but the pager.
+            The whole-job command. "Collect Every Applicant" stood beside it
+            until 3.7.13 and was removed there: it sent the same message and ran
+            the same walk, and once this pass began opening each applicant,
+            disclosing their contact details and saving their resume, the two
+            buttons did the same work under two names.
           */}
           <button className="primary" type="button" disabled={busy} onClick={this.collectList}>
             Collect Applicant List
-          </button>
-          <button className="primary" type="button" disabled={busy} onClick={this.collectAll}>
-            Collect Every Applicant
           </button>
           <button className="danger" type="button" onClick={this.stopEverything}>Stop</button>
           <button className="success" type="button" onClick={() => this.exportCsv(this.filtered(), "applicant(s)")}>
@@ -352,9 +349,11 @@ class ApplicantsApp extends React.Component {
           {/*
             A run resumes by default — it walks past anyone already saved for
             this job without opening them. This is how to ask for the whole
-            list again anyway, after a fix or a LinkedIn layout change.
+            list again anyway, after a fix or a LinkedIn layout change. It
+            modifies the run, not any one button, which is why it outlived the
+            command it was first added beside.
           */}
-          <label className="inline" title="Collect every applicant again, including the ones already saved">
+          <label className="inline" title="Read every applicant again, including the ones already saved">
             <input
               type="checkbox"
               checked={recollect}

@@ -1,5 +1,41 @@
 # CHANGELOG.md
 
+## 3.7.13 — Collect Every Applicant removed
+
+Requested outright: *"remove Collect Every Applicant, its code and function and feature ... that will
+not affect any other button or any other feature."*
+
+**It was never a second walk.** `options.listOnly` chose between two **per-row bodies** inside one
+loop, and everything that makes a run a run was already shared between them: the row loop, the
+identity ledger, the page roster and page boundary, `growApplicantList`, the pagination (rule 9h),
+the conclusive-stop rule, the collected index, the panel-arrival guard, the auto-run and the
+reload-resume. By 3.7.11 the two bodies had converged as well — Collect Applicant List opens each
+applicant, walks their panel to the bottom, opens their contact disclosure and saves their resume —
+leaving `expand: false` and the row-name floor as the only differences between them. So what went is
+**one branch and one button**, not a capability.
+
+Removed: the button and `collectEveryApplicant` in the popup, the button and `collectAll` on the
+Applicants page, and the per-row branch that called `extractApplicant({ ...options })` directly
+along with the already-collected check it duplicated (the bulk retirement above it always did that
+work for both paths, which is why deleting it changes no behaviour). `options.listOnly` is still
+accepted and simply no longer read, so a run armed by the previous build resumes rather than falling
+into a branch that is gone.
+
+Kept, and asserted: Collect This Applicant and `PV_APPLICANT_EXTRACT`; Collect Applicant List and
+`PV_APPLICANT_COLLECT_ALL`; `extractApplicant` — now the surface's one per-row path, called both by
+the walk and for a single applicant; `sweepCurrentPage` and the roster; `clickApplicantPager` and
+`isConclusiveListStop`; `selectApplicantRow`; the PERMANENT resume chain and the contact disclosure;
+`continueInterruptedRun` and `pumpAutoRun`; and the seven-click budget, which counts **controls** —
+no control was removed here, only a caller.
+
+`recollect` moved rather than being deleted. It is a property of a *run* — "walk past the people
+already saved, or open them again" — and never belonged to one button, so **Re-collect already
+saved** now travels with Collect Applicant List. Unchecked it sends `false`, which is the walk's own
+default, so that button's behaviour is unchanged unless the box is ticked.
+
+TASK-0123. `npm run check` passes (432 tests). Rule 17: this is unit tests and fixtures, not a live
+LinkedIn result.
+
 ## 3.7.8 — The section that was never read, every page of the list, and a resume that saves itself
 
 `npm run check` passes here (411 tests: typecheck, build, test, validate).

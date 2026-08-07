@@ -61,9 +61,14 @@ For a recruiter looking at the applicants on their **own** job posting
 no tab, navigates nowhere, and never shortlists, moves, rejects, rates, messages or interviews anybody.
 
 - **Collect This Applicant** reads the applicant currently open in your LinkedIn tab;
-  **Collect Every Applicant** works through the whole list, one at a time, and can be stopped at any
-  point — each applicant is saved the moment it finishes
-- **A stopped run resumes.** Pressing Collect Every Applicant again walks past everyone already saved
+  **Collect Applicant List** works through the whole list, one at a time, and can be stopped at any
+  point — each applicant is saved the moment it finishes. It opens each one, lets their panel load,
+  scrolls it to the bottom, opens their contact details and saves their resume to disk under their
+  own name
+- **Collect Every Applicant was removed in 3.7.13.** It sent the same command and ran the same walk
+  as Collect Applicant List, and once that walk began opening each applicant and saving their resume
+  the two buttons did the same work under two names. Nothing else changed: one button, same run
+- **A stopped run resumes.** Pressing Collect Applicant List again walks past everyone already saved
   for that job without reopening them, and picks up from the rest. Tick **Re-collect already saved**
   to go over the whole list again on purpose
 - **Either button takes you to the page.** Your LinkedIn hiring tab is brought to the front — window
@@ -118,7 +123,7 @@ no tab, navigates nowhere, and never shortlists, moves, rejects, rates, messages
   the tab it opens never comes to the front, never has to be closed by hand, and the run continues
   through it. Through 3.7.7 a resume that opened in a tab ended the run outright
 - **Coming back to a job you have collected starts the run again — with no reload.** Once you have
-  pressed *Collect Every Applicant* on a job, returning to that job's Applicants page restarts the run
+  pressed *Collect Applicant List* on a job, returning to that job's Applicants page restarts the run
   from the first row with the options you chose — it walks past everyone already saved unless you
   ticked *Re-collect already saved*. It notices you arriving by LinkedIn's own in-app navigation, by
   the browser Back button, and by opening the job again from another page; through 3.7.6 only a manual

@@ -1222,11 +1222,22 @@ test("the next applicant is only scanned once the panel is showing them", async 
     "and so does the applicant that was already showing");
   assert.match(select, /return !refused;/, "and nothing else does");
 
-  // A row that came up as somebody else is a skip, not a record — scanning
-  // anyway would save that applicant a second time under this row's identity.
+  // A row that came up as somebody else is never SCANNED — scanning anyway would
+  // save that applicant a second time under this row's identity. There is one
+  // per-row path since 3.7.13, so this is `collectVisibleApplicant`: a row that
+  // would not open returns before the panel is ever read.
+  const open = source.slice(source.indexOf("async function collectVisibleApplicant"), source.indexOf("async function extractAllApplicants"));
+  assert.match(open, /if \(!\(await selectApplicantRow\(row\)\)\) return \{ opened: false, record: null \};/,
+    "the result must be checked, and a failure must return");
+  assert.ok(
+    open.indexOf("selectApplicantRow") < open.indexOf("await extractApplicant("),
+    "before the panel is read, or the applicant still showing is scanned under this row"
+  );
+  // And what the walk then saves for that row is the row's OWN name — never a
+  // reading of whoever the panel was left on.
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
-  assert.match(run, /const opened = await selectApplicantRow\(row\)/, "the result must be checked");
-  assert.match(run, /if \(!opened\) \{[\s\S]*?state\.run\.skipped \+= 1/, "and a failure to open must skip");
+  assert.match(run, /if \(!opened && !state\.run\.lastError\) \{/, "a row that would not open is recorded as such");
+  assert.match(run, /record: fromRow/, "and only its own name is saved for it");
 });
 
 test("a run that stopped short on the job it is still showing continues itself", async () => {
@@ -1365,13 +1376,11 @@ test("the list pass opens every applicant across every page and takes what the p
   );
   assert.equal(enriched.applicant.currentRole, "HR Executive", "a later blank must not wipe what is stored");
 
-  // The walk: same loop, same pagination, the panel step not taken.
+  // The walk. Since 3.7.13 there is no second per-row path to be a branch of:
+  // Collect Every Applicant was removed and this is what the one loop does.
   const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("async function runEveryApplicant"));
-  assert.match(run, /if \(options\.listOnly === true\) \{/, "the list pass is a branch of the one walk");
-  // The LAST of the two `listOnly` branches — the first reads the job header
-  // once, this one is the per-row work.
-  const pass = run.slice(run.lastIndexOf("if (options.listOnly === true) {"), run.indexOf("if (collected.has({ applicationId: rowId"));
-  assert.ok(pass.length > 200, "the list-pass branch must be found, not an empty slice");
+  const pass = run.slice(run.indexOf("const rowId = Applicants.parseHiringContext(row.href)"));
+  assert.ok(pass.length > 200, "the per-row work must be found, not an empty slice");
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
 
   // Each applicant is opened, the panel walked to the bottom, and what it
@@ -1455,26 +1464,27 @@ test("the list pass opens every applicant across every page and takes what the p
     "and refused before the row is even opened, not after"
   );
 
-  // The profile extraction is STOPPED, never removed: `extractApplicant` and
-  // everything it drives is still here and still the only path for a full run.
-  assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
-  assert.match(run, /const \{ record \} = await extractApplicant\(\{ \.\.\.options, expectApplicationId: rowId \}\);/,
-    "and still be what a full run calls — with the same protection, since it has the same exposure");
+  // The profile extraction is the SHARED one: the same `extractApplicant` a
+  // single applicant is collected through, so there is one reading rule here.
+  assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the extraction must still exist");
+  assert.equal((source.match(/async function extractApplicant/g) || []).length, 1,
+    "and there must be exactly one of it");
 
   // The job header is read ONCE. It sits above both columns and does not change
   // as the list is walked, so reading it per row would be hundreds of forced
   // layouts for one unchanging answer.
-  assert.match(run, /let listJob = null;\s*if \(options\.listOnly === true\) \{/, "the job is read once per run");
+  assert.match(run, /const listJob = attempt\("read job", jobAccumulator/, "the job is read once per run");
   assert.equal((run.match(/readJob\(jobAccumulator\)/g) || []).length, 1, "exactly once");
 
   // Its own button, exactly as the connections surface has always had "Find All
   // Connections" beside "Start Profile Extraction".
-  assert.match(ui, /Collect Applicant List/, "the list pass needs its own control");
-  assert.match(ui, /collectList = \(\) => this\.command\([\s\S]{0,400}?\{ options: \{ listOnly: true \} \}/,
-    "which asks for a list pass and nothing else");
-  // `listOnly` travels with the armed options, so returning to the tab resumes a
-  // list pass as a list pass rather than starting to open people.
-  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading the applicant list/,
+  assert.match(ui, /Collect Applicant List/, "the whole-job walk needs its own control");
+  assert.match(ui, /collectList = \(\) => this\.command\([\s\S]{0,600}?\{ options: \{ listOnly: true, recollect: this\.state\.recollect \} \}/,
+    "which asks for the walk, and carries the run's own re-collect setting");
+  // `listOnly` travels with the armed options rather than being dropped, so a
+  // run armed by the previous build resumes instead of falling into the branch
+  // 3.7.13 removed.
+  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*\n?\s*this\.state\.recollect/,
     "and rides the same command, so the auto-run remembers it");
 });
 
@@ -1593,8 +1603,10 @@ test("a record may only be built from the applicant that was asked for", async (
   // Bounded: refusing forever would let one unresolvable row hold the job.
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
   assert.match(run, /const MAX_WRONG_APPLICANT_RETRIES = 2;/, "the retry is bounded");
-  assert.equal((run.match(/if \(error\?\.wrongApplicant\)/g) || []).length, 2,
-    "and both the list pass and the full run handle it");
+  // One per-row path since 3.7.13, so one handler — it used to be two, one per
+  // branch, and they had to agree.
+  assert.equal((run.match(/if \(error\?\.wrongApplicant\)/g) || []).length, 1,
+    "and the one per-row path handles it");
   assert.match(run, /state\.run\.failed \+= 1;[\s\S]{0,300}?rather than save the wrong name/,
     "exhausting the retries is a failure, never a save");
 });
@@ -1932,7 +1944,7 @@ test("the run walks the list by identity, so a position can never address the wr
 
   // The first row is no longer assumed to be the one already open.
   assert.ok(!/if \(index > 0\) \{/.test(run), "`index > 0` assumed the open panel was row zero");
-  assert.match(run, /if \(!rowId \|\| rowId !== openId\) \{/,
+  assert.match(source, /if \(!rowId \|\| rowId !== openId\) \{/,
     "the panel is opened unless the address bar already says it shows this row");
   // Still exactly seven click call sites: this adds no control (rule 9).
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
@@ -2566,8 +2578,17 @@ test("a run resumes over the applicants it has not collected yet", async () => {
   // Decided from the row's own href, before anything is opened.
   assert.match(run, /const rowId = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
     "the id in the row's href is all a row knows before it is opened");
-  assert.match(run, /if \(collected\.has\(\{ applicationId: rowId, name: row\.name \}\)\) \{[\s\S]*?alreadyCollected \+= 1/,
-    "an applicant already saved must be walked past, not opened");
+  // Retired in BULK on one scan, before anybody is opened. The per-row copy of
+  // this check went with the second path in 3.7.13; this one always did the
+  // work for both, which is why removing that one changed no behaviour.
+  assert.match(run, /\? collected\.has\(\{ applicationId: candidateId \}\)/,
+    "an applicant already saved is judged from their row's own id");
+  assert.match(run, /if \(!saved\) continue;[\s\S]{0,240}?alreadyCollected \+= 1/,
+    "and walked past, not opened");
+  assert.ok(
+    run.indexOf("const saved = candidateId") < run.indexOf("await collectVisibleApplicant"),
+    "and that verdict is reached before anybody is opened"
+  );
   assert.match(run, /collected\.applications\.add\(rowId\.toLowerCase\(\)\)/,
     "and one collected in this run must not be collected again in it");
 
@@ -2594,7 +2615,7 @@ test("coming back to an unfinished job run resumes it, but a completed run stays
   assert.match(worker, /async function armAutoRun\(jobId: string, options: any, tabId = 0\)/, "the worker must remember the job and owning tab");
   const collectAllStart = worker.indexOf("APPLICANT_MESSAGES.COLLECT_ALL) {");
   const collectAll = worker.slice(collectAllStart, worker.indexOf("return { ok: false, error", collectAllStart));
-  assert.match(collectAll, /await armAutoRun\(/, "and only Collect Every Applicant arms it");
+  assert.match(collectAll, /await armAutoRun\(/, "and only the whole-job command arms it");
   assert.ok(
     collectAll.indexOf("APPLICANT_MESSAGES.STATUS") < collectAll.indexOf("await armAutoRun("),
     "a second press must detect the live run before it can replace that run's lifecycle token"
@@ -3317,12 +3338,16 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   assert.match(source, /function assertExpectedApplicant\(expected\)/,
     "because the record - not the click - is what refuses the wrong applicant");
 
-  // The caller does not re-click an applicant already shown, and a row that came
-  // up as somebody else is skipped rather than scanned under this row's name.
-  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("if (state.run.state === Applicants.RUN_STATE.RUNNING)"));
-  assert.match(run, /if \(!rowId \|\| rowId !== openId\) \{/, "an applicant already open is not clicked again");
-  assert.match(run, /const opened = await selectApplicantRow\(row\);[\s\S]{0,400}?if \(!opened\) \{/,
-    "a row that came up as somebody else is skipped, never scanned as them");
+  // The caller does not re-click an applicant already shown, and a row that
+  // would not come up is never scanned as whoever the panel is still showing.
+  // One per-row path since 3.7.13, so this is `collectVisibleApplicant` — the
+  // permanent clause is untouched, only where it lives.
+  const open = source.slice(source.indexOf("async function collectVisibleApplicant"), source.indexOf("async function extractAllApplicants"));
+  assert.match(open, /if \(!rowId \|\| rowId !== openId\) \{/, "an applicant already open is not clicked again");
+  assert.match(open, /if \(!\(await selectApplicantRow\(row\)\)\) return \{ opened: false, record: null \};/,
+    "a row that would not open returns, never scanned as them");
+  assert.equal((open.match(/selectApplicantRow/g) || []).length, 1,
+    "and exactly one row click per applicant");
 
   // 4. Scrolling moves a column, never the recruiter's page.
   assert.match(source, /function anchorPage\(run\)/, "there is one helper that holds the page still");
@@ -3570,18 +3595,14 @@ test("the resume link is saved first and downloading cannot stop the applicant r
   assert.match(source, /PV_APPLICANT_RUN_LIFECYCLE/);
 });
 
-test("the popup closes itself once Collect Every Applicant has actually started", async () => {
+test("the popup closes itself once the whole-job command has actually started", async () => {
   const popup = await readFile(resolve(root, "src/react/popup.tsx"), "utf8");
 
   // The run happens on the hiring tab, which the worker has just activated and
   // focused. A popup left hanging over it is covering the one thing the
   // recruiter pressed the button to watch.
-  // Both whole-job commands share one handler, so the close discipline below is
-  // one rule rather than two copies of it that can drift apart.
-  assert.match(popup, /collectEveryApplicant = \(\) => this\.runApplicantJob\(\s*\{\}/,
-    "Collect Every Applicant runs the whole panel");
   assert.match(popup, /collectApplicantList = \(\) => this\.runApplicantJob\(\s*\{ listOnly: true \}/,
-    "Collect Applicant List asks for the names and nothing else");
+    "Collect Applicant List walks the whole job");
   assert.match(popup, /Collect Applicant List\s*<\/button>/, "and the popup offers it");
   const handler = popup.slice(popup.indexOf("runApplicantJob = async"), popup.indexOf("renderApplicantPanel()"));
   assert.match(handler, /if \(response\?\.started\) \{\s*\n\s*this\.closePopup\(\);/,
@@ -3638,4 +3659,77 @@ test("the hiring surface is a content script entry scoped to LinkedIn hiring pag
     "https://static.licdn.com/*",
     "https://www.linkedin.com/*"
   ]);
+});
+
+test("Collect Every Applicant is gone, and it took nothing else with it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const popup = await readFile(resolve(root, "src/react/popup.tsx"), "utf8");
+  const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // Requested outright: "remove Collect Every Applicant, its code and function
+  // and feature ... that will not affect any other button or any other
+  // feature." Both halves are asserted here, because the second is the hard one
+  // — the command it stood beside rode the SAME message, the SAME walk and the
+  // SAME pagination, differing only in a flag.
+
+  // ------------------------------------------------------------------ gone
+  // Judged on the rendered LABEL and on the handler, not on the phrase: the
+  // comments that explain why it went name it on purpose, and a comment is not
+  // a button.
+  assert.ok(!/Collect Every Applicant\s*<\/button>/.test(popup), "the popup must not offer it");
+  assert.ok(!/Collect Every Applicant\s*<\/button>/.test(page), "and neither must the Applicants page");
+  assert.ok(!/collectEveryApplicant/.test(popup), "nor keep the handler that started it");
+  assert.ok(!/collectAll = \(\) =>/.test(page), "nor the page's own handler");
+  // The second per-row path it was the only caller of. `extractApplicant` is
+  // reached through `collectVisibleApplicant` and through PV_APPLICANT_EXTRACT,
+  // and no longer by a branch spreading the run's raw options over it.
+  assert.ok(!/await extractApplicant\(\{ \.\.\.options, expectApplicationId: rowId \}\)/.test(source),
+    "the branch that called the extraction directly must be gone");
+  assert.ok(!/if \(options\.listOnly === true\) \{/.test(source),
+    "and with it the flag that chose between two paths");
+  assert.ok(!/if \(collected\.has\(\{ applicationId: rowId, name: row\.name \}\)\)/.test(source),
+    "including its own already-collected check, which the bulk retirement above already makes");
+
+  // ------------------------------------------------- and nothing else moved
+  // Collect This Applicant is a different message and a different entry point.
+  assert.match(popup, /collectApplicant = \(\) => this\.runImport\(/, "Collect This Applicant must survive");
+  assert.match(page, /collectCurrent = \(\) => this\.command\(/, "on both surfaces");
+  assert.match(source, /if \(type === "PV_APPLICANT_EXTRACT"\) \{/, "and still reach the extraction");
+  assert.match(source, /state\.extracting = extractApplicant\(message\.options \|\| \{\}\)/, "unchanged");
+
+  // The whole-job command, its message, and everything the walk is made of.
+  assert.match(popup, /Collect Applicant List/, "the whole-job command must survive");
+  assert.match(page, /Collect Applicant List/);
+  assert.match(source, /if \(type === "PV_APPLICANT_EXTRACT_ALL"\) \{/, "its content-script entry point");
+  assert.match(worker, /if \(type === APPLICANT_MESSAGES\.COLLECT_ALL\) \{/, "and the worker's, untouched");
+  for (const kept of [
+    "async function sweepCurrentPage",          // the page is settled before anybody is opened
+    "createApplicantRoster",                    // the page's own order
+    "async function growApplicantList",         // and how it grows
+    "clickApplicantPager",                      // rule 9h, the pager's one call site
+    "isConclusiveListStop",                     // only a real end may complete a run
+    "async function selectApplicantRow",        // rule 9g
+    "async function collectResume",             // the PERMANENT resume chain
+    "async function openContactAndCollect",     // rule 9d
+    "function continueInterruptedRun",          // a run that stops short asks for itself back
+    "function pumpAutoRun",                     // and the reload-resume it goes through
+    "async function loadCollectedIndex"         // a run resumes; it never starts over
+  ]) {
+    assert.ok(source.includes(kept), `${kept} is not part of the removed command and must stay`);
+  }
+
+  // `recollect` is a property of a RUN, not of the button it was first added
+  // beside, so it moved to the command that survived rather than being deleted
+  // with the one that did not. Unchecked it sends `false`, which is the walk's
+  // own default — so the surviving button's behaviour is unchanged by default.
+  assert.match(page, /Re-collect already saved/, "the re-collect control must survive");
+  assert.match(page, /options: \{ listOnly: true, recollect: this\.state\.recollect \}/, "and still reach the run");
+  assert.match(source, /options\.recollect === true/, "which the walk still honours");
+
+  // The click budget is a count of CONTROLS (rule 9), and no control was
+  // removed here — only a caller. Seven: six gated opens plus one shared
+  // dismiss.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7,
+    "applicants.js must still click exactly seven times");
 });

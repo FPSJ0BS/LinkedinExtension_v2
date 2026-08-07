@@ -156,9 +156,9 @@ test("the popup offers all three surfaces by name", async () => {
   const panel = source.slice(source.indexOf("renderApplicantPanel()"), source.indexOf("signIn = async"));
   assert.ok(!/if \(this\.state\.surface !== "applicants"\) return null/.test(panel),
     "the applicant panel must not be hidden behind the active tab");
-  assert.match(panel, /Collect Every Applicant/, "and it still offers the commands");
+  assert.match(panel, /Collect Applicant List/, "and it still offers the commands");
   assert.match(panel, /Collect This Applicant/);
-  assert.match(panel, /Collect Every Applicant/);
+  assert.match(panel, /Review &amp; Export/);
   // The prose describing what it will not do was removed in 3.7.8 with every
   // other explanatory paragraph. What it will not do is enforced by
   // FORBIDDEN_APPLICANT_CONTROL_PATTERN and asserted against the policy itself,

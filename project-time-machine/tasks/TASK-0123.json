@@ -1,0 +1,54 @@
+{
+  "schema": 2,
+  "id": "TASK-0123",
+  "name": "Remove the Collect Every Applicant command, its button and its branch of the walk",
+  "request": "Remove the Collect Every Applicant command, its button and its branch of the walk",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T07:44:25.130Z",
+  "completedAt": "2026-08-07T07:55:41.409Z",
+  "startCommit": "492ee2db45cbe22c7896aa5c8f772e8874e64c32",
+  "gitRef": "task/TASK-0123",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/universal-stop.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 432 tests, validate"
+  ],
+  "result": "Removed the Collect Every Applicant command: its button and handler in the popup and on the Applicants page, and the per-row branch of the walk it was the only caller of. It was never a second walk - options.listOnly chose between two per-row bodies inside one loop, and the row loop, identity ledger, page roster, growApplicantList, pagination, conclusive-stop rule, collected index, arrival guard, auto-run and reload-resume were all already shared; by 3.7.11 the two bodies had converged too, so what went is one branch and one button, not a capability. extractApplicant is now the surface's one per-row path, called both by the walk and by PV_APPLICANT_EXTRACT. The already-collected check deleted with the branch was a duplicate of the bulk retirement above it. options.listOnly is still accepted and no longer read, so a run armed by the previous build resumes rather than falling into a branch that is gone. recollect moved to Collect Applicant List rather than being deleted - it is a property of a run, not of one button, and unchecked it sends false, which is the walk's own default. Kept and asserted by a new test: Collect This Applicant, Collect Applicant List, extractApplicant (exactly one), sweepCurrentPage and the roster, clickApplicantPager, isConclusiveListStop, selectApplicantRow, the PERMANENT resume chain, the contact disclosure, continueInterruptedRun, pumpAutoRun and the seven-click budget. background.ts, applicants-core.js, messages.ts, the databases, the manifest, content.js and connections.js are untouched. Five assertions were repointed at collectVisibleApplicant, where the clauses they lock now live - including the PERMANENT one-click-per-applicant test, which gained a count of the row clicks on that path and was not weakened."
+}

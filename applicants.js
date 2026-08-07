@@ -4392,8 +4392,9 @@
    *
    * `current_role`, `current_company` and `total_experience` are still
    * `deriveCurrentPosition` and `totalExperienceFrom` over the Experience cards
-   * the panel rendered, exactly as in a full collection: **one** definition of
-   * "current role" on this surface rather than a second that can drift from it.
+   * the panel rendered, exactly as when a single applicant is collected:
+   * **one** definition of "current role" on this surface rather than a second
+   * that can drift from it.
    */
   const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false });
 
@@ -4403,13 +4404,13 @@
    *
    * `extractApplicant` owns all of it — the wait for the applicant to be
    * showing, the scan, the disclosure, the resume, the record and the save — so
-   * this adds no reading rule of its own and no click rule of its own. It is the
-   * full run's own path with the section expander off.
+   * this adds no reading rule of its own and no click rule of its own. It is
+   * `PV_APPLICANT_EXTRACT`'s own path with the section expander off.
    */
   async function collectVisibleApplicant(row, rowId) {
     const openId = Applicants.parseHiringContext(location.href).applicationId || "";
-    // Not re-clicked when the panel is already showing them — the same test the
-    // full run makes, and it costs no extra click either way.
+    // Not re-clicked when the panel is already showing them, and it costs no
+    // extra click either way.
     if (!rowId || rowId !== openId) {
       if (!(await selectApplicantRow(row))) return { opened: false, record: null };
     }
@@ -4450,20 +4451,17 @@
       : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
-    // The job header, read ONCE for a list pass and attached to every row.
+    // The job header, read ONCE per run and attached to every row.
     //
     // It sits above both columns and does not change as the list is walked, so
     // reading it per row would be hundreds of forced layouts for one unchanging
     // answer — the same reason `applicantRows()` made its name a lazy getter.
     // Without it every name would land under a bare job id; with it the table
     // says which job these people applied to. Read through the same `readJob`
-    // the full extraction uses, so there is one rule for what a job header is,
+    // a single extraction uses, so there is one rule for what a job header is,
     // and left null if it says nothing rather than assembled (rule 6).
-    let listJob = null;
-    if (options.listOnly === true) {
-      const jobAccumulator = Applicants.createApplicantAccumulator();
-      listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
-    }
+    const jobAccumulator = Applicants.createApplicantAccumulator();
+    const listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
 
     state.run = Applicants.createRunState({
       state: Applicants.RUN_STATE.RUNNING,
@@ -4834,273 +4832,175 @@
       // applicant to find out they may be skipped is the cost this avoids.
       const rowId = Applicants.parseHiringContext(row.href).applicationId || "";
 
-      // ---------------------------------------------------------- list pass
+      // ------------------------------------------------------- the applicant
       // "Collect all the applicants like we did in connections": the whole
-      // list, across every page, one at a time, saving each person's name.
+      // list, across every page, one at a time. Each row is opened, its panel
+      // is let load and walked to the bottom, what it rendered is taken, the
+      // contact disclosure is opened and the resume is saved to disk under the
+      // applicant's own name — all of it `extractApplicant`, which is also what
+      // `PV_APPLICANT_EXTRACT` calls for a single applicant, so there is one
+      // reading rule on this surface and one click budget.
       //
-      // Since 3.7.10 it also **opens each applicant, lets the panel load and
-      // walks it to the bottom before moving on**, which was asked for
-      // outright. Only the name is still saved: the walk is there so every
-      // profile is genuinely reached and rendered, not so that more is read
-      // from it. `extractApplicant` and everything it drives is untouched and
-      // still the only path for the full collection — it is simply not called
-      // here.
+      // THIS USED TO BE A BRANCH. `options.listOnly` chose between it and a
+      // second per-row path that called `extractApplicant({ ...options })`
+      // directly, reached by a button called **Collect Every Applicant**. That
+      // button was removed in 3.7.13 at the user's request, and by then the two
+      // paths had converged to the point of doing the same work: this one had
+      // opened each applicant since 3.7.10 and disclosed their contacts and
+      // saved their resume since 3.7.11, leaving `expand: false` and the floor
+      // name below as the only differences. One path is now the only path.
+      // The flag is still accepted and simply no longer read, so a run armed by
+      // the previous build resumes instead of falling into a branch that is
+      // gone.
       //
       // Rows already **collected** were retired in bulk above — one substantive
-      // field, `isCollectedApplicant`, so an applicant this pass wrote a full
+      // field, `isCollectedApplicant`, so an applicant this run wrote a full
       // record for is walked past while one left with nothing but a floor name
       // is tried again. That distinction is the whole reason a run that failed
       // on somebody can be fixed by pressing the button rather than only by
       // `options.recollect`, which asks for the whole list regardless.
-      if (options.listOnly === true) {
-        // Rule 12a and rule 13a inside the loop, not between items: a hidden
-        // tab renders nothing, so its rows are not worth reading, and a Stop
-        // must land within one row.
-        assertRunnable();
-        // The row's own name, and the FLOOR for this applicant. The panel scan
-        // below is what fills the other columns, but a panel that resolves no
-        // name would otherwise leave the column the whole export is read by
-        // empty while the row plainly rendered it.
-        const fromRow = Applicants.buildApplicantListRecord({
-          name: row.name,
-          href: row.href,
-          job: listJob,
-          context: Applicants.parseHiringContext(location.href),
-          sourceUrl: location.href,
-          buildId: BUILD_ID
-        });
-        // Not a person. The applicant list renders links that are not rows —
-        // the live one is **"Edit qualifications"**, in the list's own header
-        // ("Here are all applicants to your job. Edit qualifications"), and its
-        // href carries the same `applicationId` the page is on, so nothing about
-        // the link tells it apart from the open applicant's row. The text does,
-        // and `isApplicantNameCandidate` already refused this exact phrase for
-        // the panel path a release earlier. Skipped, never saved: a record with
-        // a wrong name in the column the export is read by is worse than no
-        // record (rule 6).
-        if (!fromRow) {
-          processed.add(key);
-          state.run.skipped += 1;
-          state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
-          state.run.index = processed.size;
-          state.run.updatedAt = new Date().toISOString();
-          continue;
-        }
-        state.run.currentName = fromRow.applicant.name;
-        state.run.updatedAt = new Date().toISOString();
-
-        // Open them, let the panel load, walk it to the bottom, take what it
-        // rendered — name, current role, current company, total experience and
-        // education — then disclose their contact details and save their resume
-        // under their own name. `extractApplicant` saves the record it builds,
-        // so nothing here re-sends it.
-        let opened = true;
-        let record = null;
-        try {
-          const outcome = await collectVisibleApplicant(row, rowId);
-          opened = outcome.opened;
-          record = outcome.record;
-        } catch (error) {
-          if (error?.stopped) {
-            state.run.state = Applicants.RUN_STATE.STOPPED;
-            break;
-          }
-          if (error?.hidden) {
-            // A hidden page is a PAUSE. Left unprocessed and unsaved, so this
-            // row is done properly once the page is renderable again — with the
-            // same bound the full run applies, because a disclosure or a viewer
-            // that reliably hides the tab would otherwise re-run one applicant
-            // for as long as the tab is left alone.
-            state.run.lastError = error.message;
-            const resumed = await waitForVisibleAgain();
-            if (!resumed) {
-              state.run.state = Applicants.RUN_STATE.STOPPED;
-              break;
-            }
-            showPageNotice("Profile Vault resumed — continuing where it left off.");
-            beginRun();
-            hiddenRetries = key === retryingKey ? hiddenRetries + 1 : 1;
-            retryingKey = key;
-            if (hiddenRetries > MAX_HIDDEN_RETRIES) {
-              processed.add(key);
-              state.run.failed += 1;
-              state.run.lastError =
-                `The page kept going hidden while reading ${fromRow.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
-              state.run.index = processed.size;
-            }
-            continue;
-          }
-          // The panel was showing somebody else. The record was refused rather
-          // than written under the wrong person's name — which is the whole
-          // point — and the row is left for the next turn to open again, so it
-          // is neither lost nor saved wrongly.
-          if (error?.wrongApplicant) {
-            wrongApplicantRetries = key === wrongApplicantKey ? wrongApplicantRetries + 1 : 1;
-            wrongApplicantKey = key;
-            if (wrongApplicantRetries > MAX_WRONG_APPLICANT_RETRIES) {
-              // Re-opened enough. Recorded as failed rather than saved under
-              // whoever the panel insisted on showing, and the walk moves on.
-              processed.add(key);
-              state.run.failed += 1;
-              state.run.lastError =
-                `The panel kept showing somebody else when ${fromRow.applicant.name} was opened; `
-                + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
-              state.run.index = processed.size;
-              await wait(LIST_PROFILE_PACE_MS);
-              continue;
-            }
-            state.run.lastError = `${error.message} ${fromRow.applicant.name} will be opened again.`;
-            state.run.updatedAt = new Date().toISOString();
-            await wait(LIST_PROFILE_PACE_MS);
-            continue;
-          }
-          // A panel that would not open, would not scroll, or would not parse.
-          // The NAME came from the list row and is unaffected, so it is still
-          // saved below — losing a person from the list because their panel
-          // misbehaved would defeat the one thing this pass is for.
-          opened = false;
-          state.run.lastError = error instanceof Error ? error.message : String(error);
-        }
-        if (!opened && !state.run.lastError) {
-          state.run.lastError =
-            `Could not open ${fromRow.applicant.name}'s profile; the name from their list row was still saved.`;
-        }
-
-        // `extractApplicant` has already saved whatever the panel gave it. This
-        // is the FLOOR, and only when it is needed: a row that never opened, or
-        // a panel that resolved no name, would otherwise leave the column the
-        // export is read by empty.
-        //
-        // Safe because both halves of the store are merge-only:
-        // `saveApplicant` reconciles on job + applicationId so this lands on the
-        // record just written rather than beside it, and `mergeApplicantRecord`
-        // never overwrites a filled field with a blank — so a name-only record
-        // can only ever fill the gap, never flatten the details.
-        const named = cleanText(record?.applicant?.name);
-        try {
-          if (!named) await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
-          results.push(record || fromRow);
-          state.run.collected += 1;
-          // Added to the index as well as to the store, so a virtualized list
-          // that renders the same row twice in one pass is not walked twice.
-          if (rowId) collected.applications.add(rowId.toLowerCase());
-        } catch (error) {
-          state.run.failed += 1;
-          state.run.lastError = error instanceof Error ? error.message : String(error);
-        }
-        processed.add(key);
-        state.run.index = processed.size;
-        state.run.updatedAt = new Date().toISOString();
-        // A breath before the next one, and a Stop lands on the next row's
-        // `assertRunnable()` a moment later.
-        await wait(LIST_PROFILE_PACE_MS);
-        continue;
-      }
-
-      if (collected.has({ applicationId: rowId, name: row.name })) {
+      //
+      // Rule 12a and rule 13a inside the loop, not between items: a hidden
+      // tab renders nothing, so its rows are not worth reading, and a Stop
+      // must land within one row.
+      assertRunnable();
+      // The row's own name, and the FLOOR for this applicant. The panel scan
+      // below is what fills the other columns, but a panel that resolves no
+      // name would otherwise leave the column the whole export is read by
+      // empty while the row plainly rendered it.
+      const fromRow = Applicants.buildApplicantListRecord({
+        name: row.name,
+        href: row.href,
+        job: listJob,
+        context: Applicants.parseHiringContext(location.href),
+        sourceUrl: location.href,
+        buildId: BUILD_ID
+      });
+      // Not a person. The applicant list renders links that are not rows —
+      // the live one is **"Edit qualifications"**, in the list's own header
+      // ("Here are all applicants to your job. Edit qualifications"), and its
+      // href carries the same `applicationId` the page is on, so nothing about
+      // the link tells it apart from the open applicant's row. The text does,
+      // and `isApplicantNameCandidate` already refused this exact phrase for
+      // the panel path a release earlier. Skipped, never saved: a record with
+      // a wrong name in the column the export is read by is worse than no
+      // record (rule 6).
+      if (!fromRow) {
         processed.add(key);
         state.run.skipped += 1;
-        state.run.alreadyCollected += 1;
+        state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
         state.run.index = processed.size;
         state.run.updatedAt = new Date().toISOString();
         continue;
       }
-
-      state.run.currentName = row.name;
+      state.run.currentName = fromRow.applicant.name;
       state.run.updatedAt = new Date().toISOString();
+
+      // Open them, let the panel load, walk it to the bottom, take what it
+      // rendered — name, current role, current company, total experience and
+      // education — then disclose their contact details and save their resume
+      // under their own name. `extractApplicant` saves the record it builds,
+      // so nothing here re-sends it.
+      let opened = true;
+      let record = null;
       try {
-        // Opened unless the panel is ALREADY showing this row. The old test was
-        // `index > 0`, which assumed the open panel was row zero — true only
-        // when the recruiter had not opened anybody else first, and meaningless
-        // once positions stopped being the walk's vocabulary. Comparing the
-        // address bar's `applicationId` to the row's own asks the real question,
-        // and it costs no extra click: `selectApplicantRow` is the same single
-        // gated control (rule 9g), simply not pressed when it would be a no-op.
-        const openId = Applicants.parseHiringContext(location.href).applicationId || "";
-        if (!rowId || rowId !== openId) {
-          const opened = await selectApplicantRow(row);
-          // A row that never brought its applicant up is a skip, not a record:
-          // scanning anyway would save the previous applicant's panel a second
-          // time under this row's identity.
-          if (!opened) {
-            processed.add(key);
-            state.run.skipped += 1;
-            state.run.lastError = `Could not open ${row.name || "the next applicant"}.`;
-            state.run.index = processed.size;
-            continue;
-          }
-        }
-        // The row's own id travels with the request here too: the full run has
-        // exactly the same exposure, and a record saved under the wrong
-        // applicant's name is the same defect whichever command produced it.
-        const { record } = await extractApplicant({ ...options, expectApplicationId: rowId });
-        results.push(record);
-        processed.add(key);
-        state.run.collected += 1;
-        // Added to the index as well as to the store, so a virtualized list
-        // that renders the same row twice in one pass is not collected twice.
-        if (rowId) collected.applications.add(rowId.toLowerCase());
+        const outcome = await collectVisibleApplicant(row, rowId);
+        opened = outcome.opened;
+        record = outcome.record;
       } catch (error) {
         if (error?.stopped) {
           state.run.state = Applicants.RUN_STATE.STOPPED;
           break;
         }
-        if (error?.wrongApplicant) {
-          // Refused rather than saved under whoever the panel was showing, and
-          // bounded so one unresolvable row cannot hold the rest of the job.
-          wrongApplicantRetries = key === wrongApplicantKey ? wrongApplicantRetries + 1 : 1;
-          wrongApplicantKey = key;
-          state.run.lastError = error.message;
-          if (wrongApplicantRetries > MAX_WRONG_APPLICANT_RETRIES) {
-            processed.add(key);
-            state.run.failed += 1;
-            state.run.lastError =
-              `The panel kept showing somebody else when ${row.name || "this applicant"} was opened; `
-              + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
-            state.run.index = processed.size;
-          }
-          continue;
-        }
         if (error?.hidden) {
-          // A hidden page is a PAUSE, not the end of the run. It used to break
-          // out of this loop, so the moment anything took the tab away — a
-          // resume opening in a new tab, the recruiter glancing at another tab —
-          // the run was dead and stayed dead after they came back, which is what
-          // "it gets stuck until I close the tab myself" actually was.
+          // A hidden page is a PAUSE. Left unprocessed and unsaved, so this
+          // row is done properly once the page is renderable again — and
+          // bounded, because a disclosure or a viewer that reliably hides the
+          // tab would otherwise re-run one applicant for as long as the tab is
+          // left alone.
           state.run.lastError = error.message;
           const resumed = await waitForVisibleAgain();
           if (!resumed) {
             state.run.state = Applicants.RUN_STATE.STOPPED;
             break;
           }
-          // Said out loud, on the page. A run continuing after a pause the
-          // recruiter caused by looking at another tab is indistinguishable
-          // from a dead one until something says otherwise.
           showPageNotice("Profile Vault resumed — continuing where it left off.");
-          // The latch cleared, and the row left unprocessed so it is picked
-          // again — nothing partial was saved, so re-reading it is correct.
           beginRun();
           hiddenRetries = key === retryingKey ? hiddenRetries + 1 : 1;
           retryingKey = key;
           if (hiddenRetries > MAX_HIDDEN_RETRIES) {
-            // Retried enough. Whatever hides the page on this applicant is
-            // reproducible, so repeating it is not a pause any more — it is the
-            // loop the recruiter watches one profile spin in. Recorded as a
-            // failure, which is honest and invents nothing (rule 6), and the
-            // walk moves on to somebody it can read.
             processed.add(key);
             state.run.failed += 1;
             state.run.lastError =
-              `The page kept going hidden while reading ${row.name || "this applicant"}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
+              `The page kept going hidden while reading ${fromRow.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
             state.run.index = processed.size;
           }
           continue;
         }
-        processed.add(key);
+        // The panel was showing somebody else. The record was refused rather
+        // than written under the wrong person's name — which is the whole
+        // point — and the row is left for the next turn to open again, so it
+        // is neither lost nor saved wrongly.
+        if (error?.wrongApplicant) {
+          wrongApplicantRetries = key === wrongApplicantKey ? wrongApplicantRetries + 1 : 1;
+          wrongApplicantKey = key;
+          if (wrongApplicantRetries > MAX_WRONG_APPLICANT_RETRIES) {
+            // Re-opened enough. Recorded as failed rather than saved under
+            // whoever the panel insisted on showing, and the walk moves on.
+            processed.add(key);
+            state.run.failed += 1;
+            state.run.lastError =
+              `The panel kept showing somebody else when ${fromRow.applicant.name} was opened; `
+              + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
+            state.run.index = processed.size;
+            await wait(LIST_PROFILE_PACE_MS);
+            continue;
+          }
+          state.run.lastError = `${error.message} ${fromRow.applicant.name} will be opened again.`;
+          state.run.updatedAt = new Date().toISOString();
+          await wait(LIST_PROFILE_PACE_MS);
+          continue;
+        }
+        // A panel that would not open, would not scroll, or would not parse.
+        // The NAME came from the list row and is unaffected, so it is still
+        // saved below — losing a person from the list because their panel
+        // misbehaved would defeat the one thing this pass is for.
+        opened = false;
+        state.run.lastError = error instanceof Error ? error.message : String(error);
+      }
+      if (!opened && !state.run.lastError) {
+        state.run.lastError =
+          `Could not open ${fromRow.applicant.name}'s profile; the name from their list row was still saved.`;
+      }
+
+      // `extractApplicant` has already saved whatever the panel gave it. This
+      // is the FLOOR, and only when it is needed: a row that never opened, or
+      // a panel that resolved no name, would otherwise leave the column the
+      // export is read by empty.
+      //
+      // Safe because both halves of the store are merge-only:
+      // `saveApplicant` reconciles on job + applicationId so this lands on the
+      // record just written rather than beside it, and `mergeApplicantRecord`
+      // never overwrites a filled field with a blank — so a name-only record
+      // can only ever fill the gap, never flatten the details.
+      const named = cleanText(record?.applicant?.name);
+      try {
+        if (!named) await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
+        results.push(record || fromRow);
+        state.run.collected += 1;
+        // Added to the index as well as to the store, so a virtualized list
+        // that renders the same row twice in one pass is not walked twice.
+        if (rowId) collected.applications.add(rowId.toLowerCase());
+      } catch (error) {
         state.run.failed += 1;
         state.run.lastError = error instanceof Error ? error.message : String(error);
       }
+      processed.add(key);
       state.run.index = processed.size;
+      state.run.updatedAt = new Date().toISOString();
+      // A breath before the next one, and a Stop lands on the next row's
+      // `assertRunnable()` a moment later.
+      await wait(LIST_PROFILE_PACE_MS);
     }
 
     if (state.run.state === Applicants.RUN_STATE.RUNNING) state.run.state = Applicants.RUN_STATE.COMPLETED;
@@ -5213,7 +5113,7 @@
         console.info(
           "[Profile Vault] not continuing this job again: "
           + `${state.autoRun.fruitlessReturns} attempt(s) collected nobody new. `
-          + "Press Collect Applicant List or Collect Every Applicant to run it again."
+          + "Press Collect Applicant List to run it again."
         );
       }
       return;
@@ -5456,7 +5356,7 @@
    * So a return to the tab records an arrival on the view that is already open.
    * Nothing about the guard rails changes, and that is what keeps this inside
    * "after a direct user action": the worker is still asked whether this job was
-   * armed by the recruiter's own Collect Every Applicant, a Stop still latches
+   * armed by the recruiter's own Collect Applicant List, a Stop still latches
    * `disabled` and refuses, and a run already in flight is left alone to
    * continue on its own.
    */
@@ -5475,7 +5375,7 @@
     // switch changes no address. But nothing else bounded it either: the worker
     // keeps a job armed for twelve hours and is never told a run finished, and
     // `state.running` is null the moment one does. So the ordinary way of using
-    // this extension — press Collect Every Applicant, switch to the Applicants
+    // this extension — press Collect Applicant List, switch to the Applicants
     // page to watch the rows arrive, switch back — restarted the entire walk
     // from the first row, every single time, for twelve hours. On 665 applicants
     // that is minutes of re-paging and re-opening rows per glance, and with
@@ -5492,14 +5392,14 @@
     // next glance, recording nothing, forever. A restart has to earn the next
     // one. A real arrival (an actual change of view) clears this, because that
     // is the recruiter navigating rather than the tab merely regaining focus,
-    // and Stop / Collect Every Applicant re-arm it outright.
+    // and Stop / Collect Applicant List re-arm it outright.
     if (key === state.autoRun.returnKey && state.autoRun.fruitlessReturns >= MAX_FRUITLESS_RETURNS) {
       if (!state.autoRun.quietedReturns) {
         state.autoRun.quietedReturns = true;
         console.info(
           "[Profile Vault] not restarting this job again on a tab switch: "
           + `${state.autoRun.fruitlessReturns} restart(s) collected nobody new. `
-          + "Press Collect Every Applicant to run it again."
+          + "Press Collect Applicant List to run it again."
         );
       }
       return;
