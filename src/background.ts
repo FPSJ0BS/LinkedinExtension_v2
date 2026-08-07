@@ -1710,11 +1710,8 @@ async function claimResumeName(stem: string, applicantKey: string): Promise<numb
  * a download that has not been given a filename yet within the budget falls back
  * to the requested one, which is still the truth in the overwhelming majority.
  */
-const PATH_POLLS = 10;
-
 async function downloadedFilePath(downloadId: number, requested: string): Promise<any> {
-  let interval = 25;
-  for (let attempt = 0; attempt < PATH_POLLS; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const [item] = (await chrome.downloads.search({ id: downloadId })) || [];
       // Interrupted is checked FIRST and reported as what it is. Through 3.7.6
@@ -1731,16 +1728,7 @@ async function downloadedFilePath(downloadId: number, requested: string): Promis
     } catch {
       return { path: requested, interrupted: false, reason: "" };
     }
-    // Escalating, and never after the last look. Chrome usually has the filename
-    // within a frame or two of accepting the download, and a flat 120 ms floor
-    // meant the common case waited ~5x longer than it needed to — awaited by the
-    // content script, so it was spent once per applicant, in front of the next
-    // one. The ceiling is unchanged in spirit: the same ~1.2 s budget, spent
-    // where the answer actually is rather than evenly.
-    if (attempt < PATH_POLLS - 1) {
-      await new Promise((resolve) => setTimeout(resolve, interval));
-      interval = Math.min(200, Math.round(interval * 1.6));
-    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
   }
   // Still in flight when the budget ran out. It was accepted and is downloading,
   // so the requested path is the truth in the overwhelming majority.

@@ -400,24 +400,8 @@
    * one. `timeoutMs` is never scaled — the caller's ceiling stays the ceiling.
    */
   const TEMPO = Object.freeze({ FAST: "fast", MEDIUM: "medium", SLOW: "slow" });
-  /**
-   * Never below this, however calm the page looks.
-   *
-   * It is a floor on the *scaled* window, so it also decides whether the `fast`
-   * tempo is worth anything at all. At 150 it was silently cancelling itself:
-   * the windows this file now passes are 200–260 ms, and 0.55 of those is
-   * 110–143 — all of it clamped straight back up to 150, so a demonstrably calm
-   * page paid the medium price anyway and only the `slow` direction ever did
-   * anything.
-   *
-   * 120 restores the fast band without weakening the floor into a formality,
-   * and it is deliberately not lower: at these window sizes the difference
-   * between a 120 ms floor and a 90 ms one is ten milliseconds on a single
-   * window. The speed in this task comes from the windows themselves and from
-   * deleting fixed sleeps that guarded polls — never from tuning this toward
-   * nothing, which is what its own test exists to prevent.
-   */
-  const MIN_QUIET_MS = 120;
+  /** Never below this, however calm the page looks. */
+  const MIN_QUIET_MS = 150;
   const TEMPO_SCALE = Object.freeze({ fast: 0.55, medium: 1, slow: 1.25 });
   /** How many recent waits decide the tempo. Short, so it follows the page. */
   const TEMPO_SAMPLES = 3;
@@ -468,20 +452,8 @@
    * The contract is unchanged — this still resolves only after the document has
    * been quiet for a whole window, or after `timeoutMs`. What is adaptive is how
    * long "a whole window" is on this page; see the tempo above.
-   *
-   * **`feedsTempo: false` is for a wait held over something that is not the
-   * page.** The tempo exists to answer "is this page keeping up", and it is
-   * asymmetric on purpose: a single `unsettled` sample drops the whole run to
-   * SLOW and keeps it there. That is right for a hiring page that will not
-   * settle, and it is flatly wrong for a **PDF viewer painting its own canvas**,
-   * which mutates continuously by design and therefore times out every wait held
-   * over it. One opened resume was enough to convict the page: every later
-   * applicant then paid a 1.25x quiet window and the `slow` pace band, for the
-   * rest of the job, on evidence produced entirely by this extension's own
-   * overlay. Such a wait is still *sized* by the tempo — it is still happening on
-   * this machine — it simply does not get to *vote* on it.
    */
-  function waitForDomQuiet(quietMs = 300, timeoutMs = 2500, { feedsTempo = true } = {}) {
+  function waitForDomQuiet(quietMs = 300, timeoutMs = 2500) {
     const window_ = quietWindow(quietMs);
     tempo.waits += 1;
     tempo.savedMs += quietMs - window_;
@@ -499,7 +471,7 @@
         observer.disconnect();
         clearTimeout(quietTimer);
         clearTimeout(timeoutTimer);
-        if (feedsTempo) recordTempo(sample);
+        recordTempo(sample);
         resolve();
       };
       const observer = new MutationObserver(() => {
@@ -2037,29 +2009,6 @@
    * It is bounded, and it never counts as one of rule 9's opens: a dismiss is
    * the shared close, not a new control.
    */
-  /** How often a dismissed overlay is looked at. A modal closes within a frame. */
-  const OVERLAY_CLOSE_POLL_MS = 40;
-
-  /**
-   * True once the overlay is off the page — noticed when it happens, not a fixed
-   * time afterwards.
-   *
-   * Both dismiss steps below used to `wait(250)` and only **then** look, twice per
-   * attempt, on every single applicant whose resume viewer was opened. An artdeco
-   * modal is gone within a frame or two of the Escape, so almost all of that was
-   * spent watching an overlay that had already closed. The budget is unchanged —
-   * a modal that genuinely refuses still gets its full 250 ms before the next
-   * tactic is tried — and so is the verdict, which is still "is it on the page".
-   */
-  async function overlayClosed(overlay, budgetMs = 250) {
-    const gone = () => !overlay || !document.contains(overlay) || !isVisible(overlay);
-    for (let waited = 0; waited < budgetMs; waited += OVERLAY_CLOSE_POLL_MS) {
-      await wait(Math.min(OVERLAY_CLOSE_POLL_MS, budgetMs - waited));
-      if (gone()) return true;
-    }
-    return gone();
-  }
-
   async function closeOpenedOverlay(overlay) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (!overlay || !document.contains(overlay) || !isVisible(overlay)) return true;
@@ -2072,7 +2021,8 @@
           }
         }
       }
-      if (await overlayClosed(overlay)) return true;
+      await wait(250);
+      if (!document.contains(overlay) || !isVisible(overlay)) return true;
 
       // Inside the overlay first, then its own modal wrapper — the close button
       // of an artdeco modal lives beside the content, not within it.
@@ -2089,7 +2039,7 @@
           } catch {
             continue;
           }
-          await overlayClosed(overlay);
+          await wait(250);
           break;
         }
         if (dismissed) break;
@@ -2554,10 +2504,7 @@
         const position = currentScrollTop(target);
         if (position >= max - 8) break;
         scrollPanelTo(position + Math.max(400, target.clientHeight * 0.8), target);
-        // Held over the viewer's own canvas, so it never votes on the page's
-        // tempo — see `waitForDomQuiet`. A PDF painting itself is not a hiring
-        // page struggling, and reading it as one slowed every later applicant.
-        await waitForDomQuiet(90, 320, { feedsTempo: false });
+        await waitForDomQuiet(120, 500);
       }
     } finally {
       // Handed back where it was, on the failure path as well.
@@ -2674,20 +2621,9 @@
       diagnostics.resume.downloadControl = `click-failed:${error?.message || error}`;
       return false;
     }
-    // A beat for the click to become a network request, and deliberately no more.
-    //
-    // This was `waitForDomQuiet(150, 900)`, and the one page it ever runs against
-    // is a viewer painting a PDF — which mutates continuously, so the DOM never
-    // fell quiet and it cost the **full 900 ms every time**, then reported
-    // `unsettled` and dropped the whole run to the slow tempo on the strength of
-    // it. Neither was buying anything, because **the request is not read here**:
-    // it is read by the `waitFor` at the end of the viewer block, a poll over
-    // `RESUME_DOCUMENT_TIMEOUT_MS` that catches the entry the instant
-    // `watchResumeRequests` delivers it. A fixed sleep in front of a
-    // poll-until-true is pure latency — being early costs one poll interval, not
-    // a file. What is still needed is that the click gets its own turn of the
-    // event loop before anything downstream concludes there is no document.
-    await waitForDomQuiet(60, 250, { feedsTempo: false });
+    // The file is fetched over the network. Without this wait the request has
+    // not been made yet when the entry log is read, and the click buys nothing.
+    await waitForDomQuiet(150, 900);
     return true;
   }
 
@@ -3207,7 +3143,7 @@
         const settled = pass + 1 >= REVEAL_MIN_PASSES;
         if (settled && position >= max - Applicants.COLUMN_SCROLL_EPSILON && quiet >= 1) break;
         region.scrollTop = Math.min(max, position + Math.max(400, region.clientHeight * 0.85));
-        await waitForDomQuiet(200, 2200);
+        await waitForDomQuiet(300, 2200);
         added += snapshotPanel(livePanel(null), accumulator, diagnostics);
         const grown = cleanText(region.innerText || "").length;
         quiet = grown > seen ? 0 : quiet + 1;
@@ -3264,7 +3200,7 @@
       // Nothing at all on the first look is the case above: wait for the panel
       // to settle and ask once more before concluding there is no region.
       if (!regions.length && round === 0) {
-        await waitForDomQuiet(260, 2600);
+        await waitForDomQuiet(400, 2600);
         regions = scrollableRegions(livePanel(panel) || document.body);
       }
 
@@ -3385,7 +3321,7 @@
         record.toTail += 1;
         reachedTail = true;
       }
-      await waitForDomQuiet(200, 2400);
+      await waitForDomQuiet(320, 2400);
 
       // Did this pass move the COLUMN? Same panel-relative measure as `before`,
       // so it stays blind to which container inside the panel did the scrolling —
@@ -3452,7 +3388,7 @@
 
     try {
       scrollPanelTo(0, target);
-      await waitForDomQuiet(260, 2600);
+      await waitForDomQuiet(400, 2600);
       // Re-chosen once the column has content in it. Before the first paint the
       // panel can have no overflow at all, and a target picked from that state
       // is the page — which is precisely the container that does not move the
@@ -3481,7 +3417,7 @@
         }
         assertRunnable();
         scrollPanelTo(scan.position, target);
-        await waitForDomQuiet(200, 2400);
+        await waitForDomQuiet(320, 2400);
         // The column is re-resolved on every step, because a re-mounted panel
         // answers with the text it held when it was detached.
         live = livePanel(live);
@@ -3526,7 +3462,7 @@
 
       // A final read from the top, once everything below has hydrated.
       scrollPanelTo(0, target);
-      await waitForDomQuiet(200, 1600);
+      await waitForDomQuiet(300, 1600);
       live = livePanel(live);
       snapshotPanel(live, accumulator, diagnostics);
     } finally {
@@ -3769,24 +3705,8 @@
   // row of the list. Never parallel, never a tab per applicant, and the stop
   // flag is checked before every single row.
 
-  /**
-   * Long enough for LinkedIn to unmount the old column; not a failure if it
-   * never does.
-   *
-   * **Which is the common case, and it was being paid in full every time.** The
-   * predicate is "the old panel is gone", and on a surface that frequently swaps
-   * the column *in place* it simply never becomes true — so `waitFor` returned
-   * only at its deadline, once per applicant, having learned nothing. It is
-   * explicitly best-effort: a null result is fine and the caller proceeds
-   * regardless.
-   *
-   * Shortening it cannot let the previous applicant be mistaken for this one,
-   * because that is not what stops it — `describePanelArrival` answers PREVIOUS
-   * against `state.lastPanelIdentity` and the arrival wait keeps waiting, and
-   * `assertExpectedApplicant` refuses the record three times over besides. This
-   * wait only ever bought a head start on a teardown that has already happened.
-   */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 400;
+  /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
+  const PANEL_TEARDOWN_TIMEOUT_MS = 900;
   /**
    * How long the applicant that was asked for is given to mount.
    *
@@ -4029,7 +3949,7 @@
         else nudgeListToLastRow();
         // LinkedIn fetches the next slice over the network; this wait is what
         // stops a slow response reading as "the list has ended".
-        await waitForDomQuiet(240, 2800);
+        await waitForDomQuiet(380, 2800);
 
         // Growth means ROWS NOT SEEN BEFORE, never a scroll that happened and
         // never a bigger number — the same rule that keeps connections
@@ -4241,31 +4161,11 @@
       walk.stoppedBy = "no-list";
       return false;
     }
-    // Already on screen? Then this call costs nothing at all — no scroll, no wait.
-    //
-    // A `wanted` caller is the per-applicant one: "the run is owed a row that was
-    // not mounted last time it looked". It used to scroll to the TOP and wait a
-    // full quiet window **before its first look**, which on a virtualized list is
-    // counter-productive as well as slow — going to the top unmounts the very
-    // neighbourhood the owed row lives in, so the walk then has to come back down
-    // for a row that may have been mounted all along. Asking first is free, and a
-    // list that answers yes is exactly the "it is already rendered" case.
-    //
-    // The page-settling callers pass no `wanted` at all and are deliberately
-    // untouched: they still start at the top, every time. That is what page
-    // membership and the pager gate (rule 9h, 3.7.12) both rest on, and it is
-    // never what this early return skips.
-    if (typeof wanted === "function" && wanted()) {
-      roster.add(applicantRows());
-      walk.rows = Math.max(walk.rows, roster.size);
-      return true;
-    }
-
     // The top, because the rows this is here to find are the ones above wherever
     // the list happens to be sitting. A run resumed on a half-scrolled list, or
     // one LinkedIn scrolled to the open applicant, has them all behind it.
     scrollPanelTo(0, chooseScrollTarget(list));
-    await waitForDomQuiet(200, 2000);
+    await waitForDomQuiet(320, 2000);
 
     let quiet = 0;
     for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
@@ -4300,7 +4200,7 @@
         // would start the page at its last row and then need a sweep back up
         // for every row above it: correct, but the slow way round.
         scrollPanelTo(0, chooseScrollTarget((await waitForApplicantList()) || live));
-        await waitForDomQuiet(200, 2000);
+        await waitForDomQuiet(320, 2000);
         roster.add(applicantRows());
         return true;
       }
@@ -4310,7 +4210,7 @@
       // the one that scrolls. Dragging the last row into view settles it without
       // needing to know which.
       else nudgeListToLastRow();
-      await waitForDomQuiet(240, 2800);
+      await waitForDomQuiet(380, 2800);
     }
     return false;
   }
@@ -4421,7 +4321,7 @@
       }
       // LinkedIn fetches the next slice over the network; this wait is what
       // stops a slow response reading as "the list has ended".
-      await waitForDomQuiet(240, 2800);
+      await waitForDomQuiet(380, 2800);
       walk.passes += 1;
       if (wanted()) {
         walk.rows = applicantRows().length;
@@ -4596,26 +4496,16 @@
    * since 3.3 for the same reason. Small, because the walk below is already the
    * bulk of the time.
    */
-  const LIST_PROFILE_PACE_MS = 560;
+  const LIST_PROFILE_PACE_MS = 900;
   /**
    * The breath, taken at the page's own tempo and never the same length twice.
    *
-   * `LIST_PROFILE_PACE_MS` stays the anchor and the medium band averages it, so
-   * the tempo still only moves this either side of one documented number. What
-   * changes with the tempo is the two ends: a page that has been demonstrably
-   * still for its last few waits has already proved it is keeping up and does
-   * not need the full breath, and one whose DOM never settles gets a *longer*
-   * one — which is the direction that matters, because that is a page under
-   * strain, and the slow band is deliberately the one left near where all three
-   * used to be.
-   *
-   * **The bands came down in 3.7.17**, on a direct report that the walk feels
-   * slow. This is the one wait on the surface that buys no information at all —
-   * it is politeness, not correctness — so it is sized against what it is for: a
-   * breath between panels on the recruiter's own session, on their own hiring
-   * page, doing what they are sitting there doing by hand anyway. Every band is
-   * still hundreds of milliseconds, still randomised, and still widens the
-   * moment the page shows any sign of strain.
+   * `LIST_PROFILE_PACE_MS` stays the anchor and the medium band still averages
+   * it, so a normally-loading page paces exactly as it did. What changes is the
+   * two ends: a page that has been demonstrably still for its last few waits has
+   * already proved it is keeping up and does not need the full breath, and one
+   * whose DOM never settles gets a *longer* one than the fixed value ever gave —
+   * which is the direction that matters, because that is a page under strain.
    *
    * Randomised within each band because a run that pauses for exactly 900 ms
    * between hundreds of panels is the one shape a human session never has. That
@@ -4623,9 +4513,9 @@
    * nothing here is faster than the fixed value's own lower neighbourhood.
    */
   const PACE_BOUNDS = Object.freeze({
-    fast: [400, 560],
-    medium: [440, 680],
-    slow: [700, 1050]
+    fast: [480, 760],
+    medium: [700, 1020],
+    slow: [900, 1300]
   });
 
   function profilePaceMs() {

@@ -1,0 +1,48 @@
+{
+  "schema": 2,
+  "id": "TASK-0129",
+  "name": "Rollback of TASK-0128 (Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true)",
+  "request": "Rollback of TASK-0128 (Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-07T11:39:32.788Z",
+  "completedAt": "2026-08-07T11:39:33.946Z",
+  "startCommit": "5e6c4520fde059e05ad9591338f2c9d8073c7979",
+  "commit": null,
+  "gitRef": "task/TASK-0129",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-07T11-39-32-528Z created and verified"
+  ],
+  "result": "Reversed TASK-0128 — Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true",
+  "target": {
+    "taskId": "TASK-0128",
+    "taskName": "Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true",
+    "commit": "5e6c4520fde059e05ad9591338f2c9d8073c7979"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-07T11-39-32-528Z",
+    "commit": "5e6c4520fde059e05ad9591338f2c9d8073c7979"
+  }
+}
