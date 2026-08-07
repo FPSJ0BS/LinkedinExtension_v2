@@ -112,6 +112,38 @@ const MAX_DISCOVERY_PASSES = 400;
  */
 const HANDOVER_PENDING_ROWS = 25;
 
+/**
+ * How far a pass that exists to FEED extraction is allowed to scroll.
+ *
+ * `HANDOVER_PENDING_ROWS` alone was not enough to make the run walk profile to
+ * profile, because it is only ever tested BETWEEN passes and a pass is up to
+ * `DISCOVERY_STEPS_PER_PASS` (120) steps. On a 19,000-connection account that is
+ * 120 screens of scrolling — many minutes, thousands of rows — before the first
+ * profile is opened, which is the whole complaint the interleave was meant to
+ * answer. So the two passes whose only job is "get me enough to keep going" ask
+ * for a short one: `runDiscovery` in handover mode, and `discoverNextPage()`,
+ * which is reached only when `autoDiscover` is on. `Discover Connections Only`
+ * passes no handover budget and keeps the full 120, because enumerating the
+ * whole list is the one thing that command is for.
+ *
+ * ⚠ A short pass can never be mistaken for the end of the list, and that is
+ * structural rather than careful: `planDiscoveryStep` returns
+ * `DONE / "step-budget"` with `exhausted: false`, the content script sets
+ * `atBottom = plan.exhausted`, and `applyDiscoveryPass` cannot settle without
+ * `pass.atBottom`. A budget stop therefore says "I stopped early", never "there
+ * is no more".
+ *
+ * ⚠ But it must stay comfortably above `DISCOVERY_QUIET_SCANS` (5), the in-pass
+ * count of quiet bottom reads needed before the list may be declared finished. A
+ * budget below it could never reach a real verdict at the bottom, so every pass
+ * would return `step-budget`, the drain loop would spend
+ * `MAX_FRUITLESS_DISCOVERY` on it and then finish the run anyway with
+ * `discoveryExhausted: true` — a false completion on a list that is not done.
+ * A bottom pass needs about seven steps at worst (two quiet reads, a pagination
+ * click that resets the count, then five more), so this is set well clear of it.
+ */
+const HANDOVER_PASS_STEPS = 12;
+
 let loopRunning = false;
 /** Newest diagnostics from each surface, for the downloadable JSON report. */
 const diagnostics: { discovery: any; profile: any } = { discovery: null, profile: null };
@@ -569,7 +601,13 @@ async function discoverNextPage(): Promise<{ added: number; challenge?: any; hid
 
   const result = await sendTabMessage(
     tabId,
-    { type: CONNECTION_MESSAGES.DISCOVER, options: { cursorY: discovery.cursorY, mode: "advance" } },
+    {
+      type: CONNECTION_MESSAGES.DISCOVER,
+      // Short on purpose: this is the top-up that keeps extraction fed, so it
+      // wants the next screenful of the list rather than the rest of it. A
+      // budget stop reports `exhausted: false`, so it can never end the run.
+      options: { cursorY: discovery.cursorY, mode: "advance", maxSteps: HANDOVER_PASS_STEPS }
+    },
     DISCOVERY_TIMEOUT_MS
   );
   if (!result?.ok) throw new Error(result?.error || "Connection discovery failed.");
@@ -601,6 +639,9 @@ async function discoverNextPage(): Promise<{ added: number; challenge?: any; hid
  * "handover"` and the caller hands over, leaving the rest of the list to the
  * drain loop. It is **off by default and zero for Discover Connections Only**,
  * which is the command whose whole purpose is to enumerate everything.
+ * It also shortens the pass itself to `HANDOVER_PASS_STEPS`, because the budget
+ * above is only ever tested between passes and a full pass is 120 steps — long
+ * enough on a large account that the first profile was still minutes away.
  * `discoveryExhausted` is untouched by it — an early return says "enough to
  * begin", never "that is the whole list", and that distinction is what keeps
  * `shouldContinueAutoDiscovery` topping the queue up afterwards.
@@ -632,7 +673,18 @@ async function runDiscovery(
 
     const result = await sendTabMessage(
       tabId,
-      { type: CONNECTION_MESSAGES.DISCOVER, options: { cursorY: discovery.cursorY, mode: "advance" } },
+      {
+        type: CONNECTION_MESSAGES.DISCOVER,
+        options: {
+          cursorY: discovery.cursorY,
+          mode: "advance",
+          // A handover pass exists to get extraction started, so it scrolls a
+          // short way and hands back. Enumerating the whole list is the other
+          // command's job, and it passes no handover budget, so it keeps the
+          // content script's own full `DISCOVERY_STEPS_PER_PASS`.
+          ...(handoverAtPending > 0 ? { maxSteps: HANDOVER_PASS_STEPS } : {})
+        }
+      },
       DISCOVERY_TIMEOUT_MS
     );
     passes += 1;

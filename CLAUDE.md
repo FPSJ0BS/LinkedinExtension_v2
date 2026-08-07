@@ -1436,7 +1436,8 @@ illegal move, which is what makes a service-worker wake-up idempotent instead of
    never reloaded. This happens *before* step 3, so the redirect is what the user sees.
 3. Check the LinkedIn session; open LinkedIn's own sign-in page and pause if signed out.
 4. Read the list, persisting every pass.
-5. Stop as soon as `HANDOVER_PENDING_ROWS` (25) are queued → `connections_complete`.
+5. Stop as soon as `HANDOVER_PENDING_ROWS` (25) are queued → `connections_complete`. The pass itself
+   is shortened to `HANDOVER_PASS_STEPS` (12), because that budget is only tested between passes.
 6. `Tabs.ensureProfileTab()` opens or reuses **one** profile collector tab in the same window.
 7. It is activated.
 8. `Tabs.navigateProfileTab()` sends **that same tab** to each queued profile in turn.
@@ -1474,6 +1475,26 @@ window leaves a long list and no profiles.
   400; the number only decides how little is enough to get started, and the pass that satisfies it was
   paid for either way. It is checked **after** the pass is persisted, so nothing handed over exists
   only in memory.
+- **A pass that exists to FEED extraction is short, and that is the other half of the interleave**
+  (3.7.20, `HANDOVER_PASS_STEPS` = 12). The row budget above is only ever tested *between* passes, and
+  a pass is `DISCOVERY_STEPS_PER_PASS` (120) steps — so on the 19,000-connection account this was
+  reported against, the first profile was still 120 screens of scrolling away and the run still looked
+  exactly like "enumerate the list first". Both passes whose only job is to keep the queue fed ask for
+  a short one: `runDiscovery` in handover mode, and `discoverNextPage()`, the drain loop's top-up,
+  which is reached only when `autoDiscover` is on. What the user sees is the walk they asked for —
+  open a profile, collect it, next, and scroll for more of the list only when the queue runs dry.
+  **`Discover Connections Only` passes no handover budget and keeps all 120**, because enumerating the
+  whole list is the one thing that command is for.
+  **A short pass can never be mistaken for the end of the list, structurally rather than carefully:**
+  `planDiscoveryStep` returns `DONE / "step-budget"` with `exhausted: false`, the content script sets
+  `atBottom = plan.exhausted`, and `applyDiscoveryPass` cannot settle without `pass.atBottom`. **But
+  it must stay clear of `DISCOVERY_QUIET_SCANS` (5)** — the in-pass quiet-bottom-read count needed
+  before the list may be declared finished. A budget below it could never reach a real verdict at the
+  bottom, so every pass would return `step-budget`, the drain loop would spend
+  `MAX_FRUITLESS_DISCOVERY` on it and then finish the run anyway with `discoveryExhausted: true` — a
+  false completion on a list that is not done. A bottom pass costs about seven steps at worst (two
+  quiet reads, a pagination click that resets the count, then five more), and a test asserts the
+  relationship rather than the number.
 - **An early return is "enough to begin", never "that is the whole list".** It does not touch
   `discoveryExhausted`, which is exactly what keeps the drain loop topping the queue up. Getting that
   wrong would make a part-read account look finished and stop the run thousands of connections early.
@@ -1488,7 +1509,9 @@ window leaves a long list and no profiles.
   same time" can mean here, and rule 12's two-tab limit is unchanged.
 
 Locked by *"Start Full Collection hands over to extraction as soon as there is a batch, and keeps
-discovering"* and *"an early handover is 'enough to begin', never 'that is the whole list'"*.
+discovering"*, *"an early handover is 'enough to begin', never 'that is the whole list'"*, *"a pass
+that exists to feed extraction scrolls a short way and hands back"* and *"a short pass says 'I stopped
+early', never 'there is no more'"*.
 
 `Find All Connections` (`PV_IMPORT_DISCOVER_ALL`) enumerates the whole list and saves it; it never
 extracts. `Start Profile Extraction` (`PV_IMPORT_START`) runs over what is already saved and sets

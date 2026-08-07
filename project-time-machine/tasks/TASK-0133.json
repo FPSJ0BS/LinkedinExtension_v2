@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0133",
+  "name": "The run walks profile to profile from the start, scrolling for more of the list only when the queue runs dry",
+  "request": "The run walks profile to profile from the start, scrolling for more of the list only when the queue runs dry",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T13:53:54.447Z",
+  "completedAt": "2026-08-07T13:57:53.717Z",
+  "startCommit": "b7e9b3373b802a651c4e8b235e2a445fa2e07175",
+  "gitRef": "task/TASK-0133",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-workflow.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 448 tests, validate)"
+  ],
+  "result": "3.7.19 built the handover but the run still enumerated the list first, for a one-line reason: HANDOVER_PENDING_ROWS is only ever tested BETWEEN passes and a pass is DISCOVERY_STEPS_PER_PASS (120) steps, so on a 19,000-connection account the first profile was still 120 screens of scrolling away. HANDOVER_PASS_STEPS (12) is the other half: the two passes whose only job is to keep extraction fed ask for a short one - runDiscovery in handover mode, and discoverNextPage(), the drain loop's top-up, reached only when autoDiscover is on. connections.js already accepted and clamped options.maxSteps and planDiscoveryStep already had a step-budget verdict, so this is a budget handed to machinery built for it. The result is the requested walk: the first profile opens within seconds, each is collected and the next opened, and the list is scrolled - lazy loading waited out, an allowlisted Load more / Next used when it stalls - only when the queue runs dry. Discover Connections Only passes no handover budget and keeps all 120, asserted. A short pass can never be read as the end of the list, structurally: planDiscoveryStep returns DONE/step-budget with exhausted:false, the content script sets atBottom = plan.exhausted, and applyDiscoveryPass cannot settle without pass.atBottom. The budget must stay clear of DISCOVERY_QUIET_SCANS (5) or a bottom pass could never reach a real verdict, every pass would return step-budget, and the drain loop would spend MAX_FRUITLESS_DISCOVERY and finish the run anyway with discoveryExhausted:true - a false completion on an unfinished list; the test asserts that relationship rather than the number. HANDOVER_PENDING_ROWS (25), the drain loop and its bounds, the state machine, the two-tab rule and the pacing are unchanged. Files: src/background.ts, tests/collector-workflow.test.js (two new tests), CLAUDE.md, CHANGELOG.md 3.7.20."
+}

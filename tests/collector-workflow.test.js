@@ -552,6 +552,59 @@ test("Start Full Collection hands over to extraction as soon as there is a batch
     "Discover Connections Only must still enumerate the whole list");
 });
 
+// The second half of the same report: handing over at 25 rows did not make the
+// run walk profile to profile, because the budget is only tested BETWEEN passes
+// and a pass is 120 steps. On a 19,000-connection account that is 120 screens of
+// scrolling before the first profile is ever opened.
+test("a pass that exists to feed extraction scrolls a short way and hands back", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  assert.match(worker, /const HANDOVER_PASS_STEPS = \d+;/,
+    "how far a feeding pass may scroll must be named");
+
+  // Both passes whose only job is to keep extraction fed ask for a short one.
+  const topUp = worker.slice(worker.indexOf("async function discoverNextPage"));
+  assert.match(topUp.slice(0, topUp.indexOf("\n}")), /maxSteps: HANDOVER_PASS_STEPS/,
+    "the top-up that refills the queue must ask for the next screenful, not the rest of the list");
+
+  const full = worker.slice(worker.indexOf("async function runDiscovery"));
+  const fullBody = full.slice(0, full.indexOf("\n/** Explain"));
+  assert.match(fullBody, /handoverAtPending > 0 \? \{ maxSteps: HANDOVER_PASS_STEPS \}/,
+    "and a handover pass must shorten itself, while a full enumeration keeps all 120 steps");
+});
+
+test("a short pass says 'I stopped early', never 'there is no more'", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // Structural, not careful: this is what makes shortening a pass safe at all.
+  const budgeted = Connections.planDiscoveryStep({
+    atBottom: true, grew: false, idleAtBottom: 9, paginationAvailable: false, steps: 12, maxSteps: 12
+  });
+  assert.equal(budgeted.action, Connections.DISCOVERY_ACTION.DONE);
+  assert.equal(budgeted.reason, "step-budget");
+  assert.equal(budgeted.exhausted, false,
+    "a pass that ran out of steps must never report the list as finished");
+
+  // The content script sets `atBottom = plan.exhausted`, and a pass that is not
+  // at the bottom can never settle — so a budget stop cannot end the run.
+  const session = Queue.applyDiscoveryPass(
+    { ...Queue.createSession(), discovery: { passesWithoutGrowth: 99 } },
+    { atBottom: false, paginationAvailable: false, cursorY: 4000 },
+    0,
+    "t"
+  );
+  assert.equal(session.exhausted, false,
+    "a pass that stopped on its budget must leave the list open");
+
+  // And the budget must stay clear of the in-pass quiet count, or a bottom pass
+  // could never reach a real verdict: every pass would return `step-budget`, the
+  // drain loop would spend MAX_FRUITLESS_DISCOVERY and finish the run anyway
+  // with discoveryExhausted: true — a false completion on a list that is not done.
+  const steps = Number(/const HANDOVER_PASS_STEPS = (\d+);/.exec(worker)[1]);
+  assert.ok(steps > Connections.DISCOVERY_QUIET_SCANS,
+    `a feeding pass (${steps}) must be able to reach the list end (${Connections.DISCOVERY_QUIET_SCANS} quiet reads)`);
+});
+
 test("an early handover is 'enough to begin', never 'that is the whole list'", () => {
   // The distinction the interleave rests on: handing over must not mark the list
   // exhausted, or the drain loop would treat a part-read account as finished and

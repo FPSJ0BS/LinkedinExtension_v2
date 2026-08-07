@@ -1,5 +1,51 @@
 # CHANGELOG.md
 
+## 3.7.20 — the walk starts at the first profile, and only scrolls for more when the queue runs dry
+
+The clarification to 3.7.19, and it names the behaviour rather than the mechanism: *"instead of
+collecting list only, the extension go to first profile then collect data then go to next profile
+then collect then next and continues, and click load more when needed and redirect on pages if
+needed."*
+
+3.7.19 built the handover and it was real, but it did not produce that walk, for a reason that is one
+line long: **`HANDOVER_PENDING_ROWS` is only ever tested BETWEEN passes, and a pass is
+`DISCOVERY_STEPS_PER_PASS` (120) steps.** On the 19,000-connection account this was reported against,
+the first pass scrolls 120 screens — many minutes, thousands of rows — before the check that hands
+over is reached at all. So the run still looked exactly like "enumerate the list first", which is the
+whole of what was being complained about.
+
+`HANDOVER_PASS_STEPS` (12) is the other half. The two passes whose only job is to keep extraction fed
+ask for a short one — `runDiscovery` in handover mode, and `discoverNextPage()`, the drain loop's
+top-up, which is reached only when `autoDiscover` is on. `connections.js` already accepted and clamped
+`options.maxSteps`, and `planDiscoveryStep` already had a `step-budget` verdict, so this is a budget
+passed to machinery that was built for it rather than new machinery.
+
+What the user sees is the walk they described: the first profile opens within seconds, each one is
+collected and the next opened, and the list is scrolled — with lazy loading waited out and an
+allowlisted `Load more` / `Next` used when it stalls — only when the queue runs dry. That last part is
+`discoverNextPage()` and has been there since 3.3; it just never got a turn early enough to matter.
+
+**`Discover Connections Only` passes no handover budget and keeps all 120 steps**, because enumerating
+the whole list is the one thing that command is for, and a test asserts it never takes the shortcut.
+
+**A short pass can never be mistaken for the end of the list, and that is structural rather than
+careful:** `planDiscoveryStep` returns `DONE / "step-budget"` with `exhausted: false`, the content
+script sets `atBottom = plan.exhausted`, and `applyDiscoveryPass` cannot settle without
+`pass.atBottom`. A budget stop therefore says "I stopped early", never "there is no more".
+
+**But the budget has to stay clear of `DISCOVERY_QUIET_SCANS` (5)**, the in-pass count of quiet bottom
+reads needed before the list may be declared finished — and this is the one way shortening a pass
+could have gone badly wrong. A budget below it could never reach a real verdict at the bottom, so
+every pass would return `step-budget`, the drain loop would spend `MAX_FRUITLESS_DISCOVERY` on it and
+then finish the run **anyway** with `discoveryExhausted: true`: a false completion on a list that is
+not done. A bottom pass costs about seven steps at worst (two quiet reads, a pagination click that
+resets the count, then five more), and the test asserts the *relationship*, not the number.
+
+Nothing else moved. `HANDOVER_PENDING_ROWS` (25), the drain loop, its bounds, the state machine, the
+two-tab rule and the pacing are all unchanged. Files: [src/background.ts](src/background.ts),
+[tests/collector-workflow.test.js](tests/collector-workflow.test.js) (two new tests),
+[CLAUDE.md](CLAUDE.md).
+
 ## 3.7.19 — the list and the profiles are collected together, not one after the other
 
 Requested outright against a **19,000-connection** account: *"instead of collecting the connection
