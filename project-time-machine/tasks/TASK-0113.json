@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0113",
+  "name": "A record may only be built from the applicant that was asked for",
+  "request": "A record may only be built from the applicant that was asked for",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T02:06:27.574Z",
+  "completedAt": "2026-08-07T02:14:53.315Z",
+  "startCommit": "d877b6e1cb32396c96edab6b62860b23cfdbfb6a",
+  "gitRef": "task/TASK-0113",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 428 tests, validate)"
+  ],
+  "result": "Reported with the recruiter's own table: three different people in the list (Komal Sharma, Neha Singh, Mahak Ayani) all stored as 'Komal Sharma', the one open when the run started. The chain, and the last link is the one that made it invisible. The row click routes the address bar at once, so each record was keyed to the RIGHT application - which is why there were three rows and not one - but the panel had not re-rendered, and selectApplicantRow waited only for panelIdentity() (applicationId|text.length|first 300 chars) to DIFFER from before the click, which the TEARDOWN alone satisfies. So the scan read the stale panel. findApplicantName then offered the correct name from the list row AND the stale panel's own name, and chooseApplicantName arbitrates with nameFromExplanations - LinkedIn's qualification prose - which on that panel says 'Komal Sharma has...' over and over. The wrong name therefore won as the CORROBORATED one, and addName latches a corroborated name against every later read (if existing && (nameCorroborated || !corroborated) return 'unchanged'). The name policy did exactly what it was designed to do; it was pointed at the wrong panel. Two layers of fix, because a wait is a race that can be lost. First, identity instead of text: Applicants.describePanelArrival() (pure, tested) returns torn-down / mounting / previous / other / arrived from the application id on the panel's own link, the member's /in/ slug, and at least PANEL_MIN_SECTIONS hydrated sections; mountedApplicantPanel() is the strict resolver that may answer null, which is what makes 'nothing is mounted' expressible; selectApplicantRow waits teardown then arrival then settles and asks again. Second, and this is what makes the failure impossible rather than unlikely: extractApplicant takes expectApplicationId, assertExpectedApplicant() re-checks it before the scan, after it and immediately before buildApplicantRecord, and a panel showing somebody else THROWS rather than saving (rule 6 - no record beats a wrong one). The record is also keyed to the applicant that was asked for rather than to a read of location.href taken when the scan began. Bounded by MAX_WRONG_APPLICANT_RETRIES so one unresolvable row cannot hold the job, and applied to BOTH commands since the full run has identical exposure. Rule 9g and the PERMANENT flow clause were amended first."
+}
