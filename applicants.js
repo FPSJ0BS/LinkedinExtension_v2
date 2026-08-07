@@ -4083,24 +4083,35 @@
    * stored applicant rather than the records themselves.
    */
   /**
-   * Who this job already has records for.
+   * Who this job already has a **usable** record for.
    *
-   * `listOnly` decides WHICH question is asked of the same payload, and the two
-   * are genuinely different. A full run asks "is this person **collected**",
-   * because a record with nothing substantive on it is a run that failed on them
-   * and must be tried again. A list pass asks "do I already **have** them",
-   * because every record it writes is name-only — so the collected test always
-   * answers no, and a resumed pass would re-walk the entire job.
+   * **One question, asked the same way by both commands.** The list pass used to
+   * ask its own — "do I already *have* them" — and that existed for exactly one
+   * reason: it wrote name-only records, which `isCollectedApplicant` correctly
+   * refuses to call collected, so a resumed pass would have re-walked the whole
+   * job. Once that pass started opening each applicant and writing a full record,
+   * the reason evaporated. What was left was actively harmful.
+   *
+   * **THE DEFECT IT CAUSED, reported directly: "even if I click the extension to
+   * start again it does not scroll the profile."** Anything that leaves a thin
+   * record behind — a panel that would not open, a scan the tab going to the
+   * background interrupted, a run that could not confirm who it was looking at —
+   * writes the row's own name as a floor, deliberately, so nobody is lost. A "do
+   * I have them" index counts every one of those as done. So the applicants a
+   * broken run failed on became precisely the ones the *next* run walked straight
+   * past, and no amount of pressing the button could reach them again.
+   * `isCollectedApplicant` is the test that tells them apart: it wants one
+   * substantive field, so a complete read is skipped and a thin one is tried
+   * again. `options.recollect` still asks for the whole list regardless.
    */
-  async function loadCollectedIndex(jobId, { listed = false } = {}) {
-    const build = listed ? Applicants.createListedIndex : Applicants.createCollectedIndex;
+  async function loadCollectedIndex(jobId) {
     try {
       const reply = await chrome.runtime.sendMessage({ type: "PV_APPLICANT_COLLECTED", jobId: jobId || "" });
-      return build(reply?.entries || [], { jobId: jobId || "" });
+      return Applicants.createCollectedIndex(reply?.entries || [], { jobId: jobId || "" });
     } catch {
       // The worker being unreachable must never mean "collect everything
       // again"; an empty index simply skips nobody.
-      return build([], { jobId: jobId || "" });
+      return Applicants.createCollectedIndex([], { jobId: jobId || "" });
     }
   }
 
@@ -4209,10 +4220,9 @@
     // walks past those rows without opening them; `recollect` is the way to ask
     // for the whole list again on purpose.
     const jobId = Applicants.parseHiringContext(location.href).jobId || "";
-    const listed = options.listOnly === true;
     const collected = options.recollect === true
       ? Applicants.createCollectedIndex([], { jobId })
-      : await loadCollectedIndex(jobId, { listed });
+      : await loadCollectedIndex(jobId);
     listDiagnostics.alreadyCollected = collected.size;
 
     // The job header, read ONCE for a list pass and attached to every row.
@@ -4476,11 +4486,12 @@
       // still the only path for the full collection — it is simply not called
       // here.
       //
-      // Rows this pass has already listed were retired in bulk above, against
-      // `createListedIndex` rather than `createCollectedIndex` — every record a
-      // list pass writes is name-only, which is deliberately *not* "collected",
-      // so the collected test always answers no and a resumed pass would walk
-      // the whole job again. `options.recollect` is how to ask for it anyway.
+      // Rows already **collected** were retired in bulk above — one substantive
+      // field, `isCollectedApplicant`, so an applicant this pass wrote a full
+      // record for is walked past while one left with nothing but a floor name
+      // is tried again. That distinction is the whole reason a run that failed
+      // on somebody can be fixed by pressing the button rather than only by
+      // `options.recollect`, which asks for the whole list regardless.
       if (options.listOnly === true) {
         // Rule 12a and rule 13a inside the loop, not between items: a hidden
         // tab renders nothing, so its rows are not worth reading, and a Stop

@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0118",
+  "name": "A record with nothing on it is a failed read, not an applicant already done",
+  "request": "A record with nothing on it is a failed read, not an applicant already done",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T03:02:37.143Z",
+  "completedAt": "2026-08-07T03:06:05.719Z",
+  "startCommit": "bcc2f5ef24bb1e43fc29713d355ada7cc26a6b44",
+  "gitRef": "task/TASK-0118",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "Reported: 'even if I click the extension to start again it does not scroll the profile.' The list pass built its skip index with createListedIndex - createCollectedIndex(..., anyRecord: true), 'do I already HAVE them' - which counts a record with nothing on it as done. Every path that fails on an applicant still writes the row's own name as a floor so nobody is lost, so the applicants a broken run FAILED on were exactly the ones the next run retired in bulk without opening, and no number of button presses could reach them. createListedIndex existed for one reason - that pass wrote name-only records - and that reason evaporated when it started opening each applicant and writing a full record. Removed, with the anyRecord flag and the { listed } parameter on loadCollectedIndex; both commands now ask isCollectedApplicant, which wants one substantive field, so a complete read is skipped and a thin one is tried again. The worker still sends every stored entry with the verdict beside it rather than filtering on it - the index applies the verdict, the worker only reports - so the payload is unchanged. The test that asserted the two indexes stay distinguishable is replaced by one asserting a floor-name record is never skipped, judged both from the worker's verdict and from the record itself."
+}

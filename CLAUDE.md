@@ -812,18 +812,23 @@ questions, and the second costs hours where the first costs a walk down the list
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.
 - **A listed applicant is not a collected one.** `isCollectedApplicant` needs one substantive field,
   so a later full run still opens these people rather than walking past them forever.
-- **Which "already have them" question is asked depends on the pass** (3.7.10). A full run asks
-  `createCollectedIndex` — "is this person **collected**" — because a record with nothing substantive
-  on it is a run that *failed* on them and must be tried again. A list pass asks
-  `createListedIndex` — "do I already **have** them" — because every record it writes is name-only,
-  so the collected test always answers no and a resumed pass would walk the whole job again. That
-  matters most once the pass opens each applicant: a row then costs tens of seconds, and since an
-  interrupted run continues itself, a pass that keeps being interrupted would walk the first page
-  over and over — the re-saves reading as progress, which is exactly what clears the
-  fruitless-return budget that would otherwise stop it. `PV_APPLICANT_COLLECTED` therefore sends
-  **every** stored entry with the verdict beside it rather than filtering on the verdict, because a
-  page filtering on `collected` can never tell "already listed" from "never seen".
-  `options.recollect` asks for the whole list again either way.
+- **One "already have them" question, asked the same way by both commands** (3.7.11). Both ask
+  `createCollectedIndex` — "is this person **collected**", meaning the record carries at least one
+  substantive field — and `createListedIndex`, the "do I already **have** them" variant the list pass
+  used to ask, is **gone**. It existed for exactly one reason: that pass wrote name-only records,
+  which `isCollectedApplicant` correctly refuses to call collected, so a resumed pass would have
+  re-walked the whole job. The moment it started opening each applicant and writing a full record the
+  reason evaporated, and what was left was actively harmful. **The defect it caused, reported
+  directly: *"even if I click the extension to start again it does not scroll the profile."*** Every
+  path that leaves a thin record behind — a panel that would not open, a scan the tab going to the
+  background interrupted, a run that could not confirm who it was looking at — writes the row's own
+  name as a floor, deliberately, so nobody is lost. A have-them index counts every one of those as
+  done, so the applicants a broken run **failed** on became precisely the ones the next run walked
+  straight past, and no number of button presses could reach them again. One substantive field is the
+  test that tells a complete read from a failed one. `PV_APPLICANT_COLLECTED` still sends **every**
+  stored entry with the verdict beside it rather than filtering on it — the index applies the verdict,
+  the worker only reports — so nothing about the payload changed. `options.recollect` asks for the
+  whole list again regardless.
 - **Two earlier changes are what make running it first safe**, and neither is incidental:
   `saveApplicant` reconciles on `job.id + applicationId` (rule 14, v6) so the later full pass enriches
   *this* record instead of creating a second one under a different hash, and `mergeApplicantRecord`

@@ -2000,14 +2000,13 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     // message channel to answer one question per row.
     //
     // **Every stored record, and the verdict beside it — never only the
-    // collected ones.** Dropping the rest here made the payload answer exactly
-    // one question, and the list pass has to ask a different one: it writes
-    // name-only records, which are deliberately *not* `collected`, so a page
-    // filtering on that flag can never tell "I already listed this person" from
-    // "I have never seen them". `createCollectedIndex` still consults the flag
-    // and is unchanged; `createListedIndex` ignores it. The extra entries cost
-    // three small fields each — a job with 665 listed applicants is tens of
-    // kilobytes, which is the same order as the answer it already sent.
+    // collected ones.** The index applies the verdict; the worker only reports
+    // it. Filtering here would make the payload answer exactly one question and
+    // leave the page unable to tell "I have a thin record for this person" from
+    // "I have never seen them" — and the difference between those two decides
+    // whether a run that failed on somebody can ever reach them again. The extra
+    // entries cost three small fields each: a job with 665 applicants is tens of
+    // kilobytes, the same order as the answer it already sent.
     const applicants = await getAllApplicants();
     const wanted = String(message?.jobId || "").trim();
     return {

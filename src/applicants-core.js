@@ -1950,14 +1950,13 @@
    * collected}` entry the worker sends over the message channel, so the same
    * policy serves both without a second copy of the "is it collected" rule.
    */
-  function createCollectedIndex(records = [], { jobId = "", anyRecord = false } = {}) {
+  function createCollectedIndex(records = [], { jobId = "" } = {}) {
     const applications = new Set();
     const names = new Set();
     const wantedJob = cleanText(jobId).toLowerCase();
 
     for (const record of records || []) {
-      const judged = anyRecord
-        || (typeof record?.collected === "boolean" ? record.collected : isCollectedApplicant(record));
+      const judged = typeof record?.collected === "boolean" ? record.collected : isCollectedApplicant(record);
       if (!judged) continue;
       const recordJob = cleanText(record?.job?.id ?? record?.jobId ?? "").toLowerCase();
       if (wantedJob && recordJob && recordJob !== wantedJob) continue;
@@ -1982,32 +1981,6 @@
         return Boolean(value) && names.has(value);
       }
     };
-  }
-
-  /**
-   * Everyone this job has a record for **at all** — collected or merely listed.
-   *
-   * A different question from `createCollectedIndex`, and the two must not be
-   * conflated. "Collected" deliberately means *carries something substantive*,
-   * so a name-only row reads as **not** collected and a full run still opens
-   * that person — which is exactly right, and is what makes running the list
-   * pass first safe.
-   *
-   * It is the wrong question for the list pass itself. Once that pass opens each
-   * applicant and walks their panel to the bottom, a row costs tens of seconds
-   * rather than a millisecond, and *every* record it writes is name-only. Asking
-   * "is this one collected" therefore always answers no, so a resumed pass
-   * re-walks the whole job from the first row — and, because an interrupted run
-   * now continues itself, a pass that keeps getting interrupted would walk the
-   * first page over and over without ever reaching the second. The re-saves look
-   * like progress, which is precisely what clears the fruitless-return budget
-   * that would otherwise stop it.
-   *
-   * So the list pass asks whether it already *has* this person, and
-   * `options.recollect` is how the recruiter asks for the whole list again.
-   */
-  function createListedIndex(records = [], { jobId = "" } = {}) {
-    return createCollectedIndex(records, { jobId, anyRecord: true });
   }
 
   /**
@@ -2231,7 +2204,7 @@
     applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
-    RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex, createListedIndex,
+    RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
