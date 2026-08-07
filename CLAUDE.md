@@ -1352,6 +1352,29 @@ starts work when it *won* the transition — that is what makes a service-worker
 instead of a second discovery or a second extractor. `ready_to_extract → extracting` is a legal move,
 so the automatic workflow never needs a Stop/Start detour. A terminal state is left only via `idle`.
 
+**And a direct command is what takes that move, since 3.7.18 — `beginConnectionsRun()`.** Both
+connections workflows used to open on a bare
+`if (!(await moveCollectionTo(OPENING_CONNECTIONS))) return;`, which is a **silent** return, so from
+the first time a run reached `completed`, `completed_with_gap`, `stopped` or `failed`, **both
+`Start Full Collection` and `Discover Connections Only` were permanent no-ops** — while the command
+branch had already replied `started: true` and the page said "Collecting…". Reported as *"nothing is
+happening"*, and the only escape was `Clear Queue`, which discards the discovered list to unstick a
+state machine. Pressing one of those buttons **is** the "explicitly starting over" this rule names,
+so a terminal state is reset to `idle` first and then the wanted transition is taken. Scoped to
+terminal states on purpose: nothing is in flight in one, every other state keeps refusing, and that
+refusal is exactly what keeps a wake-up idempotent. Provable here because both workflows are reached
+from their command branches and nowhere else — never the heartbeat, the alarm or the drain loop. It
+resets a *state*, never data: the queue, the discovered list and the saved profiles are untouched.
+**A refusal is never silent again** — `lastError` names the state that refused. Locked by *"a
+finished, stopped or failed run can be started again without clearing the queue"* and *"a connections
+command resets a terminal run and never refuses in silence"*.
+
+**Where to look when a connections command appears to do nothing:** **Download Diagnostics** carries
+`collectionState` and the last 40 state-machine moves as `transitions`, each with `changed` and a
+`reason` — a refused start reads verbatim as `refused:completed->opening_connections`. That log is
+in-memory, so it is empty after the service worker sleeps; `collectionState` is persisted and is the
+durable half.
+
 **Discovery must terminate.** Three separate bounds, all of which were missing and each of which
 alone produced an infinite run:
 - `grew` counts *new connections only* — never a pagination click.

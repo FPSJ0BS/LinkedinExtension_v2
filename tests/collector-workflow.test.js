@@ -444,6 +444,84 @@ test("manual discovery saves the list without starting any extraction", async ()
   assert.ok(!/Queue\.startSession/.test(commandBody), "the discover command must never start extraction");
 });
 
+// Reported as "nothing is happening": after the first run ended, BOTH connections
+// buttons were permanent no-ops. All four terminal states move to exactly one
+// place — idle — so `moveCollectionTo(OPENING_CONNECTIONS)` was refused, and both
+// workflows opened with a bare `if (!(await ...)) return`, a SILENT return. The
+// command branch had already replied `started: true` and the page said
+// "Collecting…". The only escape was Clear Queue, which throws away the whole
+// discovered list to unstick a state machine.
+test("a finished, stopped or failed run can be started again without clearing the queue", () => {
+  // The state machine's own rule, unchanged: a terminal state goes to idle and
+  // nowhere else. This is what made the bare guard a dead button.
+  for (const terminal of [
+    Queue.COLLECTION_STATE.COMPLETED,
+    Queue.COLLECTION_STATE.COMPLETED_WITH_GAP,
+    Queue.COLLECTION_STATE.STOPPED,
+    Queue.COLLECTION_STATE.FAILED
+  ]) {
+    assert.ok(Queue.isTerminalCollectionState(terminal), `${terminal} must be terminal`);
+    assert.ok(
+      !Queue.canTransitionCollection(terminal, Queue.COLLECTION_STATE.OPENING_CONNECTIONS),
+      `${terminal} -> opening_connections must stay refused; that is the guard`
+    );
+    assert.ok(
+      Queue.canTransitionCollection(terminal, Queue.COLLECTION_STATE.IDLE),
+      `${terminal} -> idle is the "explicitly starting over" move the button now makes`
+    );
+
+    // Starting over is that move followed by the one the guard wanted, and it
+    // carries the queue with it: resetting touches the collection state only.
+    const session = { ...Queue.createSession(), collectionState: terminal, discoveryExhausted: true };
+    const idle = Queue.transitionCollection(session, Queue.COLLECTION_STATE.IDLE, "t1");
+    assert.equal(idle.changed, true, `${terminal} must be resettable`);
+    const opening = Queue.transitionCollection(idle.session, Queue.COLLECTION_STATE.OPENING_CONNECTIONS, "t2");
+    assert.equal(opening.changed, true, `${terminal} must then be able to start a run`);
+    assert.equal(opening.session.discoveryExhausted, true, "and the queue's own fields ride along untouched");
+  }
+
+  // A state that is genuinely mid-run is NOT reset: that refusal is what makes a
+  // service-worker wake-up idempotent instead of a second discovery.
+  for (const active of [
+    Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS,
+    Queue.COLLECTION_STATE.EXTRACTING_PROFILE
+  ]) {
+    assert.ok(!Queue.isTerminalCollectionState(active), `${active} must not be treated as terminal`);
+  }
+});
+
+test("a connections command resets a terminal run and never refuses in silence", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  const start = worker.indexOf("async function beginConnectionsRun");
+  assert.ok(start > 0, "the direct-command entry must exist as its own function");
+  const body = worker.slice(start, worker.indexOf("\n/**", start + 1));
+
+  assert.match(body, /Queue\.isTerminalCollectionState\(from\)/,
+    "a finished, stopped or failed run is what gets reset");
+  assert.match(body, /await moveCollectionTo\(Queue\.COLLECTION_STATE\.IDLE\)/,
+    "and it is reset through the state machine, not by writing the field");
+  assert.match(body, /await moveCollectionTo\(Queue\.COLLECTION_STATE\.OPENING_CONNECTIONS\)/,
+    "then it takes the transition the guard always wanted");
+  assert.match(body, /lastError:/, "and a refusal names the state that refused it");
+  assert.ok(!/clearQueue|Queue\.clearQueue|deleteProfile/.test(body),
+    "starting over must never throw the discovered list away — Clear Queue is a separate action");
+
+  // Both buttons take it, and the bare silent guard is gone from both.
+  for (const workflow of ["startCollectingWorkflow", "discoveryOnlyWorkflow"]) {
+    const at = worker.indexOf(`async function ${workflow}`);
+    assert.ok(at > 0, `${workflow} must exist`);
+    const rest = worker.slice(at);
+    const workflowBody = rest.slice(0, rest.indexOf("\n// ---"));
+    assert.match(workflowBody, /if \(!\(await beginConnectionsRun\(\)\)\) return;/,
+      `${workflow} must enter through beginConnectionsRun`);
+    assert.ok(
+      !/moveCollectionTo\(Queue\.COLLECTION_STATE\.OPENING_CONNECTIONS\)/.test(workflowBody),
+      `${workflow} must not keep its own bare guard, which is what returned in silence`
+    );
+  }
+});
+
 test("manual extraction runs over the saved queue without re-enumerating the list", async () => {
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const branch = worker.slice(worker.indexOf("if (type === IMPORT_MESSAGES.START)"));

@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0131",
+  "name": "A finished or stopped run no longer makes both connections buttons permanent no-ops",
+  "request": "A finished or stopped run no longer makes both connections buttons permanent no-ops",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T13:21:14.624Z",
+  "completedAt": "2026-08-07T13:30:48.432Z",
+  "startCommit": "aecf72d6117c8f34bbaac224bb97ae541a3786c5",
+  "gitRef": "task/TASK-0131",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-tabs.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-workflow.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 444 tests, validate)"
+  ],
+  "result": "Both connections buttons were permanent no-ops after the first run ended, which is the reported 'nothing is happening'. startCollectingWorkflow and discoveryOnlyWorkflow each opened on a bare 'if (!(await moveCollectionTo(OPENING_CONNECTIONS))) return' - a SILENT return - and COLLECTION_TRANSITIONS gives all four terminal states (stopped, completed, completed_with_gap, failed) exactly one move: idle. So once a run finished, was stopped or failed, OPENING_CONNECTIONS was refused and both buttons did nothing, while the command branch had already replied started:true and the page said 'Collecting...'. The only escape was Clear Queue, which discards the discovered list. Long-standing, not caused by the applicants surface: the same guard is in the recorded baseline and connections.js/connections-core.js are untouched since it. This also explains why TASK-0130's reveal changed nothing - it runs inside the workflow, after the guard. New beginConnectionsRun() resets a TERMINAL state to idle first, because pressing these buttons is the 'explicitly starting over' the transition table's own comment names, then takes the wanted transition; scoped to terminal states where nothing is in flight, so every other state keeps refusing and a service-worker wake-up stays idempotent (provable: both workflows are reached only from their command branches, never the heartbeat, alarm or drain loop). It resets a state, not data - queue, discovered list and saved profiles untouched. A refusal is no longer silent: lastError names the state that refused. CLAUDE.md's collection state machine section amended with the rule and with where to find the evidence (Download Diagnostics carries collectionState plus the last 40 transitions with changed/reason); CHANGELOG.md 3.7.18. Two new tests - 'a finished, stopped or failed run can be started again without clearing the queue' drives the pure state machine for all four terminal states and asserts active states are not treated as terminal, and 'a connections command resets a terminal run and never refuses in silence' asserts the helper and that neither workflow keeps its bare guard; the step-order test's first entry moved to beginConnectionsRun(). Files: src/background.ts, tests/collector-workflow.test.js, tests/collector-tabs.test.js, CLAUDE.md, CHANGELOG.md."
+}

@@ -190,6 +190,58 @@ async function resolveConnectionsTab(): Promise<number> {
 }
 
 /**
+ * How a direct connections command enters the state machine.
+ *
+ * Both workflows below used to open with a bare
+ * `if (!(await moveCollectionTo(OPENING_CONNECTIONS))) return;` — and that is a
+ * SILENT return. The transition table lets all four terminal states move to
+ * exactly one place:
+ *
+ *   [STOPPED] [COMPLETED] [COMPLETED_WITH_GAP] [FAILED]  ->  [IDLE]
+ *
+ * so the moment a run finished, was stopped, or failed, `OPENING_CONNECTIONS`
+ * was refused and **both buttons became permanent no-ops** — while the command
+ * branch had already replied `started: true` and the page said "Collecting.
+ * Your connections are being discovered first…". Reported exactly as *"nothing
+ * is happening"*, and the only escape was Clear Queue, which throws away the
+ * discovered list to unstick a state machine.
+ *
+ * The table's own comment says a terminal state is left "only by explicitly
+ * starting over" — and pressing Start Full Collection or Discover Connections
+ * Only **is** starting over. Nothing else reaches these two workflows: they are
+ * called from their command branches and nowhere else, so the heartbeat, the
+ * alarm and the drain loop cannot get here. The reset is therefore scoped to
+ * terminal states, where by definition no run is in flight; every other state
+ * keeps refusing, which is what preserves the property that makes a
+ * service-worker wake-up idempotent rather than a second discovery.
+ *
+ * And a refusal is never silent again. `lastError` names the state that refused,
+ * because "the button did nothing" and "the collector is still finishing" are
+ * the same picture from the outside and only one of them names a cause.
+ * Resetting to idle touches the collection state and nothing else — the queue,
+ * the discovered list and every saved profile are untouched. Clear Queue remains
+ * the separate, destructive action.
+ */
+async function beginConnectionsRun(): Promise<boolean> {
+  const before = await readState();
+  const from = String(before.session.collectionState || Queue.COLLECTION_STATE.IDLE);
+  if (Queue.isTerminalCollectionState(from)) {
+    await moveCollectionTo(Queue.COLLECTION_STATE.IDLE);
+  }
+  if (await moveCollectionTo(Queue.COLLECTION_STATE.OPENING_CONNECTIONS)) return true;
+
+  const state = await readState();
+  const current = String(state.session.collectionState || Queue.COLLECTION_STATE.IDLE);
+  const label = Queue.collectionStateText(current) || current;
+  await saveSession({
+    ...state.session,
+    lastError: `Could not start: the collector is still in "${label}". Press Stop, then start again.`,
+    updatedAt: nowIso()
+  });
+  return false;
+}
+
+/**
  * Steps 2-3 as a DIRECT COMMAND: the Connections tab, raised into view.
  *
  * `resolveConnectionsTab()` already opens or reuses the one Connections tab and
@@ -915,8 +967,9 @@ function kickLoop(): void {
 async function startCollectingWorkflow(options: any = {}): Promise<void> {
   const generation = runGeneration;
   // Idempotent entry. The transition is persisted, so a service-worker wake-up
-  // that re-issues the command cannot start a second discovery.
-  if (!(await moveCollectionTo(Queue.COLLECTION_STATE.OPENING_CONNECTIONS))) return;
+  // that re-issues the command cannot start a second discovery — and a finished
+  // or stopped run is reset first, because a button press is starting over.
+  if (!(await beginConnectionsRun())) return;
 
   workflowRunning = true;
   await setDiscoveryRunning(true);
@@ -1007,7 +1060,9 @@ async function startCollectingWorkflow(options: any = {}): Promise<void> {
 /** Find All Connections, detached from the message that requested it. */
 async function discoveryOnlyWorkflow(options: any = {}): Promise<void> {
   const generation = runGeneration;
-  if (!(await moveCollectionTo(Queue.COLLECTION_STATE.OPENING_CONNECTIONS))) return;
+  // Same entry as the full workflow, and for the same reason: this button was
+  // just as dead after a run finished as the other one.
+  if (!(await beginConnectionsRun())) return;
   await setDiscoveryRunning(true);
   try {
     // Same direct-command reveal as the full workflow, and for the same reason:

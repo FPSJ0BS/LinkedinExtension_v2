@@ -595,7 +595,10 @@ test("the automatic workflow performs the steps in the order the design requires
   // that did nothing. The check then reuses the tab that was just revealed, and
   // the signed-out path still sends that same tab to LinkedIn's sign-in page.
   const order = [
-    "COLLECTION_STATE.OPENING_CONNECTIONS",
+    // Step 1 is now beginConnectionsRun(), which owns the move to
+    // OPENING_CONNECTIONS and resets a finished or stopped run first — a button
+    // press is "explicitly starting over", the one move a terminal state has.
+    "beginConnectionsRun()",
     "revealConnectionsTab()",
     "checkLoginState()",
     "COLLECTION_STATE.DISCOVERING_CONNECTIONS",

@@ -1,5 +1,52 @@
 # CHANGELOG.md
 
+## 3.7.18 — a finished run no longer makes both connections buttons dead forever
+
+Reported as *"nothing is happening"* — after 3.7.17 raised the Connections window and it still did
+nothing. That is because 3.7.17 fixed a real gap that was **behind** this one: the reveal runs inside
+the workflow, and the workflow was returning before it ever got there.
+
+Both workflows opened on a bare guard:
+
+```ts
+if (!(await moveCollectionTo(Queue.COLLECTION_STATE.OPENING_CONNECTIONS))) return;   // silent
+```
+
+and the transition table gives all four terminal states exactly one move:
+
+```js
+[STOPPED] [COMPLETED] [COMPLETED_WITH_GAP] [FAILED]  ->  [IDLE]
+```
+
+So from the moment a run first finished, was stopped, or failed, `OPENING_CONNECTIONS` was refused
+and **both `Start Full Collection` and `Discover Connections Only` became permanent no-ops.** Nothing
+said so: the command branch had already replied `started: true`, so the page reported *"Collecting.
+Your connections are being discovered first, then extracted one at a time."* while the detached
+workflow returned on its first line. The only escape was `Clear Queue` — which throws away the whole
+discovered list to unstick a state machine.
+
+It is long-standing rather than anything the applicants surface did; the same guard is in the
+recorded baseline, and `connections.js` and `connections-core.js` have not been touched since.
+
+`beginConnectionsRun()` is the fix, and it is scoped deliberately:
+
+- **A button press is "explicitly starting over"** — which is what the transition table's own comment
+  already says is the way out of a terminal state. So a terminal state is reset to `idle` first, then
+  the move the guard wanted is taken.
+- **Only terminal states.** By definition nothing is in flight in one. Every other state keeps
+  refusing, which is the property that makes a service-worker wake-up idempotent instead of a second
+  discovery. Both workflows are reached from their command branches and nowhere else — not the
+  heartbeat, the alarm or the drain loop — so "a button press" is provable here.
+- **It resets a state, not your data.** The queue, the discovered list and every saved profile are
+  untouched; `Clear Queue` remains the separate, destructive action.
+- **A refusal is never silent again.** `lastError` names the state that refused, because "the button
+  did nothing" and "the collector is still finishing" look identical from outside and only one of
+  them names a cause.
+
+The evidence trail was already there and is worth knowing about: **Download Diagnostics** carries
+`collectionState` and the last 40 state-machine moves as `transitions`, each with `changed` and a
+`reason` — a refusal shows up verbatim as `refused:completed->opening_connections`.
+
 ## 3.7.17 — the connections buttons bring the Connections page to the front
 
 Reported outright: *"I want these buttons to directly redirect on the connections page and start
