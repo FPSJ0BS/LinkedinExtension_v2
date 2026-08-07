@@ -825,6 +825,32 @@ resume chain, the contact disclosure, the auto-run and the seven-click budget al
   ⚠ This makes a pass cost **tens of seconds per applicant** rather than a millisecond — a
   665-applicant job is hours, not minutes. That is what makes the listed-index skip below load-bearing
   rather than an optimisation.
+- **And it paces itself to the page, not to a number chosen in the source** (3.7.14). Every quiet
+  window here is a guess about a page nobody measured, and it has to be a pessimistic one — so a
+  machine that renders an applicant instantly pays a struggling machine's budget on every pass, of
+  every walk, of every applicant. The page can be asked instead: `waitForDomQuiet` already runs a
+  `MutationObserver` over the document, so it knows for free whether anything changed while it
+  waited. Three samples of that pick one of three tempos, and the window is scaled to it
+  (`TEMPO_SCALE`, `quietWindow()`), as is the breath between applicants (`PACE_BOUNDS`, randomised
+  within its band because a run that pauses for exactly 900 ms hundreds of times is the one shape a
+  human session never has). **The asymmetry is the safety**: one wait that hits its timeout drops the
+  page to `slow` immediately and buys it a window *longer* than the source ever asked for, while
+  reaching `fast` needs every recent wait to have observed **nothing at all**. `timeoutMs` is never
+  scaled — the caller's ceiling is what stops an unsettled page holding one applicant, and a tempo
+  that could stretch it would turn a slow page into a stuck run.
+  **What this may and may not do**: a shorter window can only take a read a moment early, and an
+  early read costs nothing on this surface by construction — `snapshotPanel` is merge-only, every
+  walk re-reads on every pass, and each quiet counter resets the instant anything grows. What it must
+  never do is *end* a walk, so `REVEAL_MIN_PASSES` (4), `REVEAL_QUIET_PASSES` (3) and the
+  reached-the-bottom test are untouched and the tempo has no say in any of them. Worst case is one
+  extra pass. `waitFor`'s poll interval starts at `FAST_POLL_MS` and backs off to the caller's own,
+  which changes only how *late* an already-true condition is noticed — same predicate, same timeout,
+  same verdict. `beginRun()` resets the tempo, because a page-condition verdict is never carried
+  across runs (the rule `wentHidden` is re-derived under). The run reports the tempo it was held at
+  on `listScroll.tempo`, because "the run was slow" and "the page never settled" are the same
+  sentence from two ends and only one of them names a cause. Locked by *"the quiet window follows the
+  page, within bounds it can never leave"* and *"adapting the pace changes what a wait costs, never
+  what a walk concludes"*.
 - **From the row itself: the name and the two ids, and deliberately nothing else.** The row also
   renders a headline and a location; taking them would mean deciding that line two is the headline
   and line three is the location — positional guessing on generated markup, which rule 11 refuses and

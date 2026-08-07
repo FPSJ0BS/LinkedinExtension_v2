@@ -1,5 +1,59 @@
 # CHANGELOG.md
 
+## 3.7.14 — the applicant walk paces itself to the page instead of to fixed delays
+
+Requested outright: *"optimize applicant processing speed without changing any existing feature,
+logic, data, or UI behavior ... slightly faster + fully safe + no missed data ... accuracy > speed
+always."*
+
+**Nothing about what is read, clicked, stored or shown changed.** The diff removes ten lines, and
+every one of them is inside `waitFor`, inside `waitForDomQuiet`, or is one of the three
+`wait(LIST_PROFILE_PACE_MS)` call sites. No extraction rule, no click, no record field, no message,
+no control.
+
+**The waste it removes.** Every quiet window in [applicants.js](applicants.js) is a guess about a
+page nobody measured, and it has to be a pessimistic one, because it is chosen once — in the source —
+for a panel that might be halfway through hydrating. So a recruiter whose machine and connection
+render an applicant instantly pays the struggling machine's 320 ms on every pass, of every walk, of
+every applicant, and a 665-applicant job is where that lands.
+
+The page can be asked instead. `waitForDomQuiet` already runs a `MutationObserver` over the whole
+document, so it knows for nothing whether anything actually changed while it waited. Three samples of
+that decide one of three tempos, and the window is scaled to it.
+
+**The asymmetry is the safety.** One wait that hits its timeout drops the page to `slow` at once and
+buys it a window *longer* than the fixed value ever gave; reaching `fast` needs every recent wait to
+have observed **nothing at all**. `timeoutMs` is never scaled — the caller's ceiling is what stops an
+unsettled page holding one applicant, and a tempo that could stretch it would turn a slow page into a
+stuck run. `MIN_QUIET_MS` floors the other end, and the floor can never *raise* a window a caller
+deliberately made short.
+
+**What it may and may not do.** A shorter window can only take a read a moment early, and an early
+read costs nothing here by construction: `snapshotPanel` is merge-only, every walk re-reads on every
+pass, and each quiet counter resets the instant anything grows. What it must never do is *end* a
+walk — that would lose sections — so `REVEAL_MIN_PASSES` (4), `REVEAL_QUIET_PASSES` (3) and the
+reached-the-bottom test are untouched and the tempo has no say in any of them. The worst case is one
+extra pass.
+
+`waitFor`'s poll interval now starts at `FAST_POLL_MS` (50 ms) and backs off to the caller's own
+value. A poll interval is not a wait for anything — it is how *late* a condition already true is
+noticed — so this can only see an arrival sooner, never accept one it would otherwise have refused.
+Polling the panel's arrival every 200 ms meant the average applicant sat on an already-mounted panel
+before the run looked, once per applicant, all job long.
+
+The breath between applicants (`PACE_BOUNDS`) follows the same tempo and is randomised within its
+band. The medium band still averages `LIST_PROFILE_PACE_MS`, so a normally-loading page paces exactly
+as it did; the slow band is *longer* than the fixed value, because that is a page under strain.
+
+`beginRun()` resets the tempo — a page-condition verdict is never carried across runs, the same rule
+`wentHidden` is re-derived under. The walk reports the tempo it was held at on `listScroll.tempo`,
+because "the run was slow" and "the page never settled" are the same sentence from two ends and only
+one of them names a cause.
+
+Two tests lock the bounds at both ends, the unscaled ceiling, the reset, the single pacing helper,
+and — the point of the whole change — that the rules deciding when a walk has finished reading an
+applicant are exactly the ones that were there before.
+
 ## 3.7.14 — an installer, so the extension can be put on another device
 
 Requested outright: *"create an installer through which I can install it in any other device and use

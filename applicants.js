@@ -306,6 +306,10 @@
   function beginRun() {
     state.aborted = false;
     clearHiddenLatchIfVisible();
+    // A page-condition verdict is never carried across runs, for exactly the
+    // reason `wentHidden` is re-derived above: the last run's evidence describes
+    // a page the recruiter may since have reloaded, re-routed or left.
+    resetTempo();
   }
 
   function wait(ms) {
@@ -319,9 +323,25 @@
    * expressed that way; the fixed sleeps that remain are the two the platform
    * forces — the beat after a click before a menu can exist, and the poll
    * interval of the settle loop.
+   *
+   * **The poll interval starts short and backs off toward the caller's.** A
+   * poll interval is not a wait for anything: it is how *late* the answer is
+   * noticed once it is already true. Polling the panel's arrival every 200 ms
+   * meant the average applicant sat on an already-mounted panel for 100 ms
+   * before the run looked, and a job is walked one applicant at a time. Starting
+   * at `FAST_POLL_MS` and multiplying up to the caller's own value keeps that
+   * latency near zero when the condition lands quickly — which is the common
+   * case — and still costs no more polls than before over a long wait, where a
+   * flat short interval would spin. The predicate, the timeout and therefore the
+   * verdict are all exactly as they were: this can only see a true condition
+   * *sooner*, never accept one it would otherwise have refused.
    */
+  const FAST_POLL_MS = 50;
+  const POLL_BACKOFF = 1.6;
+
   async function waitFor(predicate, { timeoutMs = 8000, pollMs = 150, label = "condition" } = {}) {
     const deadline = Date.now() + timeoutMs;
+    let interval = Math.min(FAST_POLL_MS, pollMs);
     for (;;) {
       assertRunnable();
       let value = null;
@@ -331,29 +351,129 @@
         value = null;
       }
       if (value) return value;
-      if (Date.now() >= deadline) return null;
-      await wait(pollMs);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return null;
+      await wait(Math.min(interval, remaining));
+      interval = Math.min(pollMs, Math.round(interval * POLL_BACKOFF));
     }
   }
 
-  /** Resolves once the DOM has stopped changing, or the timeout elapses. */
+  /**
+   * How settled this page has been over the last few waits.
+   *
+   * **Every quiet window in this file is a guess about a page nobody has
+   * measured**, and it has to be a pessimistic one: it is chosen once, in the
+   * source, for a panel that might be mid-hydration. So a recruiter whose
+   * machine and connection render an applicant instantly pays the same 320 ms a
+   * struggling one does, on every pass, of every walk, of every applicant — and
+   * a 665-applicant job is where that lands.
+   *
+   * The page can be asked instead. `waitForDomQuiet` already runs a
+   * `MutationObserver` over the whole document, so it knows for nothing whether
+   * anything actually changed while it waited. Three samples of that are enough
+   * to say which of three tempos the page is in, and the window is scaled to it.
+   *
+   * **Why shortening the window is safe, and where the real safety lives.** A
+   * shorter quiet window can only ever cause a read to be taken a moment early,
+   * and an early read costs nothing anywhere on this surface by construction:
+   * `snapshotPanel` is merge-only, every walk re-reads on every pass, each one
+   * resets its quiet counter the moment anything grows, and `REVEAL_MIN_PASSES`
+   * is a floor this does not touch. What an early read cannot do is end a walk —
+   * that needs `REVEAL_QUIET_PASSES` consecutive quiet passes *and* the bottom.
+   * So the worst case is one extra pass, and the best is every pass costing what
+   * the page actually needs.
+   *
+   * And it moves the other way too, which is the half that matters for accuracy:
+   * a wait that hit its timeout means the DOM never settled at all, and that
+   * page gets a *longer* window than the source ever asked for, not a shorter
+   * one. `timeoutMs` is never scaled — the caller's ceiling stays the ceiling.
+   */
+  const TEMPO = Object.freeze({ FAST: "fast", MEDIUM: "medium", SLOW: "slow" });
+  /** Never below this, however calm the page looks. */
+  const MIN_QUIET_MS = 150;
+  const TEMPO_SCALE = Object.freeze({ fast: 0.55, medium: 1, slow: 1.25 });
+  /** How many recent waits decide the tempo. Short, so it follows the page. */
+  const TEMPO_SAMPLES = 3;
+
+  const tempo = { samples: [], level: TEMPO.MEDIUM, waits: 0, savedMs: 0 };
+
+  /**
+   * Back to medium, and back to no history.
+   *
+   * A page-condition verdict must never be carried across runs — the same rule
+   * `beginRun` re-derives `wentHidden` under. A run that ended on a calm page
+   * would otherwise open the next one at full speed on evidence gathered before
+   * the recruiter switched tabs, changed job, or reloaded.
+   */
+  function resetTempo() {
+    tempo.samples.length = 0;
+    tempo.level = TEMPO.MEDIUM;
+    tempo.waits = 0;
+    tempo.savedMs = 0;
+  }
+
+  function recordTempo(sample) {
+    tempo.samples.push(sample);
+    if (tempo.samples.length > TEMPO_SAMPLES) tempo.samples.shift();
+    // One unsettled wait is enough to slow down; being sure the page is calm
+    // takes every sample. Deliberately asymmetric — the cost of being wrong is
+    // a half-read panel one way and a few hundred milliseconds the other.
+    if (tempo.samples.includes("unsettled")) tempo.level = TEMPO.SLOW;
+    else if (tempo.samples.length >= TEMPO_SAMPLES && tempo.samples.every((entry) => entry === "still")) tempo.level = TEMPO.FAST;
+    else tempo.level = TEMPO.MEDIUM;
+  }
+
+  function tempoSnapshot() {
+    return { level: tempo.level, waits: tempo.waits, savedMs: Math.round(tempo.savedMs) };
+  }
+
+  /** The quiet window this page has earned, bounded at both ends. */
+  function quietWindow(quietMs) {
+    const scaled = Math.round(quietMs * TEMPO_SCALE[tempo.level]);
+    // The floor never *raises* a window the caller deliberately made short.
+    const floor = Math.min(MIN_QUIET_MS, quietMs);
+    return Math.max(floor, Math.min(scaled, Math.round(quietMs * TEMPO_SCALE.slow)));
+  }
+
+  /**
+   * Resolves once the DOM has stopped changing, or the timeout elapses.
+   *
+   * The contract is unchanged — this still resolves only after the document has
+   * been quiet for a whole window, or after `timeoutMs`. What is adaptive is how
+   * long "a whole window" is on this page; see the tempo above.
+   */
   function waitForDomQuiet(quietMs = 300, timeoutMs = 2500) {
+    const window_ = quietWindow(quietMs);
+    tempo.waits += 1;
+    tempo.savedMs += quietMs - window_;
     return new Promise((resolve) => {
       let quietTimer;
       let timeoutTimer;
-      const finish = () => {
+      let mutated = false;
+      // `finish` is reachable from three places, and only the first arrival is
+      // this wait's verdict. Resolving twice is harmless; recording twice would
+      // put a phantom sample into the tempo the next wait is sized from.
+      let done = false;
+      const finish = (sample) => {
+        if (done) return;
+        done = true;
         observer.disconnect();
         clearTimeout(quietTimer);
         clearTimeout(timeoutTimer);
+        recordTempo(sample);
         resolve();
       };
       const observer = new MutationObserver(() => {
+        mutated = true;
         clearTimeout(quietTimer);
-        quietTimer = setTimeout(finish, quietMs);
+        quietTimer = setTimeout(() => finish("busy"), window_);
       });
       observer.observe(document.documentElement, { childList: true, subtree: true });
-      quietTimer = setTimeout(finish, quietMs);
-      timeoutTimer = setTimeout(finish, timeoutMs);
+      // Nothing observed at all across the whole window is the one sample that
+      // can speed the page up; a window that ended after mutations is only ever
+      // evidence that it should not slow down.
+      quietTimer = setTimeout(() => finish(mutated ? "busy" : "still"), window_);
+      timeoutTimer = setTimeout(() => finish("unsettled"), timeoutMs);
     });
   }
 
@@ -4366,6 +4486,36 @@
    * bulk of the time.
    */
   const LIST_PROFILE_PACE_MS = 900;
+  /**
+   * The breath, taken at the page's own tempo and never the same length twice.
+   *
+   * `LIST_PROFILE_PACE_MS` stays the anchor and the medium band still averages
+   * it, so a normally-loading page paces exactly as it did. What changes is the
+   * two ends: a page that has been demonstrably still for its last few waits has
+   * already proved it is keeping up and does not need the full breath, and one
+   * whose DOM never settles gets a *longer* one than the fixed value ever gave —
+   * which is the direction that matters, because that is a page under strain.
+   *
+   * Randomised within each band because a run that pauses for exactly 900 ms
+   * between hundreds of panels is the one shape a human session never has. That
+   * is politeness, not evasion: the bounds are narrow, the floor is real, and
+   * nothing here is faster than the fixed value's own lower neighbourhood.
+   */
+  const PACE_BOUNDS = Object.freeze({
+    fast: [480, 760],
+    medium: [700, 1020],
+    slow: [900, 1300]
+  });
+
+  function profilePaceMs() {
+    const [low, high] = PACE_BOUNDS[tempo.level] || PACE_BOUNDS.medium;
+    return Math.round(low + Math.random() * (high - low));
+  }
+
+  /** A breath between applicants, sized to how the page has been behaving. */
+  function paceBetweenApplicants() {
+    return wait(profilePaceMs());
+  }
 
   /**
    * What the list pass reads, and what it presses to read it.
@@ -4953,12 +5103,12 @@
               `The panel kept showing somebody else when ${fromRow.applicant.name} was opened; `
               + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
             state.run.index = processed.size;
-            await wait(LIST_PROFILE_PACE_MS);
+            await paceBetweenApplicants();
             continue;
           }
           state.run.lastError = `${error.message} ${fromRow.applicant.name} will be opened again.`;
           state.run.updatedAt = new Date().toISOString();
-          await wait(LIST_PROFILE_PACE_MS);
+          await paceBetweenApplicants();
           continue;
         }
         // A panel that would not open, would not scroll, or would not parse.
@@ -5000,7 +5150,7 @@
       state.run.updatedAt = new Date().toISOString();
       // A breath before the next one, and a Stop lands on the next row's
       // `assertRunnable()` a moment later.
-      await wait(LIST_PROFILE_PACE_MS);
+      await paceBetweenApplicants();
     }
 
     if (state.run.state === Applicants.RUN_STATE.RUNNING) state.run.state = Applicants.RUN_STATE.COMPLETED;
@@ -5011,6 +5161,11 @@
     // the run is walking, so dragging it back on every row would fight it.
     scrollPanelTo(listStartY, chooseScrollTarget(applicantList()) || listTarget);
     listDiagnostics.listScroll.rows = applicantRows().length;
+    // What tempo the page held the run at, and what that was worth. "The run was
+    // slow" and "the page never settled" are the same sentence from two ends,
+    // and only one of them names a cause — so the run says which it was rather
+    // than leaving the next report of it to another investigation.
+    listDiagnostics.listScroll.tempo = tempoSnapshot();
     logListWalk(listDiagnostics.listScroll);
 
     return { records: results, run: { ...state.run }, list: listDiagnostics.listScroll || null };

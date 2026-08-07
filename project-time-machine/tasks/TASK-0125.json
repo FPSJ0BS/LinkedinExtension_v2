@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "id": "TASK-0125",
+  "name": "Pace the applicant walk to the page instead of to fixed delays",
+  "request": "Pace the applicant walk to the page instead of to fixed delays",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T09:49:27.906Z",
+  "completedAt": "2026-08-07T09:56:21.891Z",
+  "startCommit": "06ed5e454e2eb6e1e1eb13285e94785a630267b5",
+  "gitRef": "task/TASK-0125",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 439 tests / 0 failed, validate (31 build files)",
+    "node --test tests/applicants-core.test.js: 83/83 including the two new pacing tests",
+    "git diff -U0 reviewed line by line: every removed line is inside waitFor, waitForDomQuiet or a wait(LIST_PROFILE_PACE_MS) call site; no other code touched",
+    "computed the resulting windows from the source constants: quiet-wait floor per applicant 5670ms -> 3131ms on a calm page and -> 7088ms on a strained one"
+  ],
+  "result": "The applicant walk's waits are sized by the page instead of by fixed numbers chosen in the source. waitForDomQuiet already runs a MutationObserver over the document, so it knows for free whether anything changed while it waited; three samples of that pick one of three tempos and scale the quiet window (TEMPO_SCALE, quietWindow, MIN_QUIET_MS floor). Asymmetric on purpose: one wait that hits its timeout drops to slow at once and buys a LONGER window than the fixed value gave, while reaching fast needs every recent wait to have observed nothing at all. timeoutMs is never scaled - the caller's ceiling is what stops an unsettled page holding one applicant. The rules that decide when a walk has finished READING an applicant are untouched: REVEAL_MIN_PASSES (4), REVEAL_QUIET_PASSES (3) and the reached-the-bottom test, so a shorter window can only take a read a moment early (harmless - merge-only accumulator, every walk re-reads every pass) and never end a walk. waitFor's poll interval starts at FAST_POLL_MS and backs off to the caller's own, which changes only how late an already-true condition is noticed - same predicate, same timeout, same verdict. The breath between applicants (PACE_BOUNDS) follows the tempo and is randomised in-band; medium still averages LIST_PROFILE_PACE_MS and slow is longer than it. beginRun resets the tempo, because a page-condition verdict is never carried across runs. The walk reports its tempo on listScroll.tempo. Ten lines removed in all, every one inside waitFor, waitForDomQuiet or the three pace call sites - no extraction rule, click, record field, message or control changed."
+}

@@ -3733,3 +3733,106 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7,
     "applicants.js must still click exactly seven times");
 });
+
+// ------------------------------------------------- pacing the walk to the page
+// Requested outright: "slightly faster + fully safe + no missed data ... replace
+// fixed delays with adaptive timing ... accuracy > speed always."
+//
+// Every quiet window in the adapter is a guess about a page nobody measured, and
+// it has to be a pessimistic one, so a fast machine pays a struggling machine's
+// budget on every pass of every walk of every applicant. The page can be asked
+// instead. What these assert is the half that keeps it safe: the bounds at BOTH
+// ends, the ceiling that is never scaled, and the floors this must not touch.
+
+test("the quiet window follows the page, within bounds it can never leave", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  const quiet = source.slice(source.indexOf("function quietWindow"), source.indexOf("function waitForDomQuiet"));
+  assert.match(quiet, /TEMPO_SCALE\[tempo\.level\]/, "the window is scaled by the tempo the page earned");
+  assert.match(quiet, /Math\.max\(floor, Math\.min\(scaled, Math\.round\(quietMs \* TEMPO_SCALE\.slow\)\)\)/,
+    "and clamped at both ends, so no tempo can produce an unbounded window");
+  assert.match(quiet, /const floor = Math\.min\(MIN_QUIET_MS, quietMs\)/,
+    "the floor may never RAISE a window a caller deliberately made short");
+
+  // A floor that can be tuned to nothing is not a floor.
+  const minQuiet = Number(/const MIN_QUIET_MS = (\d+);/.exec(source)[1]);
+  assert.ok(minQuiet >= 120, `the quiet floor must stay meaningful (found ${minQuiet}ms)`);
+
+  const scale = /const TEMPO_SCALE = Object\.freeze\(\{ fast: ([\d.]+), medium: (\d+), slow: ([\d.]+) \}\)/.exec(source);
+  assert.ok(scale, "the three tempos must be named and fixed");
+  assert.ok(Number(scale[1]) >= 0.5, `fast must stay a trim, not a gut (found ${scale[1]})`);
+  assert.equal(Number(scale[2]), 1, "medium must be exactly the window the source asked for");
+  assert.ok(Number(scale[3]) > 1, "and an unsettled page must be given MORE time, not less");
+
+  // The ceiling is the caller's and is never scaled: `timeoutMs` is what stops a
+  // page that never settles from holding one applicant, and a tempo that could
+  // stretch it would turn a struggling page into a stuck run.
+  const domQuiet = source.slice(source.indexOf("function waitForDomQuiet"), source.indexOf("// ---------------------------------------------------------------- the DOM"));
+  assert.match(domQuiet, /setTimeout\(\(\) => finish\("unsettled"\), timeoutMs\)/, "the timeout is used exactly as given");
+  assert.ok(!/timeoutMs \*/.test(domQuiet), "the caller's ceiling must never be scaled");
+
+  // Only a wait that observed NOTHING may speed the page up. A window that ended
+  // after mutations is evidence against slowing down, never evidence for haste.
+  assert.match(domQuiet, /finish\(mutated \? "busy" : "still"\)/, "a mutation seen during the window forfeits 'still'");
+  const record = source.slice(source.indexOf("function recordTempo"), source.indexOf("function tempoSnapshot"));
+  assert.match(record, /if \(tempo\.samples\.includes\("unsettled"\)\) tempo\.level = TEMPO\.SLOW/,
+    "one unsettled wait is enough to slow down");
+  assert.match(record, /every\(\(entry\) => entry === "still"\)/, "but every sample must agree before it speeds up");
+
+  // A page-condition verdict is never carried across runs — the same rule
+  // `wentHidden` is re-derived under, and for the same reason.
+  const begin = source.slice(source.indexOf("function beginRun"), source.indexOf("function wait(ms)"));
+  assert.match(begin, /resetTempo\(\)/, "a new run must not inherit the last one's verdict about the page");
+});
+
+test("adapting the pace changes what a wait costs, never what a walk concludes", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // The floors that decide whether enough of an applicant was READ are untouched
+  // by any of this. A shorter window can only take a read a moment early, and an
+  // early read costs nothing here — the accumulator is merge-only and every walk
+  // re-reads on every pass — but ENDING a walk early would lose sections, so the
+  // rules that end one stay exactly as they were.
+  assert.match(source, /const REVEAL_MIN_PASSES = 4;/, "the four-pass floor is a correctness floor, not a timing one");
+  assert.match(source, /const REVEAL_QUIET_PASSES = 3;/, "and a walk still needs three quiet passes to settle");
+  assert.match(source, /if \(reachedTail && quiet >= REVEAL_QUIET_PASSES && record\.passes >= REVEAL_MIN_PASSES\)/,
+    "with the bottom reached as well — the tempo has no say in any of it");
+
+  // Polling is how LATE a true condition is noticed, never a wait for anything.
+  // Starting short and backing off to the caller's own interval can only see an
+  // arrival sooner; the predicate and the timeout are untouched.
+  const waiter = source.slice(source.indexOf("async function waitFor"), source.indexOf("* How settled this page has been"));
+  assert.match(waiter, /let interval = Math\.min\(FAST_POLL_MS, pollMs\)/, "polling starts short");
+  assert.match(waiter, /interval = Math\.min\(pollMs, Math\.round\(interval \* POLL_BACKOFF\)\)/,
+    "and backs off to the caller's own interval, so a long wait does not spin");
+  assert.match(waiter, /await wait\(Math\.min\(interval, remaining\)\)/, "and never polls past the deadline");
+  assert.ok(!/timeoutMs \*/.test(waiter), "the caller's timeout is used exactly as given");
+
+  // The breath between applicants. The medium band still averages the anchor, so
+  // a normally-loading page paces as it always did; the slow band is LONGER than
+  // the fixed value, because that is a page under strain.
+  const anchor = Number(/const LIST_PROFILE_PACE_MS = (\d+);/.exec(source)[1]);
+  const bounds = /const PACE_BOUNDS = Object\.freeze\(\{\s*fast: \[(\d+), (\d+)\],\s*medium: \[(\d+), (\d+)\],\s*slow: \[(\d+), (\d+)\]\s*\}\)/.exec(source);
+  assert.ok(bounds, "the three bands must be named and fixed");
+  const [fastLow, fastHigh, mediumLow, mediumHigh, slowLow, slowHigh] = bounds.slice(1).map(Number);
+  assert.ok(fastLow >= 400, `even the fast band must stay a real breath (found ${fastLow}ms)`);
+  assert.ok(fastLow < fastHigh && mediumLow < mediumHigh && slowLow < slowHigh, "each band must be a range");
+  const mediumAverage = (mediumLow + mediumHigh) / 2;
+  assert.ok(mediumAverage >= anchor * 0.9 && mediumAverage <= anchor * 1.1,
+    "a normally-loading page must still pace at the anchor it always did");
+  assert.ok(slowHigh > anchor, "and a page that will not settle must be given longer than the fixed value, not shorter");
+  assert.ok(fastHigh <= mediumHigh && mediumHigh <= slowHigh, "the bands must not cross");
+
+  // Randomised within the band: a run that pauses for exactly the same interval
+  // between hundreds of panels is the one shape a human session never has.
+  assert.match(source, /Math\.round\(low \+ Math\.random\(\) \* \(high - low\)\)/, "the breath is never the same length twice");
+
+  // Every call site takes the same breath — there is one pacing rule, not three.
+  assert.ok(!/await wait\(LIST_PROFILE_PACE_MS\)/.test(source), "no call site may pace itself");
+  assert.equal((source.match(/await paceBetweenApplicants\(\)/g) || []).length, 3,
+    "the two retry paths and the completed row all pace through the one helper");
+
+  // And the run says which tempo it was held at, because "the run was slow" and
+  // "the page never settled" are the same sentence from two ends.
+  assert.match(source, /listDiagnostics\.listScroll\.tempo = tempoSnapshot\(\)/, "the walk reports its own tempo");
+});
