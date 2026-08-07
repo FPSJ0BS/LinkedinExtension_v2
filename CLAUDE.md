@@ -450,9 +450,17 @@ commands are unrecoverable.
 | `npm run validate` | Read-only `dist/` assertions |
 | `npm run clean` | Deletes `dist/` + `.build/`. Unrecoverable. |
 | `npm run check` | typecheck → build → test → validate |
+| `npm run package` | `check` → a versioned installer in `releases/`. Packages `dist/` and **nothing else** — it never reads anywhere else — then reads its own archive back and compares every entry against `dist/` before writing it. |
 
 Fresh clone: `npm install && npm run check`, then load `dist/` at `chrome://extensions`
 (Developer mode → Load unpacked).
+
+Another device: `npm run package`, then send `releases/profile-vault-react-<version>.zip`. It carries
+[INSTALL.md](INSTALL.md) and unzips to an `extension/` folder to Load unpacked. Chrome refuses to
+install an extension from a file — a `.crx` has been blocked outside the Web Store since Chrome 33 —
+so unpacked is the only route, and **nothing about the extension differs in a packaged copy**: no
+added file, no manifest key, no permission. `scripts/zip.mjs` writes the archive format by hand
+because this project has no build dependencies and shipping a zip is not a reason to acquire one.
 
 After editing `src/**` or `content.js`/`connections.js`/`applicants.js`: `npm run build`, reload the
 extension, and reload the LinkedIn tab.
@@ -1455,7 +1463,10 @@ Keep in sync: [WORKFLOW.md](WORKFLOW.md) (how a change is investigated, made, ch
 the working method these rules produce), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md) (with
 [package.json](package.json)), [MEMORY.md](MEMORY.md), [CHECKS.md](CHECKS.md) (**real results only**),
 [PHASES.md](PHASES.md), [PROJECT_STATUS.md](PROJECT_STATUS.md), [CHANGELOG.md](CHANGELOG.md),
-[SKILLS.md](SKILLS.md), [README.md](README.md).
+[SKILLS.md](SKILLS.md), [README.md](README.md), [INSTALL.md](INSTALL.md) (what ships inside the
+installer — it must account for every host permission the manifest asks for, and a test in
+[tests/packaging.test.js](tests/packaging.test.js) fails when a new one is added without explaining
+it there).
 
 **Not binding, and deliberately outside that list:**
 [COMPLETE_EXTRACTION_SPEC.md](COMPLETE_EXTRACTION_SPEC.md) — the proposed target state, in which a

@@ -5,3 +5,7 @@ node_modules/
 # needed again.
 dist/
 .build/
+
+# Installer archives. Derived from dist/ by `npm run package`, and rebuilt from
+# tracked sources at any time, so the binary is never committed.
+releases/

@@ -1,0 +1,61 @@
+{
+  "schema": 2,
+  "id": "TASK-0124",
+  "name": "Add a distributable installer package built by npm run package",
+  "request": "Add a distributable installer package built by npm run package",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T09:17:07.560Z",
+  "completedAt": "2026-08-07T09:28:11.930Z",
+  "startCommit": "235fef8d55a58d2eb4e119aa30f13687afb2d022",
+  "gitRef": "task/TASK-0124",
+  "files": [
+    {
+      "change": "modified",
+      "path": ".gitignore"
+    },
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "added",
+      "path": "INSTALL.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "added",
+      "path": "scripts/package.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "scripts/zip.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/packaging.test.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run package passed end to end: typecheck, build, 437 tests / 0 failed, validate, then a 338 KB archive of 38 files that the packager verified against dist/",
+    "Windows Expand-Archive unpacked the archive and all 38 extracted files hash-match dist/ byte-for-byte",
+    "Get-FileHash confirmed the .sha256 sidecar matches the archive",
+    "git diff --stat over every extension source path returned empty"
+  ],
+  "result": "Added an installer: \npm run package runs the full check then writes releases/profile-vault-react-<version>.zip (INSTALL.md + a byte-for-byte copy of dist/ under extension/) and a .sha256 sidecar. New scripts/zip.mjs writes and reads the ZIP format by hand so no build dependency is added; scripts/package.mjs reads only dist/, refuses a missing or inconsistent build by name, and reads its own archive back — inflating every entry, checking every CRC and comparing against dist/ — before writing it. Added INSTALL.md (Load unpacked steps, why Chrome refuses a .crx or .exe, the keep-the-folder and same-path warnings, data does not travel plus Export all CSV / Import CSV, updating, verifying, uninstalling, troubleshooting), tests/packaging.test.js (5 tests), gitignored releases/, and documented it in CLAUDE.md, README.md and CHANGELOG.md. No extension file changed: manifest.json, content.js, connections.js, applicants.js, src/, the four pages, CSS, icons and vendor all have a zero-line diff."
+}

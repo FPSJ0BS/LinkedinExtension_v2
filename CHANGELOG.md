@@ -1,5 +1,65 @@
 # CHANGELOG.md
 
+## 3.7.14 — an installer, so the extension can be put on another device
+
+Requested outright: *"create an installer through which I can install it in any other device and use
+it on them ... it should not affect the current working of the extension or any other features."*
+
+**Nothing about the extension changed, and nothing could have.** `npm run package` reads `dist/` —
+the folder Chrome already loads (rule 4) — and writes it into an archive. It adds no source file, no
+manifest key and no permission, and it cannot ship anything outside `dist/`, because it never reads
+anywhere else. A packaged copy is byte-for-byte the build a developer loads unpacked, and that is
+asserted from the archive's own bytes rather than assumed.
+
+**Why a `.zip` and not a `setup.exe` or a `.crx`.** Chrome will not install an extension from a
+file: dragging a `.crx` in has been blocked outside the Web Store since Chrome 33, and a desktop
+installer cannot get round that, because it is the browser that declines rather than the operating
+system. The one supported route for an extension distributed outside the store is **Load unpacked**,
+which takes a folder. So the installer is that folder, packed for transport, with the instructions
+inside it. Shipping a `.crx` would have looked more like an installer and installed nothing.
+
+```
+releases/profile-vault-react-<version>.zip
+  profile-vault-react-<version>/
+    INSTALL.md      the instructions, beside the thing they describe
+    extension/      a byte-for-byte copy of dist/ — the folder to select
+releases/profile-vault-react-<version>.zip.sha256
+```
+
+The extension is nested under `extension/` rather than being the top-level folder so the instruction
+can name it: a recipient who selects the folder above gets *"Manifest file is missing or
+unreadable"*, which reads like a broken download rather than a wrong click.
+
+- **`npm run package` is `npm run check` first.** An archive can only be cut from a tree that
+  typechecks, builds, passes its tests and validates, so a broken build cannot become an installer.
+- **It verifies what it wrote.** The archive is read back through its own central directory, every
+  CRC is checked, every entry is inflated and compared against `dist/`, and the packaged manifest is
+  re-parsed to confirm its version. An archive nobody can open is invisible until it reaches the
+  device it was made for.
+- **No new dependency.** Node has no archiver and this project has no build dependencies —
+  `npm test` runs on the built-in runner so a fresh clone needs nothing but Node. `scripts/zip.mjs`
+  writes the format by hand rather than making the installer the first exception to that.
+- **The refusals are named.** A missing `dist/`, a `dist/` not produced by `npm run build`, a
+  manifest and build stamp that disagree, or a file the manifest promises that is not in the folder
+  all stop the package and say which command fixes it.
+- `releases/` is gitignored: derived output, rebuildable from tracked sources, never committed.
+
+[INSTALL.md](INSTALL.md) is written for whoever receives the file rather than for a developer, and
+two of its warnings are load-bearing rather than politeness — both are asserted by a test. Chrome
+loads an unpacked extension from its folder at **every** startup, so deleting or moving that folder
+later uninstalls it; and Chrome derives the extension's identity from that folder's path, and its
+storage from that identity, so a folder that moves comes back as a different extension with an empty
+vault. The guide also states plainly that saved data does **not** travel with the installer, and
+points at **Export all CSV** / **Import CSV** for profiles — while saying that applicants export but
+have no import, so they stay on the device that collected them.
+
+Five tests in `tests/packaging.test.js`: the archive round-trips through an independent read, a
+damaged archive is refused rather than half-read, the packager reads `dist/` and could not read the
+repository, `npm run package` cannot skip its checks, and the install guide keeps the instructions
+and accounts for every host permission the manifest asks for. TASK-0124; `npm run package` passed
+end to end — 437 tests, then a 338 KB archive of 38 files that Windows' own extractor unpacks to
+files identical to `dist/`. Rule 17 still applies: that is the archive verified, not a live install.
+
 ## 3.7.13 — Collect Every Applicant removed
 
 Requested outright: *"remove Collect Every Applicant, its code and function and feature ... that will

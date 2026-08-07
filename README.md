@@ -147,16 +147,35 @@ one step. Nothing already collected is lost.
 - Search, filtering, sorting, pagination, manual editing, deletion, selection
 - CSV import, full CSV export, and an imported-only partial CSV export
 
-## Install the ready build
+## Install
 
-1. Extract the ZIP.
+### On another device — the installer
+
+`npm run package` writes `releases/profile-vault-react-<version>.zip`: the whole extension, with its
+instructions beside it. Copy it across, unzip it, and follow the `INSTALL.md` inside —
+`chrome://extensions` → **Developer mode** → **Load unpacked** → select the `extension` folder.
+
+It is a `.zip` rather than a `setup.exe` because Chrome will not install an extension from a file;
+dragging a `.crx` in has been blocked outside the Web Store for years, and it is the browser that
+declines, not Windows. **Load unpacked** is the supported route, so the installer is the folder it
+needs, packed for transport. The archive ships a `.sha256` beside it, and the packager reads its own
+output back and compares it against `dist/` before writing it.
+
+⚠ Keep the unzipped folder where you put it. Chrome loads the extension from that folder every time
+it starts, and ties the saved data to that folder's path — so moving or deleting it later loses the
+extension, or the vault. [INSTALL.md](INSTALL.md) covers updating in place, moving your saved
+profiles across, and what each thing that can go wrong means.
+
+### From a clone
+
+1. `npm install && npm run check`
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Remove or disable any older Profile Vault extension.
 5. Click **Load unpacked**.
-6. Select the extracted project's `dist` folder.
+6. Select the project's `dist` folder.
 7. Reload any LinkedIn tab that was already open.
-8. Open the extension and confirm the build ID contains `react-v3.7.5`.
+8. Open the extension and confirm the build ID contains `react-v3.7.8`.
 
 ## Use
 
