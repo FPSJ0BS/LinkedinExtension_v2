@@ -1,5 +1,64 @@
 # CHANGELOG.md
 
+## 3.7.16 — "already open" is the panel's answer, never the address bar's
+
+Reported in two halves that are one cause: *"after extracting one applicant the extension opens a
+specific/previous profile again before moving to the next"*, and *"the first applicant on every page
+is saved twice."*
+
+`collectVisibleApplicant` decided whether a row's applicant was already on screen by comparing the
+row's `applicationId` against `location.href` (`rowId !== openId`), and on a match it skipped the
+click **and with it all three of `selectApplicantRow`'s waits** — teardown, arrival, settle-and-ask-
+again. The address bar is the one source the rest of this surface already refuses for exactly this
+question: `panelOwnApplicationId` will not fall back to it, and rule 9g decides arrival from
+identifiers, both because LinkedIn **routes ahead of the render**. So the claim is true while the
+detail column is still showing the *previous* applicant.
+
+It is true at exactly two moments the run did not itself create: the recruiter's own open applicant
+when a run starts, and **the pager press**, after which LinkedIn selects the new page's first
+applicant and writes their id into the address before mounting them. Once per page — which is
+precisely "the first applicant on every page".
+
+Reading that stale panel failed two ways, and the quiet one is the worse:
+
+- when the previous applicant's panel rendered its **own** application link, `assertExpectedApplicant`
+  threw `wrongApplicant`, the row was retried, and the previous applicant was re-read in between —
+  the visible "it goes back to a specific profile before moving on";
+- when it rendered **none**, `describePanelArrival` can only answer `arrived` ("mounted, and no id
+  was rendered to check it against"), because there is no id to contradict the one asked for. So the
+  **previous** applicant was scrolled again, their contact disclosure opened again and their resume
+  downloaded again — and that read was filed under *this* row's application id. One person written
+  twice, per page, with no error anywhere.
+
+**Deduplication could not have fixed this**, which is why none was added: the record is keyed to the
+application that was *asked for*, so a scan that read the wrong panel writes the wrong person under
+the right key. That is not a duplicate key, and no store-side reconciliation can see it. The fix has
+to be that the wrong panel is never read.
+
+`panelAlreadyShowing()` ([applicants.js](applicants.js)) makes the address bar a **hint** — a row it
+does not even claim is certainly not open, so the question is worth asking at all — and the panel the
+**answer**. The claim is accepted only once `describeApplicantArrival` says the panel itself is
+showing this applicant, through the same verdict the click path waits on. A panel positively showing
+somebody else ends the wait immediately and the row is **clicked**: `OTHER` for a third party, and
+`PREVIOUS` against the new `state.lastPanelIdentity` — the identity recorded when the run finished
+the last applicant, which is the only thing that can identify a stale panel carrying no application
+link of its own. `torn-down` and `mounting` still mean only "I could not tell" (3.7.11) and are still
+waited out; only a *positive* arrival may skip the click, and everything else opens the row, which is
+where the walk was going anyway.
+
+It presses nothing and adds no control — a confirmed panel is one click saved, exactly as before —
+so the seven-click budget, rule 9's list of controls, the PERMANENT resume chain, the contact
+disclosure, the roster and page boundary (3.7.12), the pager (rule 9h), Start/Stop, the auto-run and
+every extracted field are untouched. `roster.reset()` on a pager press still resets the *page's*
+membership while `processed` — the run's ledger of finished rows — deliberately survives it, which is
+what makes the first applicant of page two a new person rather than a repeat.
+
+Locked by *"an applicant is opened, read and saved exactly once, and 'already open' is the panel's
+answer"*, which asserts the three arrival verdicts that made the defect silent, the hint-then-confirm
+shape, one read and one row click per applicant, and the unchanged click budget. Three existing
+assertions that pinned the old `rowId !== openId` line were repointed at the new decision rather than
+deleted, and one now fails if the address bar is ever allowed to decide on its own again.
+
 ## 3.7.15 — the applicant export is the applicants table, and nothing else
 
 Requested outright, against a screenshot of the rendered table: *"update only the download/export

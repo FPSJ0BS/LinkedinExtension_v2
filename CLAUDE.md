@@ -1098,9 +1098,34 @@ save → click next applicant`. Every clause of it is load-bearing.
   (`assertExpectedApplicant`), because a wait is a race that can be lost and losing it saved three
   applicants under one name. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
-  already shown is not re-clicked (`rowId !== openId`), and a row that came up as **somebody else**
+  already shown is not re-clicked (`panelAlreadyShowing`), and a row that came up as **somebody else**
   is *skipped* rather than scanned as them — with the arrival verdict's own reason on
   `state.lastArrival`.
+
+  **⚠ "Already open" is the PANEL's answer, never the address bar's** (amended in 3.7.16, and this
+  clause was written by breaking it). That test was `rowId !== openId` — a comparison against
+  `location.href` — and on a true answer it skipped the click **and with it all three waits above**.
+  The address bar is the one source this rule already refuses everywhere else, because LinkedIn
+  **routes ahead of the render**: the claim is true while the column is still showing the *previous*
+  person. It is true at exactly two moments the run did not itself create — the recruiter's own open
+  applicant when a run starts, and **the pager press**, after which LinkedIn selects the new page's
+  first applicant and writes their id into the address before mounting them. Once per page, which is
+  the whole of the reported *"the first applicant on every page is saved twice"*. Reading the stale
+  panel then failed two ways: when it rendered its own application link `assertExpectedApplicant`
+  threw and the row was opened again with the previous applicant re-read in between — the visible
+  *"it goes back to a specific/previous profile before moving on"* — and when it rendered none,
+  `describePanelArrival` can only answer `arrived` ("mounted, and no id was rendered to check it
+  against"), so the **previous** applicant was scrolled again, their contact disclosure opened again
+  and their resume downloaded again, and that read was filed under *this* row's application id. One
+  person written twice, silently, with no error anywhere. **No store-side deduplication can catch
+  that** — it is the wrong person under the right key, not a duplicate key. So the address bar is a
+  *hint* that makes the question worth asking, and `panelAlreadyShowing()` only accepts it once
+  `describeApplicantArrival` says the panel itself is showing this applicant. A panel positively
+  showing somebody else — `OTHER`, or `PREVIOUS` against `state.lastPanelIdentity`, the identity the
+  run recorded when it finished the last applicant — ends the wait at once and the row is **clicked**,
+  because clicking the row the walk is owed is the whole of moving forward. `torn-down` and `mounting`
+  still mean only "I could not tell" and are still waited out. It presses nothing and adds no control:
+  a confirmed panel is one click saved, exactly as before, and the seven-click budget is unchanged.
   **The wait is time given to the panel, not a verdict on the applicant** (3.7.11): a wait that
   cannot be answered — `torn-down` from a panel this markup will not let it resolve, `mounting` from
   one whose headings it cannot see — used to skip the person, and that stopped the run reading anybody

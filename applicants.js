@@ -118,6 +118,17 @@
     noticeTimer: null,
     wentHidden: false,
     /**
+     * Who the detail panel was showing when the run finished with an applicant.
+     *
+     * The one thing that tells "the panel has not caught up yet" apart from "the
+     * panel genuinely holds this row's applicant" on markup that renders no
+     * application link of its own — where `describePanelArrival` can only answer
+     * ARRIVED, because there is no id to contradict the one that was asked for.
+     * A panel identical to the one the last applicant was read off IS that
+     * applicant, whatever else cannot be read from it. See `panelAlreadyShowing`.
+     */
+    lastPanelIdentity: "",
+    /**
      * Coming back to a job the recruiter already started a run on.
      *
      * `lastKey` is the view this page was showing the last time it was looked
@@ -4549,6 +4560,79 @@
   const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false });
 
   /**
+   * Is the detail panel **already showing this row's applicant**, so that opening
+   * them costs no click at all?
+   *
+   * **THE DEFECT THIS REPLACES, and it is both halves of one report:** *"after
+   * extracting one applicant it opens a specific/previous profile again before
+   * moving to the next"*, and *"the first applicant on every page is saved
+   * twice."*
+   *
+   * The question used to be asked of `location.href` — `rowId !== openId` — and
+   * the address bar is the one source on this surface that cannot answer it.
+   * LinkedIn **routes ahead of the render**: that is why `panelOwnApplicationId`
+   * refuses to fall back to it, why `describePanelArrival` is built out of the
+   * panel's own links, and why rule 9g says an arrival is decided from
+   * identifiers rather than from the URL. The claim is true the instant a route
+   * happens and stays true while the column is still showing the **previous**
+   * person, and there are exactly two moments a route happens that this run did
+   * not make itself: the recruiter's own open applicant when a run starts, and
+   * **the pager press**, after which LinkedIn selects the new page's first
+   * applicant and writes their id into the address bar before mounting them.
+   * Once per page, in other words — precisely "the first applicant on every
+   * page".
+   *
+   * On that answer the run skipped the click **and with it all three of
+   * `selectApplicantRow`'s waits**, and read whatever was on screen:
+   *
+   *   - when the stale panel rendered its own application link,
+   *     `assertExpectedApplicant` threw `wrongApplicant`, the row was opened
+   *     again, and the previous applicant was re-read in between — the visible
+   *     "it goes back to a specific profile before moving on";
+   *   - and when it rendered none, `describePanelArrival` answers ARRIVED
+   *     ("mounted, and no id was rendered to check it against"), so the
+   *     **previous** applicant was scrolled again, their contact disclosure
+   *     opened again and their resume downloaded again — and the record was then
+   *     filed under *this* row's application id. One person written twice, once
+   *     per page, with no error anywhere.
+   *
+   * So the address bar is a **hint** and the panel is the **answer**. The claim
+   * is only accepted once the panel itself says it is showing this applicant,
+   * through the same `describeApplicantArrival` the click path waits on — time
+   * given to the panel, never a verdict on the applicant (rule 9g). A panel that
+   * is positively **somebody else** — a third party (`OTHER`) or the applicant
+   * this run last finished with (`PREVIOUS`) — ends the wait immediately, because
+   * the answer to that is to click the row, which is where the walk was going
+   * anyway. `TORN_DOWN` and `MOUNTING` still mean only "I could not tell", and
+   * are still waited out.
+   *
+   * It presses nothing and adds no control: a confirmed panel is one click saved,
+   * exactly as before, and a refused one falls through to the single gated row
+   * click rule 9g already names.
+   */
+  async function panelAlreadyShowing(rowId) {
+    const wanted = cleanText(rowId).toLowerCase();
+    if (!wanted) return false;
+    // The hint, and only ever a hint: it is what makes this worth asking at all,
+    // because a row the address bar does not even claim is certainly not open.
+    const claimed = cleanText(Applicants.parseHiringContext(location.href).applicationId).toLowerCase();
+    if (claimed !== wanted) return false;
+
+    const previous = cleanText(state.lastPanelIdentity);
+    const settled = (verdict) => verdict.arrived
+      || verdict.state === Applicants.PANEL_ARRIVAL.OTHER
+      || verdict.state === Applicants.PANEL_ARRIVAL.PREVIOUS;
+    const seen = await waitFor(() => {
+      const verdict = describeApplicantArrival(rowId, previous);
+      return settled(verdict) ? verdict : null;
+    }, { timeoutMs: PANEL_ARRIVAL_TIMEOUT_MS, pollMs: 200, label: "applicant-panel-open" });
+
+    state.lastArrival = seen || describeApplicantArrival(rowId, previous);
+    state.lastArrivalConfirmed = Boolean(seen?.arrived);
+    return Boolean(seen?.arrived);
+  }
+
+  /**
    * Open this row's applicant, let the panel load, walk it to the bottom, take
    * what it rendered, disclose their contact details and save their resume.
    *
@@ -4558,15 +4642,21 @@
    * `PV_APPLICANT_EXTRACT`'s own path with the section expander off.
    */
   async function collectVisibleApplicant(row, rowId) {
-    const openId = Applicants.parseHiringContext(location.href).applicationId || "";
-    // Not re-clicked when the panel is already showing them, and it costs no
-    // extra click either way.
-    if (!rowId || rowId !== openId) {
+    // Not re-clicked when the panel is genuinely showing them — asked of the
+    // panel and waited for, never taken from the address bar — and it costs no
+    // extra click either way. A panel that cannot be confirmed is **opened**,
+    // because clicking the row the walk is owed is the whole of moving forward.
+    if (!(await panelAlreadyShowing(rowId))) {
       if (!(await selectApplicantRow(row))) return { opened: false, record: null };
     }
     // The row's own id travels with the request, so the extraction can refuse to
     // build a record out of anybody else's panel.
     const { record } = await extractApplicant({ ...VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId });
+    // Who the panel was showing when this applicant was finished with. Recorded
+    // here rather than inferred later, because it is what makes the next row's
+    // "is it already open" question answerable on markup that renders no
+    // application link — see `panelAlreadyShowing`.
+    state.lastPanelIdentity = panelIdentity();
     return { opened: true, record };
   }
 

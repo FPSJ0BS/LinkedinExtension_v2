@@ -1,0 +1,35 @@
+{
+  "schema": 2,
+  "id": "TASK-0127",
+  "name": "Open each applicant exactly once: the already-open test asks the panel, never the address bar",
+  "request": "Open each applicant exactly once: the already-open test asks the panel, never the address bar",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T10:44:26.591Z",
+  "completedAt": "2026-08-07T10:51:40.318Z",
+  "startCommit": "0e5b4db2de0231cca32330b1bbf81a4ff4fd7253",
+  "gitRef": "task/TASK-0127",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm test passed (441/441)",
+    "npm run check passed (typecheck, build, test 441/441, validate 31 build files)"
+  ],
+  "result": "The applicant walk's 'is this row already open' test asks the panel instead of the address bar. collectVisibleApplicant compared the row's applicationId against location.href (rowId !== openId) and on a match skipped the click AND all three of selectApplicantRow's waits - teardown, arrival, settle-and-ask-again. LinkedIn routes ahead of the render (the reason panelOwnApplicationId refuses the address bar and rule 9g decides arrival from identifiers), so that claim is true while the column still shows the PREVIOUS applicant. It is true at exactly two moments the run did not create: the recruiter's own open applicant at run start, and the pager press, after which LinkedIn selects the new page's first applicant and writes their id into the address before mounting them - once per page, which is the reported 'first applicant on every page is saved twice'. Reading the stale panel failed two ways: with its own application link rendered, assertExpectedApplicant threw wrongApplicant and the row was retried with the previous applicant re-read in between (the visible 'goes back to a specific/previous profile'); with none rendered, describePanelArrival can only answer arrived - no id to contradict the one asked for - so the previous applicant was scrolled, disclosed and resume-downloaded again and filed under THIS row's application id. Deduplication cannot catch that: it is the wrong person under the right key. New panelAlreadyShowing() keeps the address bar as a hint (a row it does not claim is certainly not open) and makes the panel the answer, accepting the claim only once describeApplicantArrival confirms it; OTHER, or PREVIOUS against the new state.lastPanelIdentity recorded when the run finished the last applicant, ends the wait at once and the row is clicked; torn-down and mounting still mean 'I could not tell' and are still waited out. Presses nothing and adds no control - the seven-click budget, rule 9's controls, the PERMANENT resume chain, the contact disclosure, the roster and page boundary, the pager, Start/Stop, the auto-run and every extracted field are untouched; roster.reset() on a pager press still resets the page's membership while processed survives it. Files: applicants.js, tests/applicants-core.test.js (one new test, three existing assertions repointed off the old rowId !== openId line), CLAUDE.md rule 9g, CHANGELOG.md 3.7.16."
+}

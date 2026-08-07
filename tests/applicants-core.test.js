@@ -1399,7 +1399,8 @@ test("the list pass opens every applicant across every page and takes what the p
   assert.match(reveal, /await extractApplicant\(\{ \.\.\.VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId \}\)/,
     "and the reading rule is the shared one, told which applicant it is for");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
-  assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
+  assert.match(reveal, /if \(!\(await panelAlreadyShowing\(rowId\)\)\) \{/,
+    "and not re-clicked when the PANEL says it already shows them — never when only the address bar does");
   assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
 
   // `expand: false` is also the flag `extractApplicant` turns into a null
@@ -1944,8 +1945,10 @@ test("the run walks the list by identity, so a position can never address the wr
 
   // The first row is no longer assumed to be the one already open.
   assert.ok(!/if \(index > 0\) \{/.test(run), "`index > 0` assumed the open panel was row zero");
-  assert.match(source, /if \(!rowId \|\| rowId !== openId\) \{/,
-    "the panel is opened unless the address bar already says it shows this row");
+  assert.match(source, /if \(!\(await panelAlreadyShowing\(rowId\)\)\) \{/,
+    "the panel is opened unless the PANEL ITSELF already says it shows this row");
+  assert.ok(!/rowId !== openId/.test(withoutComments(source)),
+    "the address bar can no longer decide on its own that an applicant is already open");
   // Still exactly seven click call sites: this adds no control (rule 9).
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
 });
@@ -2920,6 +2923,112 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
 });
 
+test("an applicant is opened, read and saved exactly once, and 'already open' is the panel's answer", async () => {
+  // THE REPORT, in two halves that are one cause: "after extracting one
+  // applicant the extension opens a specific/previous profile again before
+  // moving to the next", and "the first applicant on every page is saved twice".
+  //
+  // `collectVisibleApplicant` decided "this row is already open" from
+  // `location.href` (`rowId !== openId`), and on that answer it skipped the click
+  // AND every wait in `selectApplicantRow`. LinkedIn routes **ahead of the
+  // render** — the whole reason `panelOwnApplicationId` refuses the address bar
+  // outright — so the claim is true while the column is still showing the
+  // PREVIOUS applicant. It is true exactly once per page: at the start of a run,
+  // and after the pager press, which selects the new page's first applicant and
+  // writes their id into the address before mounting them. Once per page is
+  // precisely "the first applicant on every page".
+
+  // 1. Why reading the stale panel was SILENT rather than caught. A panel that
+  //    renders no application link of its own cannot contradict the id that was
+  //    asked for, so the arrival verdict is ARRIVED and the record guard
+  //    (`assertExpectedApplicant`, which only ever fires on OTHER) cannot save it.
+  const stale = "in:https://www.linkedin.com/in/previous-applicant";
+  const blind = Applicants.describePanelArrival({
+    expected: "25550787924", applicationId: "", identity: stale, sections: 3, connected: true
+  });
+  assert.equal(blind.state, Applicants.PANEL_ARRIVAL.ARRIVED,
+    "a panel carrying no id of its own answers ARRIVED whoever it is actually showing");
+
+  // 2. Which is why the run has to say who it last finished with: a panel
+  //    identical to the one the previous applicant was read off IS that
+  //    applicant, whatever else cannot be read from it.
+  const known = Applicants.describePanelArrival({
+    expected: "25550787924", applicationId: "", identity: stale, previousIdentity: stale,
+    sections: 3, connected: true
+  });
+  assert.equal(known.state, Applicants.PANEL_ARRIVAL.PREVIOUS,
+    "and that same panel, named as the one just read, is the previous applicant");
+
+  // 3. A stale panel that DOES carry its id is somebody else outright — the
+  //    noisier half of the same defect, and the one that cost a visible re-open.
+  const other = Applicants.describePanelArrival({
+    expected: "25550787924", applicationId: "25550700000", identity: "id:25550700000",
+    sections: 3, connected: true
+  });
+  assert.equal(other.state, Applicants.PANEL_ARRIVAL.OTHER, "a different id is a different applicant");
+
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // 4. So the address bar is a HINT and the panel is the ANSWER.
+  const ask = source.slice(
+    source.indexOf("async function panelAlreadyShowing"),
+    source.indexOf("async function collectVisibleApplicant")
+  );
+  assert.ok(ask.length > 200, "the already-open test must be its own step");
+  assert.match(ask, /if \(claimed !== wanted\) return false;/,
+    "a row the address bar does not even claim is certainly not open");
+  assert.match(ask, /const seen = await waitFor\(\(\) => \{[\s\S]{0,200}?describeApplicantArrival\(rowId, previous\)/,
+    "and a row it does claim is waited for on the panel, exactly as the click path waits");
+  assert.match(ask, /verdict\.state === Applicants\.PANEL_ARRIVAL\.OTHER/, "somebody else ends the wait");
+  assert.match(ask, /verdict\.state === Applicants\.PANEL_ARRIVAL\.PREVIOUS/,
+    "and so does the applicant this run last finished with");
+  assert.match(ask, /return Boolean\(seen\?\.arrived\);/,
+    "only a positive arrival may skip the click; 'I could not tell' opens the row");
+  assert.ok(!/\.click\(\)/.test(ask), "asking the panel presses nothing");
+
+  // 5. And all it decides is whether the row is CLICKED — never whether the
+  //    applicant is read. A panel that cannot be confirmed is opened.
+  const open = source.slice(
+    source.indexOf("async function collectVisibleApplicant"),
+    source.indexOf("async function extractAllApplicants")
+  );
+  assert.match(open, /if \(!\(await panelAlreadyShowing\(rowId\)\)\) \{\s*\n\s*if \(!\(await selectApplicantRow\(row\)\)\) return \{ opened: false, record: null \};/,
+    "an unconfirmed panel is opened by clicking the row the walk is owed");
+  assert.match(open, /state\.lastPanelIdentity = panelIdentity\(\);/,
+    "and who was on screen when this applicant was finished with is recorded for the next row");
+  assert.equal((open.match(/extractApplicant\(/g) || []).length, 1, "one read per applicant");
+  assert.equal((open.match(/selectApplicantRow/g) || []).length, 1, "and one row click per applicant");
+
+  // 6. Why deduplication alone could never have fixed this. The record is keyed
+  //    to the application that was ASKED for, so a scan that read the wrong panel
+  //    writes the WRONG PERSON under the RIGHT id — which is not a duplicate key
+  //    and no store-side reconciliation can catch it. The braces have to be that
+  //    the wrong panel is never read.
+  const extract = source.slice(
+    source.indexOf("async function extractApplicant"),
+    source.indexOf("// ------------------------------------------------------- every applicant")
+  );
+  assert.match(extract, /context: expected \? \{ \.\.\.context, applicationId: expected \} : context,/,
+    "the record is keyed to the applicant that was asked for");
+  assert.equal((extract.match(/assertExpectedApplicant\(expected\)/g) || []).length, 3,
+    "and the panel is checked three times — none of which a panel rendering no id can fail");
+
+  // 7. A new page resets the PAGE's membership and never the RUN's ledger: that
+  //    is what makes the first applicant of page two a new person rather than a
+  //    repeat, and what stops page one being walked a second time.
+  const run = source.slice(
+    source.indexOf("async function extractAllApplicants"),
+    source.indexOf("async function runEveryApplicant")
+  );
+  assert.match(run, /roster\.reset\(\);\s*\n\s*pageSettled = false;/, "a pager press is a new page");
+  assert.ok(!/processed\.clear\(\)/.test(run), "but the run's ledger of finished rows survives every page");
+  assert.match(run, /processed\.add\(key\);\s*\n\s*state\.run\.index = processed\.size;/,
+    "and a collected row joins that ledger before the walk moves on");
+
+  // Rule 9: none of this adds a control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
   const view = Applicants.applicantsViewKey;
   const JOB = "4277798308";
@@ -3343,7 +3452,8 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   // One per-row path since 3.7.13, so this is `collectVisibleApplicant` — the
   // permanent clause is untouched, only where it lives.
   const open = source.slice(source.indexOf("async function collectVisibleApplicant"), source.indexOf("async function extractAllApplicants"));
-  assert.match(open, /if \(!rowId \|\| rowId !== openId\) \{/, "an applicant already open is not clicked again");
+  assert.match(open, /if \(!\(await panelAlreadyShowing\(rowId\)\)\) \{/,
+    "an applicant already open is not clicked again — and 'already open' is the panel's answer, never the URL's");
   assert.match(open, /if \(!\(await selectApplicantRow\(row\)\)\) return \{ opened: false, record: null \};/,
     "a row that would not open returns, never scanned as them");
   assert.equal((open.match(/selectApplicantRow/g) || []).length, 1,
