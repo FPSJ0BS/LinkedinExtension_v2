@@ -3891,6 +3891,111 @@
   }
 
   /**
+   * How many scroll passes settling ONE page of the list may cost.
+   *
+   * A page is 25 rows — roughly 2000px — so this covers walking it top to bottom
+   * about three times over, plus the `LIST_QUIET_PASSES` confirmations. It is
+   * deliberately far smaller than `LIST_MAX_PASSES`: this walks a page, never a
+   * list, and a budget large enough to walk a list would hide a page that never
+   * settles instead of ending it.
+   */
+  const LIST_PAGE_PASSES = 24;
+
+  /**
+   * Settle THIS page: every row it holds, in the order it holds them, before a
+   * single applicant on it is opened — and never touching the pager.
+   *
+   * **THE REPORT: "it did not even collect all the applicants in one page ...
+   * make sure it is working in a sequence, collecting all applicants before
+   * moving to next page."** Both halves of that came from the same absence. The
+   * run knew only which rows were mounted at the instant it looked, so:
+   *
+   *   - it started wherever the recruiter had left the list, and
+   *     `growApplicantList` only ever scrolls DOWN, so every row above that
+   *     point was never mounted, never offered and never collected — and the
+   *     pager was then pressed on a page that was never finished;
+   *   - and "which row next" was "whichever unfinished row is rendered first",
+   *     which a virtualized window re-centring on the applicant just opened
+   *     re-answers differently every time. That is the reported back-and-forth:
+   *     the window re-mounts rows above the one just collected, they are
+   *     unprocessed, they render first, and the walk steps backwards.
+   *
+   * Settling the page fixes both at their root, because it converts "what is
+   * mounted" into the two facts the walk actually needs — who is on this page,
+   * and in what order (`Applicants.createApplicantRoster`). It starts at the
+   * **top** for the first of those reasons and it confirms the bottom for the
+   * second, on the same "growth means rows never seen before, never a scroll
+   * that happened" rule the rest of this surface is bounded by.
+   *
+   * It presses nothing. Paging forward stays the caller's decision, made only
+   * once the roster it settled here has been finished with, which is the whole
+   * of "all applicants before the next page".
+   *
+   * `wanted` lets a caller stop early — used when the run is looking for rows
+   * the page still owes it rather than settling the page for the first time.
+   */
+  async function sweepCurrentPage(roster, diagnostics, wanted = null) {
+    const walk = diagnostics.listScroll || createListWalk(diagnostics);
+    const list = await waitForApplicantList();
+    if (!list) {
+      walk.stoppedBy = "no-list";
+      return false;
+    }
+    // The top, because the rows this is here to find are the ones above wherever
+    // the list happens to be sitting. A run resumed on a half-scrolled list, or
+    // one LinkedIn scrolled to the open applicant, has them all behind it.
+    scrollPanelTo(0, chooseScrollTarget(list));
+    await waitForDomQuiet(320, 2000);
+
+    let quiet = 0;
+    for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
+      assertRunnable();
+      // Re-resolved every pass, for the reason `waitForApplicantList` exists:
+      // the hiring view re-mounts, and a detached container keeps answering with
+      // the range it had when it was unmounted.
+      const live = await waitForApplicantList();
+      if (!live) {
+        walk.stoppedBy = "no-list";
+        return false;
+      }
+      const target = chooseScrollTarget(live);
+      // ONE list scan per pass, and both answers taken from it.
+      const gained = roster.add(applicantRows());
+      walk.rows = Math.max(walk.rows, roster.size);
+      walk.passes += 1;
+      // Found what the caller came for. The list is deliberately left where it
+      // is, because where it is, is where that row is mounted.
+      if (typeof wanted === "function" && wanted()) return true;
+
+      const max = maxScrollPosition(target);
+      const position = currentScrollTop(target);
+      const atBottom = position >= max - 8;
+      quiet = gained > 0 ? 0 : quiet + 1;
+      // The bottom is confirmed rather than believed on sight: LinkedIn fetches
+      // the rest of the page over the network, and a slice still in flight looks
+      // exactly like a page that has ended.
+      if (atBottom && quiet >= LIST_QUIET_PASSES) {
+        // Settled — and handed back at the TOP, because the first applicant of
+        // this page is the next one the run opens. Leaving it at the bottom
+        // would start the page at its last row and then need a sweep back up
+        // for every row above it: correct, but the slow way round.
+        scrollPanelTo(0, chooseScrollTarget((await waitForApplicantList()) || live));
+        await waitForDomQuiet(320, 2000);
+        roster.add(applicantRows());
+        return true;
+      }
+
+      if (!atBottom) scrollPanelTo(position + Math.max(500, (target?.clientHeight || 600) * 0.8), target);
+      // Either this really is the bottom, or the container being driven is not
+      // the one that scrolls. Dragging the last row into view settles it without
+      // needing to know which.
+      else nudgeListToLastRow();
+      await waitForDomQuiet(380, 2800);
+    }
+    return false;
+  }
+
+  /**
    * Reveal more rows — once, and only because the run has just run out of them.
    *
    * THE REPORT: "you do not need to scroll [the applicant list] in the start,
@@ -4305,8 +4410,45 @@
      * pause is the one case where the row still has to be done.
      */
     const processed = new Set();
-    const unprocessedRows = () => Applicants.unprocessedApplicantRows(applicantRows(), processed);
-    const nextRow = () => unprocessedRows()[0] || null;
+
+    /**
+     * Who is on the page being walked, and in what order — settled before
+     * anybody on it is opened, and reset when the pager moves to the next one.
+     *
+     * THE DEFECT THIS REPLACES, reported in two halves that turned out to be one
+     * cause. "It saves a profile, goes to a specific profile, then to the next,
+     * saves, then back to that specific profile" — and "it did not even collect
+     * all the applicants in one page." The ledger above answers "have I finished
+     * with this row"; nothing answered "which row is next" or "is this page
+     * done", and the DOM was left to imply both. It cannot: `applicantRows()` is
+     * whatever is mounted at the instant it is asked, LinkedIn re-centres that
+     * window on the applicant whose panel it has just opened, and rows above the
+     * scroll position the run happened to start at were never mounted at all.
+     * So the walk stepped backwards and forwards through the re-mounted window,
+     * and pressed the pager on a page it had only partly opened.
+     *
+     * See `sweepCurrentPage` for the settle and `Applicants.createApplicantRoster`
+     * for the ordering.
+     */
+    const roster = Applicants.createApplicantRoster();
+
+    /**
+     * One list scan, and the roster learns from every one of them.
+     *
+     * This is the hook that keeps the roster honest between settles: the run
+     * reads the list several times per applicant anyway, so a row LinkedIn
+     * mounts late is merged into its own place on the page at no extra cost —
+     * `roster.add` is a merge-insert, so it lands between the rows it rendered
+     * between rather than after everything already known.
+     */
+    const unprocessedRows = () => {
+      const rendered = applicantRows();
+      roster.add(rendered);
+      return Applicants.unprocessedApplicantRows(rendered, processed);
+    };
+
+    /** Has this page been walked end to end, so its roster is its membership? */
+    let pageSettled = false;
 
     /**
      * How many times running the CURRENT row has ended with the page hidden.
@@ -4361,14 +4503,37 @@
       //
       // Reading the list is not free: `applicantRows()` walks every `a[href]` in
       // the list and, before this, took `innerText` on each — a forced layout
-      // per row. The turn used to do that twice (`nextRow()`, then the `known`
-      // bookkeeping), and a resumed run spends most of its turns skipping rows
+      // per row. The turn used to do that twice (once to pick the next row, and
+      // again for the `known` bookkeeping), and a resumed run spends most of its
+      // turns skipping rows
       // that are already saved, so a mostly-collected 665-applicant job was
       // paying well over a thousand full list scans to decide it had nothing to
       // do. The DOM cannot change between those two reads — nothing here awaits
       // — so one scan is not merely cheaper, it is the only honest number.
       let pending = unprocessedRows();
-      if (!pending.length) {
+      // Back into PAGE order. `pending` is whatever the list has mounted, in
+      // whatever order it mounted it; the roster is where those rows sit on the
+      // page. Without this the walk takes the first row the window happens to
+      // render, which is how it kept stepping back to an applicant it had
+      // already passed.
+      pending = roster.sort(pending);
+
+      /**
+       * The next row of this page, in the PAGE's order — mounted or not.
+       *
+       * This is the whole of "make sure it is working in a sequence". `pending`
+       * can only offer what the list has mounted, and a virtualized window that
+       * re-centres on the applicant just opened decides that. Asking the roster
+       * instead means the run waits for the row that is genuinely next and
+       * refuses to open whoever happens to be on screen in their place.
+       *
+       * `roster.sort` guarantees that when this row IS mounted it is `pending[0]`
+       * — it holds the lowest roster position of anything unprocessed — so the
+       * common case costs one string comparison and no scrolling at all.
+       */
+      const owed = roster.next(processed);
+      const ready = pending.length > 0 && rowKey(pending[0]) === owed;
+      if (!pageSettled || !ready) {
         /**
          * THE STOP AFTER N PROFILES, and it is not a counter anywhere.
          *
@@ -4391,8 +4556,73 @@
          * minutes hidden ends the run — so nothing here can spin.
          */
         let grown;
+        const pagedBefore = listDiagnostics.listScroll.paged;
         try {
-          grown = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
+          /**
+           * THE PAGE BOUNDARY, and it is a step of its own on purpose.
+           *
+           * **"Make sure it is working in a sequence, collecting all applicants
+           * before moving to next page."** Neither half of that was ever
+           * decidable before, because the run's only notion of the page was
+           * "rows that happen to be mounted". Settling it end to end, from the
+           * top, is what turns that into membership: after this the roster IS
+           * the page, so "next" means the next row on it and "finished" means
+           * all of them — not "nothing unprocessed is on screen".
+           *
+           * It costs one walk of ~25 rows per page, and it is emphatically not
+           * the up-front walk 3.7.8 removed: that one walked the WHOLE list,
+           * every page of a 665-applicant job, before a single person was
+           * opened. This walks the page the run has just arrived at, and only
+           * that page.
+           */
+          if (!pageSettled) {
+            await sweepCurrentPage(roster, listDiagnostics);
+            pageSettled = true;
+            pending = roster.sort(unprocessedRows());
+          }
+
+          /**
+           * The row this page owes next is not mounted, so bring THAT row back.
+           *
+           * A virtualized list recycles, so "the next row is not on screen" is
+           * not "the next row is done" — and treating the two as the same thing
+           * is both halves of the report at once: the walk opened whoever the
+           * window was showing instead (the back-and-forth), and pressed the
+           * pager while rows it had never opened were still on the page.
+           *
+           * The sweep is asked for that one row and stops the moment it mounts.
+           * Only a row that survives a confirmed walk of the whole page is
+           * retired, because by then it is not on the page any more — and it is
+           * retired one at a time, so a single vanished row costs one sweep
+           * rather than condemning every row still outstanding.
+           */
+          const target = roster.next(processed);
+          const mounted = (key) => unprocessedRows().some((candidate) => rowKey(candidate) === key);
+          if (target && !mounted(target)) {
+            await sweepCurrentPage(roster, listDiagnostics, () => mounted(target));
+            pending = roster.sort(unprocessedRows());
+            if (!mounted(target)) {
+              processed.add(target);
+              state.run.skipped += 1;
+              state.run.index = processed.size;
+              state.run.lastError = `A row on this page could not be found again and was skipped (${target}).`;
+              console.warn(`[Profile Vault ${BUILD_ID}] a row vanished from the page`, target);
+              continue;
+            }
+          }
+
+          if (!pending.length) {
+            grown = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
+            // A pager press is a NEW page: nothing about the old roster survives
+            // it, and the new one is settled before anybody on it is opened, so
+            // page two is walked in its own order from its own first row.
+            if (listDiagnostics.listScroll.paged !== pagedBefore) {
+              roster.reset();
+              pageSettled = false;
+              await sweepCurrentPage(roster, listDiagnostics);
+              pageSettled = true;
+            }
+          }
         } catch (error) {
           if (error?.stopped) {
             state.run.state = Applicants.RUN_STATE.STOPPED;
@@ -4411,41 +4641,47 @@
           beginRun();
           continue;
         }
-        known = grown;
-        // The DOM genuinely moved, so this re-scan is the one that is earned.
-        pending = unprocessedRows();
-        if (!pending.length) {
-          if (listDiagnostics.listScroll.stoppedBy === "running") {
-            listDiagnostics.listScroll.stoppedBy = "list-exhausted";
-          }
-          const stoppedBy = listDiagnostics.listScroll.stoppedBy;
-          // "No new row" is not "no more applicants", and the difference decides
-          // whether this job can ever restart: `claimAutoRun` will not re-arm a
-          // job whose execution reported COMPLETED, so claiming it here without
-          // having reached the end of the list disables the reload-resume too.
-          //
-          // `list-exhausted` is inconclusive despite the name it is recorded
-          // under. Growth only leaves `stoppedBy` at "running" when it returned
-          // early because `wanted()` was true — it had found an unprocessed row —
-          // so arriving here means that row was recycled out of the DOM between
-          // its check and this re-scan. That is a race on a virtualized list, not
-          // the end of one, and the retry resolves it on the next pass.
-          if (Applicants.isConclusiveListStop(stoppedBy)) {
-            state.run.state = Applicants.RUN_STATE.COMPLETED;
+        // `grown` is undefined when the settle — or the sweep for a row this
+        // page still owed — produced the work, so the pager was never consulted
+        // and there is no verdict to read. Fall through and open somebody.
+        if (grown !== undefined) {
+          known = grown;
+          // The DOM genuinely moved, so this re-scan is the one that is earned —
+          // and in page order, because the page it reads may be a new one.
+          pending = roster.sort(unprocessedRows());
+          if (!pending.length) {
+            if (listDiagnostics.listScroll.stoppedBy === "running") {
+              listDiagnostics.listScroll.stoppedBy = "list-exhausted";
+            }
+            const stoppedBy = listDiagnostics.listScroll.stoppedBy;
+            // "No new row" is not "no more applicants", and the difference decides
+            // whether this job can ever restart: `claimAutoRun` will not re-arm a
+            // job whose execution reported COMPLETED, so claiming it here without
+            // having reached the end of the list disables the reload-resume too.
+            //
+            // `list-exhausted` is inconclusive despite the name it is recorded
+            // under. Growth only leaves `stoppedBy` at "running" when it returned
+            // early because `wanted()` was true — it had found an unprocessed row —
+            // so arriving here means that row was recycled out of the DOM between
+            // its check and this re-scan. That is a race on a virtualized list, not
+            // the end of one, and the retry resolves it on the next pass.
+            if (Applicants.isConclusiveListStop(stoppedBy)) {
+              state.run.state = Applicants.RUN_STATE.COMPLETED;
+              break;
+            }
+            inconclusive += 1;
+            if (inconclusive < MAX_INCONCLUSIVE_GROWTHS) continue;
+            // Out of retries and still unable to see the end of the list. This must
+            // NOT be COMPLETED: stopping leaves the standing instruction armed, so
+            // staying on the tab or reloading picks the run up again.
+            state.run.state = Applicants.RUN_STATE.STOPPED;
+            state.run.lastError =
+              `Stopped after ${processed.size} applicant(s): the list would not reveal more rows (${stoppedBy}). `
+              + "The run is not complete — it will continue when this page is reloaded or reopened.";
             break;
           }
-          inconclusive += 1;
-          if (inconclusive < MAX_INCONCLUSIVE_GROWTHS) continue;
-          // Out of retries and still unable to see the end of the list. This must
-          // NOT be COMPLETED: stopping leaves the standing instruction armed, so
-          // staying on the tab or reloading picks the run up again.
-          state.run.state = Applicants.RUN_STATE.STOPPED;
-          state.run.lastError =
-            `Stopped after ${processed.size} applicant(s): the list would not reveal more rows (${stoppedBy}). `
-            + "The run is not complete — it will continue when this page is reloaded or reopened.";
-          break;
         }
-        // A growth that produced work starts the allowance over: three slow or
+        // A pass that produced work starts the allowance over: three slow or
         // budget-bound attempts spread across a long run are not a stuck list.
         inconclusive = 0;
       }
@@ -4480,6 +4716,10 @@
       // is known to remain. `known` is still the high-water mark of rendered
       // rows, which is all the DOM can honestly say about a paginated list.
       known = Math.max(known, processed.size + pending.length);
+      // And the roster knows more than the DOM does: it holds every row of this
+      // page, including the ones currently recycled out of it, so the progress
+      // the recruiter watches counts the page rather than the window.
+      known = Math.max(known, processed.size + roster.remaining(processed));
       state.run.index = processed.size;
       state.run.total = known;
 

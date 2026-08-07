@@ -2040,6 +2040,144 @@
     return (rows || []).filter((row) => !processed.has(applicantRowKey(row)));
   }
 
+  /**
+   * The rows of ONE page of the applicant list, in the order that page renders
+   * them, and independent of which of them happen to be mounted right now.
+   *
+   * **THE TWO DEFECTS THIS EXISTS FOR, reported together.** "The extension is
+   * saving a profile, going to a specific profile, then to the next, saving,
+   * then back to that specific profile, then next" — and "it did not even
+   * collect all the applicants in one page."
+   *
+   * Both are one cause. The walk asked the DOM "which row have I not finished
+   * with", took the first one it was handed, and had no other notion of order or
+   * of membership. On a virtualized list `applicantRows()` is a moving WINDOW,
+   * and LinkedIn re-centres that window on the applicant whose panel it has just
+   * opened — so the window keeps re-mounting rows *above* the one just
+   * collected. Those rows are unprocessed, they render first, and the walk
+   * therefore keeps stepping backwards and then forwards again: exactly the
+   * back-and-forth that was reported. The same blindness loses whole rows: a run
+   * that arrives with the list scrolled half way down never sees the rows above
+   * that point (`growApplicantList` only ever scrolls DOWN), so the pager is
+   * pressed with part of page one never opened, and nothing anywhere notices.
+   *
+   * A roster answers both, because it is the two things the DOM cannot say:
+   * **who is on this page**, and **in what order**. Membership is settled before
+   * anybody is opened, so "the page is finished" is a fact rather than "nothing
+   * unprocessed happens to be mounted"; and selection is by roster position, so
+   * a re-mounted window can no more re-order the walk than it can shorten it.
+   *
+   * Merge-insert rather than append, for the same reason the accumulator is
+   * merge-only: a window is a *slice* of the page, and a row seen for the first
+   * time belongs where that slice puts it — between the rows it rendered
+   * between — not at the end of everything known. Appending would place a row
+   * that mounted late after rows that come after it, which is the ordering
+   * defect in a different costume.
+   */
+  function createApplicantRoster() {
+    const order = [];
+    const index = new Map();
+
+    const reindexFrom = (at) => {
+      for (let position = at; position < order.length; position += 1) index.set(order[position], position);
+    };
+
+    return {
+      get size() {
+        return order.length;
+      },
+      keys() {
+        return [...order];
+      },
+      has(key) {
+        return index.has(cleanText(key));
+      },
+      /** Where this row sits on the page, or -1 for a row the roster never saw. */
+      positionOf(key) {
+        const value = cleanText(key);
+        return index.has(value) ? index.get(value) : -1;
+      },
+      /** A new page is a new roster: nothing about the old one survives it. */
+      reset() {
+        order.length = 0;
+        index.clear();
+      },
+      /**
+       * Merge one rendered window, in the order it rendered. Returns how many
+       * rows the roster had never seen — the only currency a paginated,
+       * virtualized list cannot lie in, and the same one growth is counted in.
+       */
+      add(rows = []) {
+        const keys = [];
+        for (const row of rows || []) {
+          const key = applicantRowKey(row);
+          if (key && key !== "name:") keys.push(key);
+        }
+        // Where an unknown row goes: just before the first row of this window
+        // the roster already knows, because everything ahead of that row in the
+        // window is ahead of it on the page. With no known row at all, the
+        // window is new ground and belongs at the end.
+        let cursor = order.length;
+        for (const key of keys) {
+          if (!index.has(key)) continue;
+          cursor = index.get(key);
+          break;
+        }
+        let gained = 0;
+        for (const key of keys) {
+          if (index.has(key)) {
+            cursor = index.get(key) + 1;
+            continue;
+          }
+          order.splice(cursor, 0, key);
+          reindexFrom(cursor);
+          cursor += 1;
+          gained += 1;
+        }
+        return gained;
+      },
+      /** The rows of this page the run has not finished with, in page order. */
+      pending(processed = new Set()) {
+        return order.filter((key) => !processed.has(key));
+      },
+      /**
+       * The next row of this page, in the page's own order — mounted or not.
+       *
+       * This is what "in sequence" means, and why it is asked of the roster
+       * rather than of the DOM: the run waits for *this* row rather than opening
+       * whoever the mounted window happens to be showing instead of them.
+       */
+      next(processed = new Set()) {
+        for (const key of order) if (!processed.has(key)) return key;
+        return "";
+      },
+      /** How many, without building the list — this is asked every turn. */
+      remaining(processed = new Set()) {
+        let count = 0;
+        for (const key of order) if (!processed.has(key)) count += 1;
+        return count;
+      },
+      /**
+       * A rendered window, put back into page order.
+       *
+       * Rows the roster has never seen sort last rather than first: a row that
+       * appeared from nowhere is genuinely of unknown position, and guessing it
+       * belongs at the front is how the walk jumped backwards in the first
+       * place. Ties keep their DOM order, so the sort is stable in both.
+       */
+      sort(rows = []) {
+        return (rows || [])
+          .map((row, at) => ({ row, at, position: this.positionOf(applicantRowKey(row)) }))
+          .sort((left, right) => {
+            const a = left.position < 0 ? Number.MAX_SAFE_INTEGER : left.position;
+            const b = right.position < 0 ? Number.MAX_SAFE_INTEGER : right.position;
+            return a === b ? left.at - right.at : a - b;
+          })
+          .map((entry) => entry.row);
+      }
+    };
+  }
+
   // ------------------------------------------------------------ panel arrival
   /**
    * Has the applicant we asked for actually mounted?
@@ -2205,7 +2343,7 @@
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
-    isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows,
+    isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,

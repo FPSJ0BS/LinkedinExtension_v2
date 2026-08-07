@@ -1883,7 +1883,14 @@ test("the run walks the list by identity, so a position can never address the wr
   // What replaces it: a ledger of what has been finished with, and "the first
   // rendered row I have not finished with".
   assert.match(run, /const processed = new Set\(\);/, "the run keeps its own ledger");
-  assert.match(run, /const nextRow = \(\) => unprocessedRows\(\)\[0\] \|\| null;/, "and asks it which row is next");
+  // "Which row next" is the roster's answer, not the DOM's. The ledger says what
+  // is finished with; the roster says where each row sits on the page, and
+  // without it the walk takes whichever unfinished row the mounted window
+  // happens to render first — which is how it kept stepping back to an applicant
+  // it had already passed.
+  assert.match(run, /const roster = Applicants\.createApplicantRoster\(\);/, "and a roster of the page it is on");
+  assert.match(run, /pending = roster\.sort\(pending\);/, "which is what puts the mounted window back into page order");
+  assert.match(run, /const row = pending\[0\];/, "so the next row is the next row on the page");
   assert.match(source, /function rowKey\(row\)/, "identity must be a named, single rule");
   const key = source.slice(source.indexOf("function rowKey(row)"), source.indexOf("How many scroll attempts"));
   assert.match(key, /Applicants\.applicantRowKey\(row\)/,
@@ -2692,6 +2699,176 @@ test("a virtualized run advances by application id and never selects a finished 
   assert.deepEqual(selected, ids.map((id) => `id:${id}`), "the queue advances in first-seen list order");
 });
 
+test("the walk follows the page's own order, and a page is finished before the pager is pressed", () => {
+  // THE REPORT, in two halves that turned out to be one cause: "it is saving a
+  // profile, going to a specific profile, then to the next, saving, then back to
+  // that specific profile, then next" — and "it did not even collect all the
+  // applicants in one page."
+  //
+  // The walk's whole notion of the list was `applicantRows()`: whatever the DOM
+  // has mounted at the instant it is asked. That answers neither question it was
+  // being used for. It cannot say what ORDER the page is in, because a
+  // virtualized window re-centres on the applicant whose panel was just opened
+  // and so keeps re-mounting rows above it; and it cannot say who is ON the
+  // page, because rows above wherever the list happened to be sitting were never
+  // mounted at all and `growApplicantList` only ever scrolls down.
+  const jobId = "4277798308";
+  const page = ["11", "12", "13", "14", "15", "16"];
+  const key = (id) => `id:${id}`;
+  const row = (id) => ({
+    name: `Applicant ${id}`,
+    href: `https://www.linkedin.com/hiring/applicants/?applicationId=${id}&jobId=${jobId}`
+  });
+  const windowOf = (ids) => ids.map(row);
+
+  // A three-row window that re-centres on the row just opened — the live
+  // behaviour, and the reason the old rule went backwards.
+  const centredOn = (id) => {
+    const at = page.indexOf(id);
+    const from = Math.max(0, Math.min(at - 1, page.length - 3));
+    return page.slice(from, from + 3);
+  };
+
+  // 1. THE OLD RULE, on the recruiter's own starting position: LinkedIn had an
+  //    applicant open half way down, so that is where the list was.
+  const before = [];
+  const beforeDone = new Set();
+  let mounted = centredOn("14");
+  for (let turn = 0; turn < page.length; turn += 1) {
+    const next = Applicants.unprocessedApplicantRows(windowOf(mounted), beforeDone)[0];
+    if (!next) break;
+    const chosen = Applicants.applicantRowKey(next);
+    beforeDone.add(chosen);
+    before.push(chosen);
+    mounted = centredOn(chosen.slice(3));
+  }
+  assert.deepEqual(before, ["id:13", "id:12", "id:11"],
+    "the first mounted unfinished row walks the page BACKWARDS as the window re-centres");
+  assert.ok(before.every((chosen, at) => at === 0 || chosen < before[at - 1]),
+    "which is the reported 'goes to the next, then back to that specific profile'");
+  assert.ok(before.length < page.length,
+    "and it then runs out of mounted rows with half the page never opened, which is "
+    + "'it did not even collect all the applicants in one page'");
+
+  // 2. THE ROSTER. Settling the page is one walk of it, top to bottom, before
+  //    anybody is opened — so the slices arrive in page order and the roster IS
+  //    the page. `remaining` is then a fact about the page rather than about the
+  //    window, which is what the pager press is gated on.
+  const roster = Applicants.createApplicantRoster();
+  for (const slice of [["11", "12", "13"], ["12", "13", "14"], ["14", "15", "16"]]) {
+    roster.add(windowOf(slice));
+  }
+  assert.deepEqual(roster.keys(), page.map(key), "the roster holds the whole page, in the page's order");
+
+  // 3. And the walk follows it: `next` is the next row of the PAGE, mounted or
+  //    not, so a window showing somebody else is a reason to go and find them
+  //    rather than to open whoever is on screen instead.
+  const after = [];
+  const done = new Set();
+  for (let turn = 0; turn < page.length; turn += 1) {
+    const owed = roster.next(done);
+    if (!owed) break;
+    after.push(owed);
+    done.add(owed);
+  }
+  assert.deepEqual(after, page.map(key), "every applicant, in the order the page lists them");
+  assert.equal(roster.remaining(done), 0, "and only then is the page finished");
+
+  // A row still owed keeps the page unfinished even when nothing is mounted —
+  // the difference between 'no unprocessed row is on screen' and 'no
+  // unprocessed row is left', which is what pressed the pager too early.
+  const half = new Set([key("11"), key("12")]);
+  assert.equal(roster.remaining(half), 4, "rows recycled out of the DOM are still on the page");
+  assert.equal(roster.next(half), key("13"), "and the next one is still the next one");
+
+  // 4. A row that mounts late belongs where the slice that showed it puts it,
+  //    between the rows it rendered between. Appending it would place it after
+  //    rows that come after it — the ordering defect in a different costume.
+  const late = Applicants.createApplicantRoster();
+  late.add(windowOf(["11", "13", "15"]));
+  assert.equal(late.add(windowOf(["11", "12", "13"])), 1, "growth counts rows never seen before");
+  late.add(windowOf(["13", "14", "15"]));
+  assert.deepEqual(late.keys(), ["11", "12", "13", "14", "15"].map(key), "merge-insert, never append");
+  assert.equal(late.add(windowOf(["13", "14"])), 0, "and a window of nothing new gains nothing");
+
+  // 5. A mounted window is sorted back into page order, with a row the roster
+  //    has never seen sorting LAST — a row of unknown position guessed to the
+  //    front is how the walk jumped backwards to begin with.
+  const stranger = { name: "Stranger", href: "https://www.linkedin.com/hiring/applicants/stranger" };
+  const sorted = late.sort([row("14"), stranger, row("12"), row("13")]);
+  assert.deepEqual(sorted.map(Applicants.applicantRowKey), [key("12"), key("13"), key("14"), "href:https://www.linkedin.com/hiring/applicants/stranger"],
+    "page order, and an unknown row last");
+
+  // 6. A new page is a new roster: nothing about the old one survives the pager.
+  late.reset();
+  assert.equal(late.size, 0);
+  assert.equal(late.next(new Set()), "", "so page two is walked in page two's order, from page two's first row");
+});
+
+test("the page is settled before anybody on it is opened, and the pager waits for it", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // "Make sure it is working in a sequence, collecting all applicants before
+  // moving to next page." Both clauses are one step: the page the run has just
+  // arrived at is walked end to end BEFORE its first applicant is opened, which
+  // is what makes "the next row" and "this page is done" answerable at all.
+  const sweep = source.slice(source.indexOf("async function sweepCurrentPage"), source.indexOf("* Reveal more rows"));
+  assert.ok(sweep.length > 200, "settling a page must be its own step");
+  assert.match(sweep, /scrollPanelTo\(0, chooseScrollTarget\(list\)\)/,
+    "it starts at the TOP: the rows it exists to find are the ones above wherever the list was left");
+  assert.match(sweep, /const gained = roster\.add\(applicantRows\(\)\)/,
+    "and every pass feeds the roster, in the order the page rendered them");
+  assert.match(sweep, /quiet = gained > 0 \? 0 : quiet \+ 1/,
+    "growth means rows never seen before, never a scroll that happened");
+  assert.match(sweep, /if \(atBottom && quiet >= LIST_QUIET_PASSES\)/,
+    "the bottom is confirmed rather than believed on sight");
+  assert.match(sweep, /pass < LIST_PAGE_PASSES/, "one page, one budget");
+  assert.match(sweep, /assertRunnable\(\)/, "and Stop ends it");
+  assert.match(sweep, /const live = await waitForApplicantList\(\);/,
+    "the list is re-resolved per pass, never a detached node");
+  // It settles a PAGE. Pressing the pager stays the caller's decision, made only
+  // once the roster this settled has been finished with — that IS "all the
+  // applicants before the next page".
+  assert.ok(!/\.click\(\)/.test(sweep), "settling a page presses nothing, least of all the pager");
+  assert.ok(!/findApplicantPaginationControl/.test(sweep), "and it never even looks for the pager");
+  // Handed back at the top, so the page starts at its first row rather than its
+  // last and then sweeping back up for every row above it.
+  assert.match(sweep, /scrollPanelTo\(0, chooseScrollTarget\(\(await waitForApplicantList\(\)\) \|\| live\)\)/,
+    "a settled page is handed back at its top");
+
+  const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
+  assert.match(run, /if \(!pageSettled\) \{\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);\s*\n\s*pageSettled = true;/,
+    "the page is settled before the walk opens anybody on it");
+  // The next row is the page's next row, mounted or not — and when it is not,
+  // the run goes and finds THAT row rather than opening whoever is on screen.
+  assert.match(run, /const owed = roster\.next\(processed\);/, "which row is next is the roster's answer");
+  assert.match(run, /const ready = pending\.length > 0 && rowKey\(pending\[0\]\) === owed;/,
+    "and the run only proceeds when that row is the one it is about to open");
+  assert.match(run, /await sweepCurrentPage\(roster, listDiagnostics, \(\) => mounted\(target\)\)/,
+    "a row recycled out of the DOM is brought back, not skipped past");
+  // Only a row that survives a confirmed walk of the whole page is retired, and
+  // one at a time, so a single vanished row cannot condemn the rest.
+  assert.match(run, /if \(!mounted\(target\)\) \{[\s\S]{0,400}?processed\.add\(target\);[\s\S]{0,400}?continue;/,
+    "and only a row that is genuinely gone is skipped");
+
+  // The pager is reached only after all of that, and a page it moves to is
+  // settled in its turn before its first applicant is opened.
+  assert.ok(
+    run.indexOf("const owed = roster.next(processed);") < run.indexOf("await growApplicantList("),
+    "the roster is consulted before anything may page forward"
+  );
+  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) \{\s*\n\s*roster\.reset\(\);\s*\n\s*pageSettled = false;\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);/,
+    "a pager press is a new page: a new roster, settled before it is walked");
+
+  // The roster learns from every list read the run already makes, so a row
+  // LinkedIn mounts late is merged into its own place at no extra scan.
+  assert.match(run, /const unprocessedRows = \(\) => \{\s*\n\s*const rendered = applicantRows\(\);\s*\n\s*roster\.add\(rendered\);/,
+    "every list scan feeds the roster");
+
+  // Rule 9: this adds no control, on any path.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
   const view = Applicants.applicantsViewKey;
   const JOB = "4277798308";
@@ -3258,8 +3435,17 @@ test("a page that hides while the list grows pauses the run, it does not kill it
   // restarted it from the first row. That is the "stops after N profiles and
   // starts over": N was however many rows were rendered before growth was first
   // needed, never a counter.
-  assert.match(run, /try \{\s*\n\s*grown = await growApplicantList\(/,
+  // Every step that scrolls the list — settling the page the run has arrived at,
+  // sweeping it for a row it still owes, and growing past it — shares the ONE
+  // try/catch, because every one of them calls `assertRunnable()` per pass and so
+  // every one of them can throw on a hidden page.
+  const guarded = run.slice(run.indexOf("try {"), run.indexOf("} catch (error) {"));
+  assert.match(guarded, /grown = await growApplicantList\(/,
     "growing the list must be inside the same pause handling the row work has");
+  assert.match(guarded, /await sweepCurrentPage\(roster, listDiagnostics\);/,
+    "and so must settling the page, which scrolls it end to end");
+  assert.ok(!/await sweepCurrentPage\(/.test(run.slice(run.indexOf("} catch (error) {"))),
+    "no list walk may sit outside the pause handling and kill the run");
   assert.match(run, /if \(!error\?\.hidden\) throw error;[\s\S]{0,400}?await waitForVisibleAgain\(\)/,
     "a hidden page during growth is a pause, exactly as it is during extraction");
   assert.match(run, /await waitForVisibleAgain\(\);[\s\S]{0,600}?beginRun\(\);\s*\n\s*continue;/,

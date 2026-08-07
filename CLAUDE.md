@@ -229,6 +229,10 @@ commands are unrecoverable.
       accepted only because `inContainer` is checked immediately after — a bare `›` elsewhere on a
       hiring page is refused. **Numbered page buttons stay refused**: a bare `2` would make any
       numeric control in the list a pager.
+      **It may only be pressed once the current page's roster is finished** (3.7.12) — see "The walk
+      is the page's own order" below. What gated it before was "no unprocessed row is *mounted*",
+      and on a virtualized list that is not "no unprocessed row is *left*": the pager was pressed
+      over applicants the run had never opened, and nothing anywhere noticed.
    i. The opened viewer's own **Download** control (`purpose: "resume-download"`, added in 3.7.9),
       matched by `RESUME_DOWNLOAD_CONTROL_PATTERN` on the **whole** label and **proven inside the
       viewer this extension opened itself**. It exists because the address a viewer fetches is not
@@ -853,7 +857,56 @@ questions, and the second costs hours where the first costs a walk down the list
   people. Both whole-job commands in the popup share one handler (`runApplicantJob`), so the
   close-only-on-`{ok, started}` discipline is one rule rather than two copies that can drift.
 
-## Collecting every applicant (3.7.3, amended in 3.7.4 and 3.7.6)
+## Collecting every applicant (3.7.3, amended in 3.7.4, 3.7.6 and 3.7.12)
+
+**The walk is the page's own order, and a page is finished before the pager is pressed** (3.7.12).
+Requested outright, and reported in two halves that turned out to be one cause: *"it is saving a
+profile, going to a specific profile, then to the next, saving, then back to that specific profile,
+then next"* — and *"it did not even collect all the applicants in one page ... make sure it is
+working in a sequence, collecting all applicants before moving to next page."*
+
+The walk's whole notion of the list was `applicantRows()`: whatever the DOM has mounted at the
+instant it is asked. That answers neither question it was being used for.
+
+- **It cannot say what order the page is in.** LinkedIn re-centres the virtualized window on the
+  applicant whose panel it has just opened, so rows *above* the one just collected keep re-mounting.
+  They are unprocessed and they render first, so "the first rendered row I have not finished with"
+  walked backwards, then forwards, then backwards again — the reported back-and-forth, exactly.
+- **It cannot say who is on the page.** A run that arrives with the list scrolled anywhere but the
+  top — which is where LinkedIn leaves it, on the applicant it had open — never mounts the rows above
+  that point, because `growApplicantList` only ever scrolls **down**. The pager was then pressed with
+  part of the page never opened, and nothing anywhere noticed.
+
+So the page is settled before anybody on it is opened. `sweepCurrentPage()` ([applicants.js](applicants.js))
+scrolls the page from the **top** to a confirmed bottom, feeding `Applicants.createApplicantRoster()`
+([applicants-core.js](src/applicants-core.js)) on every pass, and hands the list back at its top so
+the page starts at its first row. After it, the roster **is** the page: `roster.next(processed)` is
+the next row in the page's own order whether or not it is mounted, and `roster.remaining(processed)`
+is what the pager press is gated on. Four properties are load-bearing:
+
+- **The next row is waited for, never substituted.** `roster.sort()` puts a mounted window back into
+  page order, so when the owed row is mounted it is `pending[0]` and the common case costs one string
+  comparison. When it is **not** mounted the run sweeps for *that row* and opens nobody else in the
+  meantime. Only a row that survives a confirmed walk of the whole page is retired — one at a time,
+  and said out loud — because by then it is not on the page any more.
+- **Merge-insert, never append.** A window is a *slice*: a row seen for the first time belongs
+  between the rows it rendered between, not after everything already known. Appending would place a
+  late-mounting row after rows that come after it, which is the ordering defect in a different
+  costume.
+- **A row of unknown position sorts last.** Guessing it belongs at the front is how the walk jumped
+  backwards to begin with.
+- **A pager press is a new page**: the roster is reset and the new page is settled in its turn,
+  before its first applicant is opened. `pageSettled` is what carries that across turns.
+
+It costs one walk of ~25 rows per page and it is **not** the up-front walk 3.7.8 removed — that one
+walked the whole list, every page of a 665-applicant job, before a single person was opened. This
+walks the page the run has just arrived at, and only that page. `sweepCurrentPage` presses nothing
+and never so much as looks for the pager (a test asserts both), so paging forward stays the caller's
+decision, made only once the roster it settled has been finished with. Every list scan the run
+already makes feeds the roster (`unprocessedRows()`), so a row LinkedIn mounts late is merged into
+its own place at no extra cost. Locked by *"the walk follows the page's own order, and a page is
+finished before the pager is pressed"* and *"the page is settled before anybody on it is opened, and
+the pager waits for it"*.
 
 **A section that is not found produces no warning, only zeros — so the search has to report itself.**
 `current_role`, `current_company` and `total_experience` all derive from the Experience section and

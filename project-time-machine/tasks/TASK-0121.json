@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0121",
+  "name": "The applicant walk settles each page's roster in list order and finishes that page before any pager press",
+  "request": "The applicant walk settles each page's roster in list order and finishes that page before any pager press",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T03:32:27.535Z",
+  "completedAt": "2026-08-07T03:44:47.135Z",
+  "startCommit": "01d1de9b9b2ec9f703249d76368c59b683868755",
+  "gitRef": "task/TASK-0121",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 431 tests, validate)"
+  ],
+  "result": "The applicant walk now follows the page's own order and finishes a page before the pager is pressed. Reported in two halves that were one cause: it saved a profile, went to a specific profile, then next, then BACK to that specific profile - and it did not collect all the applicants on one page. The walk's only notion of the list was applicantRows(), whatever the DOM has mounted when asked, and that answers neither question it was used for. It cannot say the page's ORDER: LinkedIn re-centres the virtualized window on the applicant just opened, so rows above it keep re-mounting, are unprocessed and render first, and 'the first rendered row I have not finished with' walked backwards. It cannot say who is ON the page: a run arriving with the list scrolled anywhere but the top never mounts the rows above that point, because growApplicantList only ever scrolls DOWN, so the pager was pressed with part of the page never opened. sweepCurrentPage() walks the page from the top to a confirmed bottom feeding Applicants.createApplicantRoster(), and hands the list back at its top; after it the roster IS the page. roster.next(processed) is the next row in page order whether or not it is mounted - when it is not, the run sweeps for THAT row and opens nobody else meanwhile, retiring one only if it survives a confirmed walk of the whole page. roster.sort() puts a mounted window back into page order (unknown position sorts last, never first). add() is merge-insert, so a late-mounting row lands between the rows it rendered between. A pager press resets the roster and settles the new page before its first applicant. Costs one walk of ~25 rows per page and is not the whole-list walk 3.7.8 removed; sweepCurrentPage presses nothing and never looks for the pager, so paging stays gated on the roster being spent. Every list scan the run already makes feeds the roster, so a late row is merged at no extra cost. Rule 9h and the Collecting every applicant section of CLAUDE.md were amended; two tests lock the ordering, the page boundary and the unchanged seven-click budget."
+}
