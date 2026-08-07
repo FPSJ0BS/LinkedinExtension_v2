@@ -1,5 +1,66 @@
 # CHANGELOG.md
 
+## 3.7.17 — the walk waits for conditions instead of sleeping over them
+
+Reported directly: *"it waits 1 to 2 seconds for the resume download and the extension still feels
+slow — make scrolling faster but do not miss any information; you can skip the applicant-list scroll
+as it is already rendered, but make sure it scrolls the right-side profile."*
+
+**Nothing that decides whether an applicant was fully read was changed.** `REVEAL_MIN_PASSES` (4),
+`REVEAL_QUIET_PASSES` (3), `REVEAL_MAX_PASSES` (40), `LIST_QUIET_PASSES` (3), `LIST_PAGE_PASSES` (24)
+and the reached-the-bottom test all stand, and a new test asserts each of them stands. What was
+removed is time spent waiting for things that had already happened.
+
+**The resume, ~1.3 s of the 1.5–2.3 s, in three parts.**
+
+- **A PDF viewer painting itself was being read as the hiring page struggling.** `recordTempo` drops
+  the whole run to `slow` on a *single* `unsettled` sample and keeps it there — right for a hiring
+  page that will not settle, and flatly wrong for this extension's own resume overlay, which mutates
+  continuously by design and therefore times out every wait held over it. So opening one resume
+  convicted the page and taxed **every later applicant** with a 1.25x quiet window and the slow pace
+  band. `waitForDomQuiet(…, { feedsTempo: false })` lets exactly those two waits opt out of *voting*
+  while still being *sized* by the tempo. It defaults to true, so this is an exception, not a
+  loophole.
+- **A fixed sleep sat in front of a poll-until-true.** `clickResumeDownload` slept up to 900 ms so
+  the network request "would exist" — directly before a `waitFor` over `RESUME_DOCUMENT_TIMEOUT_MS`
+  that catches the entry the instant `watchResumeRequests` delivers it. Being early there costs one
+  poll interval, never a file. Now a beat for the click's own turn of the event loop; the poll is
+  untouched.
+- **The worker read the download path back on a flat 120 ms poll.** Chrome usually has the filename
+  within a frame or two, and the content script *awaits* that reply, so the floor was spent once per
+  applicant in front of the next one. Escalating 25 ms → 200 ms, same ~1.2 s ceiling, and no sleep
+  after the last look. An interrupted download is still reported as interrupted.
+
+**The dismiss.** Both steps of `closeOpenedOverlay` ran `wait(250)` and only *then* looked, twice per
+attempt, on every applicant whose viewer opened. `overlayClosed()` polls inside the **same 250 ms
+budget** — same three attempts, same tactics, same verdict — and returns the moment the overlay is
+off the page.
+
+**The left list, which is what the report asked to skip.** `sweepCurrentPage` checked its `wanted`
+predicate *after* scrolling to the top and waiting a full quiet window. For the per-applicant caller
+that is counter-productive as well as slow: going to the top unmounts the very neighbourhood the owed
+row lives in, so the walk then climbs back down for a row that may have been on screen all along. It
+is asked **first** now. **The page-settling callers pass no `wanted` and are deliberately untouched**
+— they still start at the top every time, because page membership and the pager gate (rule 9h,
+3.7.12) rest entirely on that, and removing the sweep would reintroduce both defects 3.7.12 fixed.
+It still presses nothing and still never looks for the pager.
+
+**The right-side profile panel still gets every pass it had.** Only the quiet *windows* came down
+(320→200, 380→240, 400→260, 300→200), on the 3.7.14 argument: a shorter window can only take a read a
+moment early — the accumulator is merge-only, every walk re-reads on every pass, and every counter
+resets the instant anything grows — so the worst case is one extra pass and it can never *end* a
+walk. `MIN_QUIET_MS` went 150→**120**, not lower: at these window sizes 120 versus 90 is ten
+milliseconds on one window, so the floor's own guard test stands unweakened.
+`PANEL_TEARDOWN_TIMEOUT_MS` went 900→**400** because its predicate is never true when LinkedIn swaps
+the column in place, so the full budget was spent per applicant to learn nothing. `PACE_BOUNDS` came
+down to `[400,560] / [440,680] / [700,1050]` around a 560 ms anchor — the one wait here that buys no
+information at all — with every band still randomised and the slow band still the longest.
+
+Rule 9g's prose said `PANEL_ARRIVAL_TIMEOUT_MS` was 10 s and the teardown 1.5 s; both had already
+been shortened in an earlier release without the doc following. Corrected against the source.
+
+No control was added, no click site moved, and the seven-click budget is asserted unchanged.
+
 ## 3.7.16 — "already open" is the panel's answer, never the address bar's
 
 Reported in two halves that are one cause: *"after extracting one applicant the extension opens a

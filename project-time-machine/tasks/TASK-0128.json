@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "TASK-0128",
+  "name": "Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true",
+  "request": "Speed up the applicant walk: stop paying fixed sleeps for conditions that are already true",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T11:08:42.828Z",
+  "completedAt": "2026-08-07T11:17:51.736Z",
+  "startCommit": "be6f53d8d63e5ba4a8e4a10e1cdf936c0bcb65ae",
+  "gitRef": "task/TASK-0128",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm test passed (442/442)",
+    "npm run check passed (typecheck, build, test 442/442, validate 31 build files)"
+  ],
+  "result": "Speed up the applicant walk by removing waits for things that had already happened, without moving a single completeness floor. REVEAL_MIN_PASSES (4), REVEAL_QUIET_PASSES (3), REVEAL_MAX_PASSES (40), LIST_QUIET_PASSES (3), LIST_PAGE_PASSES (24) and the reached-the-bottom test are all unchanged and newly asserted unchanged, so nothing that decides whether an applicant was fully read was touched. Resume, ~1.3s of the reported 1.5-2.3s, in three parts: a PDF viewer painting itself mutates continuously by design so every wait held over it timed out, and one unsettled sample drops the whole run to the slow tempo permanently - so opening one resume taxed every later applicant with a 1.25x quiet window and the slow pace band; waitForDomQuiet gains feedsTempo:false for exactly the two viewer waits, which are still sized by the tempo but no longer vote on it, and it defaults to true so this is an exception not a loophole. clickResumeDownload slept up to 900ms so the request would"
+}

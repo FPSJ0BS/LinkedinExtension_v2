@@ -326,9 +326,14 @@ commands are unrecoverable.
       read the panel and let `assertExpectedApplicant` refuse the **record**, which is the guard that
       was already there and already checks three times. A row that comes up as somebody else is still
       **skipped**, not scanned; scanning anyway saved the previous applicant a second time under this
-      row's identity. `PANEL_ARRIVAL_TIMEOUT_MS` is 10 s and the teardown 1.5 s, because a job is
-      walked one applicant at a time and every second spent waiting for an answer that will not come
-      is spent once per applicant.
+      row's identity. `PANEL_ARRIVAL_TIMEOUT_MS` is **6 s** and the teardown **400 ms** (the prose
+      here said 10 s and 1.5 s after both had already been shortened; corrected against the source in
+      3.7.17), because a job is walked one applicant at a time and every second spent waiting for an
+      answer that will not come is spent once per applicant. The teardown in particular is
+      best-effort and its predicate is routinely never true — LinkedIn often swaps the column in
+      place — so a long budget there bought nothing at all; what keeps the previous applicant out is
+      `describePanelArrival` answering `PREVIOUS` against `state.lastPanelIdentity`, and
+      `assertExpectedApplicant` refusing the record three times over.
 
    Connect, Follow, Message, InMail, Endorse, Remove connection, Withdraw, Invite, Report, Block,
    Send, Share, Accept, Ignore, and Save are permanently forbidden on every surface, and the hiring
@@ -863,6 +868,52 @@ resume chain, the contact disclosure, the auto-run and the seven-click budget al
   sentence from two ends and only one of them names a cause. Locked by *"the quiet window follows the
   page, within bounds it can never leave"* and *"adapting the pace changes what a wait costs, never
   what a walk concludes"*.
+- **And it waits for conditions rather than sleeping over them** (3.7.17). Reported directly: the
+  resume download stalls for one to two seconds and the walk feels slow. Four separate causes, and
+  **not one of them was a pass, a bound or a counter** — every completeness floor below is unchanged
+  and asserted unchanged, because what decides a walk has finished reading somebody must never move
+  to make a run feel quicker.
+  - **A PDF viewer painting itself was being read as the hiring page struggling.** `recordTempo` is
+    asymmetric on purpose — one `unsettled` sample drops the whole run to `slow` and keeps it there
+    — and a wait held over this extension's *own* resume overlay mutates continuously by design, so
+    it always times out. Opening one resume therefore convicted the page and taxed **every later
+    applicant** with a 1.25x window and the slow pace band, on evidence the extension manufactured.
+    `waitForDomQuiet(…, { feedsTempo: false })` lets exactly the two waits held over that viewer opt
+    out of *voting*; they are still **sized** by the tempo, because they still happen on this
+    machine. It defaults to true, so this is an exception and not a loophole, and a test counts both
+    halves.
+  - **A fixed sleep sat in front of a poll-until-true.** Pressing Download slept up to 900 ms so the
+    request "would exist" — immediately before a `waitFor` over `RESUME_DOCUMENT_TIMEOUT_MS` that
+    catches the entry the instant `watchResumeRequests` delivers it. A sleep guarding a poll is pure
+    latency: being early costs one poll interval, never a file. It is now a beat for the click's own
+    turn of the event loop, and the poll is untouched.
+  - **A dismissed overlay was slept over rather than looked at.** Both dismiss steps ran `wait(250)`
+    and only *then* checked, twice per attempt, on every applicant whose viewer opened; an artdeco
+    modal is gone within a frame or two. `overlayClosed()` polls inside the **same 250 ms budget**
+    and returns the moment it is off the page — same three attempts, same verdict, same tactics.
+  - **The list was scrolled to the top to find a row that was already on screen.** `sweepCurrentPage`
+    checked its `wanted` predicate *after* the top-scroll and a full quiet window. For the
+    per-applicant caller — "the run is owed a row that was not mounted last time it looked" — that is
+    counter-productive as well as slow, because going to the top unmounts the very neighbourhood the
+    owed row lives in. It is asked **first** now, which is the *"the list is already rendered"* case
+    in the report. **The page-settling callers pass no `wanted` and are deliberately untouched**:
+    they still start at the top, every time, because page membership and the pager gate (rule 9h,
+    3.7.12) rest entirely on that. `sweepCurrentPage` still presses nothing and still never looks for
+    the pager, and both are asserted.
+  The quiet *windows* came down with them (320→200, 380→240, 400→260, 300→200) on the 3.7.14
+  argument exactly as written above — a shorter window can only take a read a moment early, and the
+  worst case is one extra pass. `MIN_QUIET_MS` went 150→**120** rather than lower: at these window
+  sizes the difference between 120 and 90 is ten milliseconds on one window, so the floor's own test
+  stands unweakened and the speed comes from the windows. `PANEL_TEARDOWN_TIMEOUT_MS` is 900→**400**
+  because its predicate — "the old column is gone" — is never true on a surface that swaps in place,
+  so the full budget was spent per applicant to learn nothing; it is explicitly best-effort and
+  `describePanelArrival` plus `assertExpectedApplicant` are what actually keep the previous applicant
+  out. `PACE_BOUNDS` came down to `[400,560] / [440,680] / [700,1050]` around a 560 ms anchor: this
+  is the one wait on the surface that buys **no information at all**, every band is still hundreds of
+  milliseconds and still randomised, and the slow band is still the longest of the three. Locked by
+  *"the walk waits for conditions instead of sleeping over them, and misses nothing for it"*, which
+  asserts every completeness floor, both `feedsTempo` halves, the unchanged dismiss budget, the
+  ordering inside `sweepCurrentPage` and the unchanged seven-click budget.
 - **From the row itself: the name and the two ids, and deliberately nothing else.** The row also
   renders a headline and a location; taking them would mean deciding that line two is the headline
   and line three is the location — positional guessing on generated markup, which rule 11 refuses and
