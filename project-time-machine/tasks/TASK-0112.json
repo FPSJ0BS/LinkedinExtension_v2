@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0112",
+  "name": "Strip the portrait artifact welded to the end of an applicant name",
+  "request": "Strip the portrait artifact welded to the end of an applicant name",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T01:52:08.563Z",
+  "completedAt": "2026-08-07T01:54:58.315Z",
+  "startCommit": "e2d183d23cf31bd41293b888c5675f7e5d3992f9",
+  "gitRef": "task/TASK-0112",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Reported with a screenshot: applicants saved as 'Komal Sharma graphic' and 'Harshita Singh graphic', several of them duplicated. One cause behind both. LinkedIn's applicant portrait carries its accessible name as alt='<name> graphic', and findApplicantName offers that alt text as the portrait-alt candidate - which stripped a LEADING 'photo of'/'picture of' and nothing at all from the end. Fixed in cleanApplicantName rather than at the portrait, deliberately: the same artifact reaches the name through the profile link's aria-label too, so stripping it at one of the two sources would leave the other producing a second spelling of the same person. That is not cosmetic - applicantId hashes the name, so 'Komal Sharma' and 'Komal Sharma graphic' are two different records for one applicant, which is exactly the duplicate rows reported alongside it, and the test asserts the two spellings now hash to one id. NAME_IMAGE_ARTIFACT_PATTERN covers graphic/image/photo/picture/logo/avatar, optionally preceded by 's profile, and it is applied together with the degree badge in a bounded loop so the two are stripped in either order and repeatedly - bounded rather than while, because a pattern that could ever match its own output must not be able to spin. A word ending a name is only an artifact when something precedes it and none of these is a surname; a value that is nothing but the artifact collapses to empty and isApplicantNameCandidate then refuses it, which is the right answer for an image whose alt text names nobody."
+}

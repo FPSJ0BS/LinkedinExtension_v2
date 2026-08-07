@@ -555,6 +555,16 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
   now refuses any candidate holding more than one applicant-row link, and `addName` is the one header
   field a later, corroborated read may replace — because the explanations only exist once the
   qualifications have been read.
+  **`cleanApplicantName` strips what a portrait welds to the END of a name** (3.7.10,
+  `NAME_IMAGE_ARTIFACT_PATTERN`): LinkedIn's applicant photo carries its accessible name as
+  `alt="<name> graphic"`, so records were saved as **"Komal Sharma graphic"**. Only a *leading*
+  "photo of" was ever removed. It is fixed in `cleanApplicantName` rather than at the portrait
+  because the same artifact reaches the name through the profile link's `aria-label` too, and
+  stripping it at one source would leave the other producing a second spelling of one person —
+  **which is not cosmetic**: `applicantId` hashes the name, so the two spellings are two records, and
+  that is the duplicate rows reported alongside it. The degree badge and the artifact are stripped in
+  either order and repeatedly, bounded rather than `while`; a value that is *nothing but* the
+  artifact collapses to `""` and `isApplicantNameCandidate` then refuses it.
 - `job` — `id`, `title`, `company`, `location`, `description`, `applicantCount`, `url`, plus
   `mustHaveQualifications`, `preferredQualifications` and `screeningQuestions` (question and ideal
   answer only; the *answer* belongs to the person, not the posting).

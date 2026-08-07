@@ -811,8 +811,43 @@
   const DEGREE_BADGE_PATTERN = /\s*(?:[·•]\s*)?(?:1st|2nd|3rd)(?:\+)?\s*$/i;
   const NAME_NOISE_PATTERN = /\b(?:verified|verification|premium|open to work|hiring)\b/gi;
 
+  /**
+   * What a **portrait** leaves welded to the end of a name.
+   *
+   * THE LIVE DEFECT: applicants were saved as **"Komal Sharma graphic"** and
+   * **"Harshita Singh graphic"**. LinkedIn's applicant portrait carries its
+   * accessible name as `alt="<name> graphic"`, and `findApplicantName` offers
+   * that alt text as the `portrait-alt` candidate — which stripped a *leading*
+   * `photo of` / `picture of` and nothing from the end.
+   *
+   * Fixed here rather than at the portrait, deliberately: the same artifact
+   * reaches the name through the profile link's `aria-label` too, so stripping
+   * it at one of the two sources would leave the other producing a second
+   * spelling of the same person. **That is not only cosmetic** — `applicantId`
+   * hashes the name, so "Komal Sharma" and "Komal Sharma graphic" are two
+   * different records for one applicant, which is exactly the duplicate rows
+   * that were reported alongside it.
+   *
+   * A word ending a name is only ever an artifact when something precedes it,
+   * and none of these is a surname; a value that is *nothing but* the artifact
+   * collapses to "" and is then refused by `isApplicantNameCandidate`, which is
+   * the right answer for an image with no name in its alt text at all.
+   */
+  const NAME_IMAGE_ARTIFACT_PATTERN =
+    /\s*(?:['’]s)?\s*(?:profile\s+)?(?:graphic|image|photo|picture|logo|avatar)s?\s*$/i;
+
   function cleanApplicantName(value) {
-    return cleanText(String(value ?? "").replace(NAME_NOISE_PATTERN, " ")).replace(DEGREE_BADGE_PATTERN, "").trim();
+    let text = cleanText(String(value ?? "").replace(NAME_NOISE_PATTERN, " "));
+    // Both trailing artifacts, in either order and repeated: LinkedIn renders
+    // "Komal Sharma graphic", "Mahak Ayani · 2nd", and sometimes both at once.
+    // Bounded rather than `while`, because a pattern that could ever match its
+    // own output must not be able to spin.
+    for (let pass = 0; pass < 4; pass += 1) {
+      const stripped = text.replace(DEGREE_BADGE_PATTERN, "").replace(NAME_IMAGE_ARTIFACT_PATTERN, "").trim();
+      if (stripped === text) break;
+      text = stripped;
+    }
+    return text;
   }
 
   /**
@@ -2053,7 +2088,8 @@
     normalizeDateRange, totalExperienceFrom, parseEducationBlock, educationKey,
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
-    NAME_CHROME_PATTERN, isApplicantNameCandidate, nameFromExplanations, chooseApplicantName,
+    NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,
+    nameFromExplanations, chooseApplicantName,
     // the record
     RESUME_STATUS, RESUME_EXTENSION_PATTERN, isResumeDocumentUrl, documentUrlFromDescriptor,
     // naming the saved file

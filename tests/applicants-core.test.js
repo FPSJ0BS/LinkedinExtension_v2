@@ -309,6 +309,44 @@ test("the applicant header strips the badges and never reads the timeline as a s
     ].join("\n")
   });
   assert.equal(header.name, "Mahak Ayani", "the degree badge is not part of somebody's name");
+
+  // THE LIVE DEFECT: applicants saved as "Komal Sharma graphic" and "Harshita
+  // Singh graphic". LinkedIn's portrait carries its accessible name as
+  // `alt="<name> graphic"`, and only a LEADING "photo of" was ever stripped.
+  //
+  // Not merely cosmetic: `applicantId` hashes the name, so "Komal Sharma" and
+  // "Komal Sharma graphic" are two records for one person — which is the
+  // duplicate rows that were reported alongside it.
+  assert.equal(Applicants.cleanApplicantName("Komal Sharma graphic"), "Komal Sharma");
+  assert.equal(Applicants.cleanApplicantName("Harshita Singh graphic"), "Harshita Singh");
+  assert.equal(
+    Applicants.applicantId("1", "https://www.linkedin.com/in/komal", Applicants.cleanApplicantName("Komal Sharma graphic"), "9"),
+    Applicants.applicantId("1", "https://www.linkedin.com/in/komal", "Komal Sharma", "9"),
+    "the two spellings must hash to one record"
+  );
+
+  // Every shape LinkedIn puts on a portrait, in either order and repeated.
+  for (const [raw, expected] of [
+    ["Mahak Ayani photo", "Mahak Ayani"],
+    ["Mahak Ayani's profile photo", "Mahak Ayani"],
+    ["Mahak Ayani’s profile picture", "Mahak Ayani"],
+    ["Mahak Ayani image", "Mahak Ayani"],
+    ["Mahak Ayani logo", "Mahak Ayani"],
+    ["Mahak Ayani graphic · 2nd", "Mahak Ayani"],
+    ["Mahak Ayani · 2nd graphic", "Mahak Ayani"]
+  ]) {
+    assert.equal(Applicants.cleanApplicantName(raw), expected, `"${raw}" is not somebody's name`);
+  }
+
+  // A value that is NOTHING but the artifact collapses to "", and the candidate
+  // policy then refuses it — the right answer for an image whose alt text names
+  // nobody at all.
+  assert.equal(Applicants.cleanApplicantName("graphic"), "");
+  assert.equal(Applicants.isApplicantNameCandidate("graphic"), false);
+  // And a real name is never shortened: the artifact is only ever stripped from
+  // the END, and none of these words is a surname.
+  assert.equal(Applicants.cleanApplicantName("Neeshu Kalkhanday"), "Neeshu Kalkhanday");
+  assert.equal(Applicants.cleanApplicantName("Sharmila Dash"), "Sharmila Dash");
   assert.equal(header.location, "Delhi, India");
   assert.equal(header.appliedAt, "12mo ago");
   assert.equal(header.contactedAt, "12mo ago");
