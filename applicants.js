@@ -452,8 +452,29 @@
    * The contract is unchanged — this still resolves only after the document has
    * been quiet for a whole window, or after `timeoutMs`. What is adaptive is how
    * long "a whole window" is on this page; see the tempo above.
+   *
+   * **`sample: false` — a wait that must not testify about the page.** The tempo
+   * asks one question, "is this page keeping up", and answers it from whether the
+   * document went quiet. That inference only holds while the mutations being
+   * watched are the page's own hydration. A wait held over an element that is
+   * *designed* to repaint continuously answers a different question and reports
+   * it as the same one: LinkedIn's document viewer renders and re-renders PDF
+   * pages for as long as it is open, so a wait held over it can never observe a
+   * quiet window and always ends on `timeoutMs` — recording `"unsettled"`.
+   *
+   * `recordTempo` is deliberately asymmetric: **one** such sample pins the run to
+   * SLOW, and every applicant after that pays a 1.25x window and the slow pace
+   * band. So opening a single resume made the rest of the job slower, on evidence
+   * about a PDF viewer rather than about the page. Excluding those waits makes
+   * the measurement *more* accurate, not more optimistic — it removes a reading
+   * taken with the thermometer held against the radiator.
+   *
+   * It changes what a wait COSTS and never what it CONCLUDES: the window is still
+   * a real window, `timeoutMs` is still the caller's own ceiling, and the wait
+   * still resolves on exactly the same condition. Only the verdict about the page
+   * is withheld.
    */
-  function waitForDomQuiet(quietMs = 300, timeoutMs = 2500) {
+  function waitForDomQuiet(quietMs = 300, timeoutMs = 2500, { sample = true } = {}) {
     const window_ = quietWindow(quietMs);
     tempo.waits += 1;
     tempo.savedMs += quietMs - window_;
@@ -465,13 +486,13 @@
       // this wait's verdict. Resolving twice is harmless; recording twice would
       // put a phantom sample into the tempo the next wait is sized from.
       let done = false;
-      const finish = (sample) => {
+      const finish = (verdict) => {
         if (done) return;
         done = true;
         observer.disconnect();
         clearTimeout(quietTimer);
         clearTimeout(timeoutTimer);
-        recordTempo(sample);
+        if (sample) recordTempo(verdict);
         resolve();
       };
       const observer = new MutationObserver(() => {
@@ -1989,6 +2010,17 @@
   }
 
   /**
+   * How long a dismiss gives an overlay to go away, and how often it looks.
+   *
+   * The ceiling is what the flat sleep it replaces already spent — so a modal
+   * that genuinely takes that long is given exactly as much time as before, and
+   * the far more common one that closes in a frame or two stops being charged
+   * for it. Twice per attempt, on every applicant that opened anything.
+   */
+  const DISMISS_CONFIRM_MS = 250;
+  const DISMISS_POLL_MS = 25;
+
+  /**
    * The one dismiss that closes whichever overlay this file opened.
    *
    * **A viewer left on screen is the whole "it previews instead of downloading"
@@ -2010,8 +2042,26 @@
    * the shared close, not a new control.
    */
   async function closeOpenedOverlay(overlay) {
+    // Gone, polled for rather than slept over. A modal that honours Escape is
+    // torn down in a frame or two; a flat wait pays the worst case every time,
+    // on every applicant, for both of the sleeps below. The predicate is the
+    // same one the returns already use, so this changes only how SOON a close
+    // is noticed — never what counts as one.
+    const closed = () => !overlay || !document.contains(overlay) || !isVisible(overlay);
+    // Deliberately NOT `waitFor`: that calls `assertRunnable()` on every poll, so
+    // a Stop or a page going hidden would throw straight out of a DISMISS and
+    // leave the preview on screen — the exact complaint this function exists to
+    // answer. A dismiss has to run on the failure path, so it polls with plain
+    // waits and no verdict about the run.
+    const waitUntilClosed = async () => {
+      for (let waited = 0; waited < DISMISS_CONFIRM_MS; waited += DISMISS_POLL_MS) {
+        if (closed()) return true;
+        await wait(DISMISS_POLL_MS);
+      }
+      return closed();
+    };
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (!overlay || !document.contains(overlay) || !isVisible(overlay)) return true;
+      if (closed()) return true;
       for (const key of ["Escape", "Esc"]) {
         for (const target of [overlay, document]) {
           try {
@@ -2021,8 +2071,7 @@
           }
         }
       }
-      await wait(250);
-      if (!document.contains(overlay) || !isVisible(overlay)) return true;
+      if (await waitUntilClosed()) return true;
 
       // Inside the overlay first, then its own modal wrapper — the close button
       // of an artdeco modal lives beside the content, not within it.
@@ -2039,7 +2088,7 @@
           } catch {
             continue;
           }
-          await wait(250);
+          await waitUntilClosed();
           break;
         }
         if (dismissed) break;
@@ -2504,7 +2553,12 @@
         const position = currentScrollTop(target);
         if (position >= max - 8) break;
         scrollPanelTo(position + Math.max(400, target.clientHeight * 0.8), target);
-        await waitForDomQuiet(120, 500);
+        // Held over the document viewer, which repaints its pages for as long as
+        // it is open — so this wait can only ever end on its timeout, and the
+        // "unsettled" it would report is about a PDF renderer rather than about
+        // the page. Sampled, it pinned the whole run to SLOW for every applicant
+        // after the first resume. See `waitForDomQuiet`.
+        await waitForDomQuiet(120, 500, { sample: false });
       }
     } finally {
       // Handed back where it was, on the failure path as well.
@@ -2621,9 +2675,19 @@
       diagnostics.resume.downloadControl = `click-failed:${error?.message || error}`;
       return false;
     }
-    // The file is fetched over the network. Without this wait the request has
-    // not been made yet when the entry log is read, and the click buys nothing.
-    await waitForDomQuiet(150, 900);
+    // The file is fetched over the network, so the request has not been made the
+    // instant this returns — but nothing here reads the entry log. The caller
+    // does, and it does it by POLLING: `waitFor(... requests.url() ...)` over
+    // `RESUME_DOCUMENT_TIMEOUT_MS`, with `watchResumeRequests()`'s observer live
+    // since before the viewer was opened. A fixed wait in front of that poll can
+    // only ever make the answer arrive LATER than the poll would have noticed it
+    // — it cannot make a slow network faster, and the poll already covers a
+    // slower one than this wait ever did.
+    //
+    // It also cost more than its own duration. Held over a repainting viewer it
+    // never observed a quiet window, so it ended on its timeout every time and
+    // reported "unsettled" to the tempo — one sample, and the rest of the job ran
+    // at the slow pace. Removing it removes that too.
     return true;
   }
 

@@ -1906,6 +1906,19 @@ async function claimResumeName(stem: string, applicantKey: string): Promise<numb
 }
 
 /**
+ * How the path read-back polls: short first look, backed off, hard ceiling.
+ *
+ * The ten intervals sum to more than the flat 120ms poll they replace, so the
+ * budget a slow download gets is not reduced — what changes is that the common
+ * case, where Chrome has the filename within a frame or two, is answered in
+ * ~25ms instead of ~120ms. The content script blocks on this before it can move
+ * to the next applicant.
+ */
+const DOWNLOAD_POLL_START_MS = 25;
+const DOWNLOAD_POLL_BACKOFF = 1.7;
+const DOWNLOAD_POLL_MAX_MS = 240;
+
+/**
  * Where Chrome actually put the file.
  *
  * `chrome.downloads.download()` resolves with an id, not a path, and the path it
@@ -1916,6 +1929,7 @@ async function claimResumeName(stem: string, applicantKey: string): Promise<numb
  * to the requested one, which is still the truth in the overwhelming majority.
  */
 async function downloadedFilePath(downloadId: number, requested: string): Promise<any> {
+  let delayMs = DOWNLOAD_POLL_START_MS;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const [item] = (await chrome.downloads.search({ id: downloadId })) || [];
@@ -1933,7 +1947,16 @@ async function downloadedFilePath(downloadId: number, requested: string): Promis
     } catch {
       return { path: requested, interrupted: false, reason: "" };
     }
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    // Backed off from a short first look rather than a flat interval. The
+    // content script AWAITS this before it can advance to the next applicant, so
+    // every millisecond spent here is spent once per resume — and Chrome usually
+    // has the filename almost immediately, which a flat 120ms floor could only
+    // ever notice late. The budget is not reduced: the intervals sum to more
+    // than the flat poll's did, so a download that is genuinely slow gets at
+    // least as long to name itself as it had before. Only the answer's LATENCY
+    // changes; what counts as an answer is untouched.
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(DOWNLOAD_POLL_MAX_MS, Math.round(delayMs * DOWNLOAD_POLL_BACKOFF));
   }
   // Still in flight when the budget ran out. It was accepted and is downloading,
   // so the requested path is the truth in the overwhelming majority.

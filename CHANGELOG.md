@@ -1,5 +1,63 @@
 # CHANGELOG.md
 
+## 3.7.21 — a resume costs the applicant it belongs to, and nobody else
+
+Requested outright: *"i want to make the extension faster where we can improve without compromising
+the data"*, after *"it should work 15-20 second on every profile"*. So: four changes, every one of
+them a change to what a wait **costs** and none of them a change to what a walk **concludes**. Not one
+read, floor, budget or verdict moved. The suggestion that came with it — stop scrolling the applicant
+list — was **not** taken, and the reason is measured rather than argued: `sweepCurrentPage` runs once
+per *page* of 25 applicants, not once per applicant, so it is ~0.2 s each, and it is the only producer
+of the rows above the current scroll position, the confirmed-bottom test, the page membership the
+pager is gated on, and vanished-row retirement. Removing it re-introduces both defects 3.7.12 fixed —
+the walk jumping backwards and forwards, and the pager pressed with part of the page never opened —
+which loses applicants silently. Under 1% of the time for that trade is not a trade.
+
+**The one that mattered: a repainting viewer was testifying about the page.** The tempo (3.7.14) asks
+one question — "is this page keeping up" — and answers it from whether the document went quiet. That
+inference holds only while the mutations being watched are the page's own hydration. LinkedIn's
+document viewer renders and re-renders PDF pages for as long as it is open, so a wait held over one
+**can never** observe a quiet window and always ends on `timeoutMs`, recording `"unsettled"`. And
+`recordTempo` is asymmetric by design: **one** such sample pins the run to `SLOW`, where every
+applicant afterwards pays a 1.25× quiet window and the 900–1300 ms pace band. So opening a single
+resume made the whole rest of the job slower, on evidence about a PDF renderer. `waitForDomQuiet` now
+takes `{ sample: false }`, and the viewer walk is the one caller that uses it — the wait is unchanged
+in every other respect, same window, same ceiling, same resolving condition; only the verdict about
+the page is withheld. Excluding it makes the measurement **more** accurate, not more optimistic: it
+removes a reading taken with the thermometer against the radiator. Sampling is opt-**out**, so a new
+wait testifies unless deliberately excused, and a test caps the excused waits at two.
+
+**A fixed sleep in front of a poll can only make the answer arrive later.** `clickResumeDownload`
+ended with `waitForDomQuiet(150, 900)` so "the request has been made when the entry log is read" — but
+nothing in it reads the entry log. The **caller** does, by polling: `waitFor(… requests.url() …)` over
+`RESUME_DOCUMENT_TIMEOUT_MS`, with `watchResumeRequests()`'s observer live since before the viewer
+was opened. The poll already covers a slower network than the sleep ever did. Held over the viewer it
+was also a guaranteed `"unsettled"` sample, so it cost the 900 ms twice over. The PERMANENT chain of
+rule 9i is untouched — the control is still found by the tested policy, still pressed, still before
+the document address is looked for, and the test still asserts all of it.
+
+**The dismiss looked after it slept.** `closeOpenedOverlay` dispatched Escape then `await wait(250)`
+before its first check, and again after clicking a close control — up to 500 ms per applicant to
+confirm something that a modal honouring Escape does in a frame or two. It now polls the predicate it
+already tested for, with the same 250 ms ceiling, so a genuinely slow modal is given exactly what it
+had. Deliberately **not** through `waitFor`: that calls `assertRunnable()` on every poll, so a Stop or
+a hidden page would throw straight out of a *dismiss* and leave the preview on screen — which is the
+complaint the function exists to answer. Still exactly one `.click()`.
+
+**And the worker's read-back is answered sooner without being given less time.** `downloadedFilePath`
+polled `chrome.downloads.search` on a flat 120 ms, and the content script **awaits** it before it can
+advance. It now starts at 25 ms and backs off ×1.7 to a 240 ms ceiling; the ten intervals sum to more
+than the flat poll's 1200 ms, so a genuinely slow download gets at least the budget it had — a test
+computes that sum rather than trusting the constants. An interrupted download is still reported as
+interrupted, never as a saved file.
+
+Two new tests: *"a repainting viewer cannot testify about the page, and one resume cannot slow the
+rest of the run"* and *"reading back where Chrome put the file is answered sooner, never given less
+time"*. Files: `applicants.js`, `src/background.ts`, `tests/applicants-core.test.js`, `CLAUDE.md`,
+`CHANGELOG.md`.
+
+⚠ **Not verified live** (rule 17). Local checks only: typecheck, build, 450 tests, validate.
+
 ## 3.7.20 — the walk starts at the first profile, and only scrolls for more when the queue runs dry
 
 The clarification to 3.7.19, and it names the behaviour rather than the mechanism: *"instead of

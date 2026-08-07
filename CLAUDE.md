@@ -880,6 +880,42 @@ resume chain, the contact disclosure, the auto-run and the seven-click budget al
   sentence from two ends and only one of them names a cause. Locked by *"the quiet window follows the
   page, within bounds it can never leave"* and *"adapting the pace changes what a wait costs, never
   what a walk concludes"*.
+  **⚠ A wait held over something designed to repaint may not testify** (3.7.21,
+  `waitForDomQuiet(…, { sample: false })`). The whole inference above holds only while the mutations
+  being watched are *the page's own hydration*. LinkedIn's document viewer renders and re-renders PDF
+  pages for as long as it is open, so a wait held over one **can never** observe a quiet window and
+  always ends on `timeoutMs` — recording `"unsettled"`. Combined with the asymmetry that is the
+  safety everywhere else, **one** such sample pinned the run to `slow`, so opening a single resume
+  made every applicant after it pay a 1.25× window and the 900–1300 ms band, on evidence about a PDF
+  renderer rather than about the page. Excluding those waits makes the measurement *more* accurate,
+  not more optimistic — it removes a reading taken with the thermometer held against the radiator.
+  The wait is unchanged in every other respect: same window, same ceiling, same resolving condition;
+  only the verdict is withheld. **Sampling is opt-out**, so a wait added later testifies unless it is
+  deliberately excused, and the excused ones are capped at two by test — the tempo is only worth
+  having while almost every wait feeds it, and this must never become the way to make a run faster.
+  `scrollResumeViewer` is the one caller. Locked by *"a repainting viewer cannot testify about the
+  page, and one resume cannot slow the rest of the run"*.
+- **The resume step pays for itself and not for the applicants after it** (3.7.21). Three fixed
+  sleeps on that path were costs without a corresponding benefit, and none of them decided anything.
+  `clickResumeDownload` ended with `waitForDomQuiet(150, 900)` so the request would have been made
+  "when the entry log is read" — but it does not read the entry log; the **caller** does, by polling
+  `waitFor(… requests.url() …)` over `RESUME_DOCUMENT_TIMEOUT_MS` with `watchResumeRequests()`'s
+  observer live since before the viewer opened. A fixed sleep in front of a poll can only make the
+  answer arrive *later* than the poll would have noticed it, and the poll already covers a slower
+  network than the sleep ever did. `closeOpenedOverlay` slept 250 ms **before** its first check and
+  again after clicking a close control; it now polls the same predicate to the same 250 ms ceiling,
+  and deliberately **not** through `waitFor` — that calls `assertRunnable()` on every poll, so a Stop
+  or a hidden page would throw straight out of a *dismiss* and leave the preview on screen, which is
+  the complaint that function exists to answer. Still exactly one `.click()`. And the worker's
+  `downloadedFilePath`, which the content script **awaits** before advancing, backs off from 25 ms to
+  a 240 ms ceiling instead of polling flat at 120 ms — its ten intervals sum to *more* than the flat
+  poll's, so a genuinely slow download gets at least the budget it had, and a test computes that sum
+  rather than trusting the constants. The PERMANENT chain of rule 9i is untouched throughout.
+  **What was NOT done, and why**: the request that prompted this also proposed skipping the applicant
+  list scroll. `sweepCurrentPage` runs once per *page* of 25, not once per applicant — ~0.2 s each,
+  under 1% — and it is the sole producer of the rows above the current scroll position, the
+  confirmed-bottom test, the page membership the pager is gated on, and vanished-row retirement.
+  Removing it re-introduces both defects 3.7.12 fixed and loses applicants silently.
 - **From the row itself: the name and the two ids, and deliberately nothing else.** The row also
   renders a headline and a location; taking them would mean deciding that line two is the headline
   and line three is the location — positional guessing on generated markup, which rule 11 refuses and

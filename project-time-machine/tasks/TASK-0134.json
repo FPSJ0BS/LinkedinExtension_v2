@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0134",
+  "name": "Speed up the resume step, and stop one resume slowing every applicant after it",
+  "request": "Speed up the resume step, and stop one resume slowing every applicant after it",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T15:05:51.010Z",
+  "completedAt": "2026-08-07T15:10:40.805Z",
+  "startCommit": "0a2b363a15657ea6db874a22d44ccc1418212931",
+  "gitRef": "task/TASK-0134",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 450 tests, validate)"
+  ],
+  "result": "Speed up the resume step without changing what any walk concludes. Four changes, all cost not verdict. (1) waitForDomQuiet takes { sample: false }; the resume viewer's walk uses it, because a PDF viewer repaints for as long as it is open so a wait held over it can never observe a quiet window, always ends on timeoutMs and records 'unsettled' - and recordTempo's asymmetry means ONE such sample pins the run to SLOW, so opening a single resume made every later applicant pay a 1.25x window and the slow pace band. Sampling is opt-out and excused waits are capped at two by test. (2) Removed clickResumeDownload's trailing waitForDomQuiet(150,900): it sat in front of the caller's own waitFor over RESUME_DOCUMENT_TIMEOUT_MS with watchResumeRequests()'s observer already live, so it could only make the answer arrive later, and held over the viewer it was a guaranteed 'unsettled' sample too. Rule 9i's PERMANENT chain untouched and still asserted. (3) closeOpenedOverlay polls for the close it already tests for instead of sleeping 250ms before looking, twice per attempt; same 250ms ceiling, and deliberately not via waitFor because that calls assertRunnable and would throw a Stop out of a dismiss, leaving the preview on screen. Still exactly one .click(). (4) downloadedFilePath backs off 25ms x1.7 to 240ms instead of a flat 120ms; the ten intervals sum to more than the flat poll's 1200ms so a slow download gets at least its old budget, computed by test rather than assumed. Not done, deliberately: skipping the applicant list scroll. sweepCurrentPage runs once per page of 25 (~0.2s per applicant, under 1%) and is the sole producer of rows above the scroll position, the confirmed-bottom test, the page membership gating the pager, and vanished-row retirement - removing it re-introduces both defects 3.7.12 fixed and loses applicants silently. No read, floor, budget or verdict changed. Two new tests. Files: applicants.js, src/background.ts, tests/applicants-core.test.js, CLAUDE.md, CHANGELOG.md 3.7.21."
+}

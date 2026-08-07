@@ -3946,3 +3946,96 @@ test("adapting the pace changes what a wait costs, never what a walk concludes",
   // "the page never settled" are the same sentence from two ends.
   assert.match(source, /listDiagnostics\.listScroll\.tempo = tempoSnapshot\(\)/, "the walk reports its own tempo");
 });
+
+// A resume costs the applicant it belongs to, and nobody else. The tempo asks
+// "is this page keeping up" and answers it from whether the DOM went quiet —
+// an inference that only holds while the mutations are the page's own hydration.
+// A document viewer repaints its pages for as long as it is open, so a wait held
+// over one can never observe a quiet window and always ends on `timeoutMs`,
+// reporting "unsettled". `recordTempo` is asymmetric by design: ONE such sample
+// pins the run to SLOW, and every applicant after it pays a 1.25x window and the
+// slow pace band. So opening a single resume made the rest of the job slower, on
+// evidence about a PDF renderer rather than about the page.
+test("a repainting viewer cannot testify about the page, and one resume cannot slow the rest of the run", async () => {
+  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+
+  // 1. The opt-out exists, defaults to ON, and withholds only the VERDICT.
+  const domQuiet = source.slice(source.indexOf("function waitForDomQuiet"), source.indexOf("// ---------------------------------------------------------------- the DOM"));
+  assert.match(domQuiet, /function waitForDomQuiet\(quietMs = 300, timeoutMs = 2500, \{ sample = true \} = \{\}\)/,
+    "sampling is opt-OUT, so a new wait testifies unless it is deliberately excused");
+  assert.match(domQuiet, /if \(sample\) recordTempo\(verdict\);/, "and only the tempo reading is withheld");
+  // The wait itself is unchanged: same window, same ceiling, same condition. An
+  // excused wait that also resolved differently would be a second behaviour
+  // hiding behind a diagnostics flag.
+  assert.match(domQuiet, /const window_ = quietWindow\(quietMs\)/, "an excused wait is still a real window");
+  assert.match(domQuiet, /setTimeout\(\(\) => finish\("unsettled"\), timeoutMs\)/, "and still ends on the caller's own ceiling");
+  assert.ok(!/timeoutMs \*/.test(domQuiet), "which is never scaled, excused or not");
+
+  // 2. The viewer walk is the one excused, and it is excused where it is held
+  //    over the viewer — not globally.
+  const viewerWalk = source.slice(source.indexOf("async function scrollResumeViewer"), source.indexOf("* Locate, record and — when permitted — save"));
+  assert.match(viewerWalk, /await waitForDomQuiet\(120, 500, \{ sample: false \}\)/,
+    "the wait held over the document viewer must not report on the page");
+
+  // 3. Excused waits stay RARE. The tempo is only worth having while almost every
+  //    wait feeds it, so this must never become the way to make the run faster.
+  const excused = (source.match(/sample: false/g) || []).length;
+  assert.ok(excused <= 2, `only a wait held over a continuously repainting element may be excused (found ${excused})`);
+
+  // 4. The fixed sleep after pressing Download is gone. It sat in FRONT of a poll
+  //    that catches the same event — `waitFor` over RESUME_DOCUMENT_TIMEOUT_MS,
+  //    with `watchResumeRequests()`'s observer live since before the open — so it
+  //    could only ever make the answer arrive later than the poll would notice it.
+  //    And held over the viewer it was itself a guaranteed "unsettled" sample.
+  const press = source.slice(source.indexOf("async function clickResumeDownload"), source.indexOf("* Prove a candidate address is the DOCUMENT"));
+  assert.ok(!/await waitForDomQuiet\(/.test(press),
+    "pressing Download must not sleep in front of the poll that reads the result");
+  // The chain rule 9i marks PERMANENT is untouched: the control is still pressed.
+  assert.match(press, /control\.element\.click\(\);/, "the control is still pressed");
+  assert.match(press, /diagnostics\.resume\.downloadClicked = true;/, "and still says so");
+
+  // 5. The dismiss polls instead of sleeping — but never through `waitFor`, which
+  //    calls `assertRunnable()` and would throw a Stop straight out of a dismiss,
+  //    leaving the preview on screen. That is the complaint it exists to answer.
+  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("/** The disclosure LinkedIn mounted"));
+  assert.ok(!/waitFor\(/.test(dismiss), "a dismiss must run on the failure path, so it never asserts runnability");
+  assert.ok(!/await wait\(250\)/.test(dismiss), "and must not pay the worst case on every applicant");
+  assert.match(dismiss, /for \(let waited = 0; waited < DISMISS_CONFIRM_MS; waited \+= DISMISS_POLL_MS\)/,
+    "it polls for the close it already tests for");
+  const confirm = Number(/const DISMISS_CONFIRM_MS = (\d+);/.exec(source)[1]);
+  assert.ok(confirm >= 250, `a modal must still get the time the flat sleep gave it (found ${confirm}ms)`);
+  // Still exactly one click: a dismiss is the shared close, never a new control.
+  assert.equal((dismiss.match(/\.click\(\)/g) || []).length, 1, "and is still one click, retried");
+});
+
+test("reading back where Chrome put the file is answered sooner, never given less time", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  const path = worker.slice(worker.indexOf("async function downloadedFilePath"), worker.indexOf("async function downloadResume"));
+  assert.match(path, /setTimeout\(resolve, delayMs\)/, "the poll interval must grow rather than stay flat");
+  assert.match(path, /delayMs = Math\.min\(DOWNLOAD_POLL_MAX_MS, Math\.round\(delayMs \* DOWNLOAD_POLL_BACKOFF\)\)/,
+    "backed off to a ceiling, so a slow download does not spin");
+
+  const start = Number(/const DOWNLOAD_POLL_START_MS = (\d+);/.exec(worker)[1]);
+  const backoff = Number(/const DOWNLOAD_POLL_BACKOFF = ([\d.]+);/.exec(worker)[1]);
+  const max = Number(/const DOWNLOAD_POLL_MAX_MS = (\d+);/.exec(worker)[1]);
+  assert.ok(start < 120, `the first look must be sooner than the flat poll it replaces (found ${start}ms)`);
+  assert.ok(backoff > 1, "and the interval must actually back off");
+
+  // THE PROPERTY THAT MATTERS: this is a latency change, not a budget cut. The
+  // ten intervals must still sum to at least what the flat 120ms poll spent, or a
+  // genuinely slow download would fall back to the REQUESTED path more often —
+  // and `resume_file` would name a file that is not on disk.
+  let delay = start;
+  let total = 0;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    total += delay;
+    delay = Math.min(max, Math.round(delay * backoff));
+  }
+  assert.ok(total >= 10 * 120,
+    `a slow download must get at least the budget it had (found ${total}ms against 1200ms)`);
+
+  // And an interrupted download is still reported as one, never as a saved file.
+  assert.match(path, /if \(item && item\.state === "interrupted"\) \{\s*\n\s*return \{ path: "", interrupted: true/,
+    "an interrupted download must still report itself as one");
+});
