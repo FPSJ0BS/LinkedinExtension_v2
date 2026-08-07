@@ -649,32 +649,44 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
   and the worker refuses to fetch one (`refused-page-not-a-document`). The live defect: the control's
   route was stored as the file, so "Open resume" reopened the applicants page — and the worker
   downloaded that HTML page as somebody's CV and reported `downloaded`. A LinkedIn host is not a file.
-- **The table and the CSV were restructured in 3.7.1; the resume is two columns since 3.7.6.**
-  `APPLICANT_TABLE_COLUMNS` is `applicant_name, email, mobile, resume_file, current_role,
-  current_company, total_experience, education` — the person first, then both ways to reach them,
-  then the resume in **one** column since 3.7.9: **which file we have**. `resume_link` was removed
-  from the table on request ("we can skip the link and remove it from table too") and is
-  **demoted into the detail columns, never dropped** — it is the only column carrying `url` /
-  `viewerUrl`, so deleting it outright would take the document address out of the export
-  altogether, and `resume.url` itself must stay on the record because `resumeAlreadyDownloaded()`
-  is what stops every run re-downloading every file. The same treatment `qualifications` got, with
-  the same two-part test: removed from the table, still asserted present in the export.
-  `resume_link` is the document address when the page
-  rendered one and the LinkedIn viewer page when that is all there is, because either way the cell
-  means "open the CV"; `resume_file` is the saved copy's path under the downloads folder, falling back
-  to the file name LinkedIn showed. Both are `resumeLink()` / `resumeFile()` in
-  [applicant-csv.js](src/applicant-csv.js), so the table cell and the CSV cell are one rule, and
-  neither invents anything. 3.7.4's `resume_status`, `resume_viewer` and `resume_saved_as` are
-  **gone as columns** — a **deliberate removal**, five cells answering one question — while every
-  record field is kept: `downloadStatus` is what stops a file being fetched twice and what the page's
-  resume filter reads, `viewerUrl` and `localReference` are what the two columns are built out of, and
-  the details drawer still shows all three. From here the usual rule resumes: **append columns; never
-  reorder.** `job_title` and the applicant's `location` were **dropped** as columns in
-  3.7.1: the job is a filter on the page and the location is detail, and both still live in the
-  details drawer. `job_id` stays in the detail columns so the association is kept. `all_emails` and
-  `all_phone_numbers` export every value, not only the primary two, with each number marked as text
-  **per entry** — a cell-level marker would protect only the first and `04423456789` would lose its
-  leading zero.
+- **The downloaded file IS the table, and since 3.7.15 it is nothing else.** Requested outright,
+  against a screenshot of the rendered table: *"the downloaded CSV or Excel file contains **only**
+  these columns in this exact order — #, Applicant Name, Email, Mobile, Resume File, Current Role,
+  Current Company, Total Experience, Education. Do not download any extra fields ... Keep all extra
+  data stored internally."* So `APPLICANT_CSV_COLUMNS` is exactly `["#", ...APPLICANT_TABLE_COLUMNS]`
+  — `APPLICANT_TABLE_COLUMNS` is `applicant_name, email, mobile, resume_file, current_role,
+  current_company, total_experience, education`, and one assertion holds the file, that list and the
+  page's rendered `<th>` labels together, so a column added to any one of them without the others
+  fails. **`#` is a position in the file being written**, 1..N over the rows exported, exactly as the
+  table's own `#` is a position in the view it paints; it is derived from where the row lands, never
+  read off the record, and it is deliberately not `applicant_id` — two exports of different filters
+  number the same person differently, which is right for a serial number and would be a defect for a
+  key.
+  **This removed columns, which the appending rule forbids, so the rule is amended here first.**
+  Twenty-three detail columns are gone from the file: `qualifications`,
+  `must_have_qualifications`, `preferred_qualifications`, `screening_responses`, `experience`,
+  `skills`, `application_status`, `collected_at`, `last_updated`, `all_emails`, `all_phone_numbers`,
+  `website`, `profile_url`, `headline`, `applied`, `contacted`, `resume_link`, `resume_file_type`,
+  `resume_pages`, `job_id`, `job_url`, `warnings`, `source_url` and `applicant_id`. That includes
+  `resume_link` and `qualifications`, which 3.7.9 had **demoted rather than dropped** with a
+  two-part test asserting each was still in the export — the second half of both tests is now the
+  opposite assertion, and the change is stated rather than quietly made.
+  **Not one field left the RECORD, and that distinction is the whole change.** Everything above is
+  still extracted, still merged, still stored and still rendered in the details drawer;
+  `resume.url`, `viewerUrl` and `downloadStatus` in particular are load-bearing, because
+  `resumeAlreadyDownloaded()` is what stops every run re-downloading every file. The formatters
+  those columns were built on — `resumeLink()`, `qualificationRows()`, `formatQualifications()`,
+  `allOf()`, `formatScreening()`, `formatExperience()` — are **all kept, all exported and all still
+  tested**, because the drawer renders through them and because a column is a *view*. There is no
+  applicant CSV import, so shrinking the file cannot break a round trip. Two tests assert both
+  halves: every named column is absent from the file, and every value is still on the record.
+  `resume_file` is the saved copy's path under the downloads folder, falling back to the file name
+  LinkedIn showed; `resumeLink()` is still the document address when the page rendered one and the
+  LinkedIn viewer page when that is all there is. Both live in
+  [applicant-csv.js](src/applicant-csv.js), so the table cell and the drawer are one rule, and
+  neither invents anything. `mobile` is still written with a leading apostrophe so a spreadsheet
+  keeps it as text. From here the usual rule resumes — **append columns; never reorder** — and
+  appending one now means appending it to the table as well.
 - `extraction.rawData` keeps the verbatim text every section was parsed from, so a LinkedIn layout
   change is diagnosable from the exported record rather than only from a live page.
 

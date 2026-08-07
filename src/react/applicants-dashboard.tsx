@@ -427,20 +427,14 @@ class ApplicantsApp extends React.Component {
             can carry the clamp safely. */}
         <td className="text-cell" data-label="Email"><span className="cell-clip">{show(record.applicant.contact.email)}</span></td>
         <td className="text-cell" data-label="Mobile"><span className="cell-clip">{show(record.applicant.contact.phone)}</span></td>
-        {/* Two resume columns, and no more. Where to click, and which file we
-            have. The status, the viewer address and the saved path are all
-            still on the record and still in the details drawer — they were
-            three more columns to read across for one question, which is what
-            made the table unreadable. The link is the document when one was
-            found and the LinkedIn viewer page when it is not, because either
-            way the cell means "open the CV". */}
-        {/* The **Resume Link** column that stood here was removed on request in
-            3.7.9 — "we can skip the link and remove it from table too". What the
+        {/* One resume column, and no more: which file we have. The **Resume
+            Link** column that stood here was removed on request in 3.7.9 — "we
+            can skip the link and remove it from table too" — because what the
             recruiter wants from this row is the CV on disk, not an address to
-            click. The link is **demoted, not dropped**: it still exports as the
-            `resume_link` detail column and still shows in the details drawer
-            below, because it is the only place `url`/`viewerUrl` reach the CSV
-            at all. */}
+            click. The link, the status, the viewer address, the file type and
+            the page count are all still on the record and still in the details
+            drawer below; since 3.7.15 they are no longer in the CSV either,
+            which now carries this table and nothing else. */}
         {/* The saved copy's path when there is one, the file name when there is
             not. A file:// link would be blocked, so it is shown as text. */}
         <td className="text-cell" data-label="Resume File"><span className="cell-clip">{show(resumeFile(record))}</span></td>
@@ -454,12 +448,13 @@ class ApplicantsApp extends React.Component {
 
             The **Qualifications** column that stood here was removed on
             request. Every requirement, its verdict, its explanation and its
-            source are still collected and still stored — they are in the
-            details drawer below and in the CSV's detail block — but a cell
-            holding one line per requirement is a paragraph in a table, and on a
-            job with seven must-haves it was the widest thing on the row while
-            answering a question the drawer answers better. Nothing about the
-            record changed; only what the table paints. */}
+            source are still collected and still stored, and the details drawer
+            below still shows all of them — but a cell holding one line per
+            requirement is a paragraph in a table, and on a job with seven
+            must-haves it was the widest thing on the row while answering a
+            question the drawer answers better. Nothing about the record
+            changed; only what the table paints, and since 3.7.15 the CSV paints
+            exactly the same set. */}
         <td className="list-cell" data-label="Education">
           {record.applicant.education.length
             ? <ul className="cell-list">

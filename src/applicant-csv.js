@@ -8,34 +8,43 @@
  * Those all live in [csv.js](./csv.js) and are imported rather than copied, so
  * a fix to one file fixes both exports.
  *
- * **The column order is the table's column order**, exactly as the connections
- * export mirrors the Saved Profiles table, and `APPLICANT_TABLE_COLUMNS` is
- * exported so a test holds the two in step. The structured columns follow.
+ * **The file IS the table, and from 3.7.15 it is nothing else.** Requested
+ * outright, against a screenshot of the rendered table: *"the downloaded CSV or
+ * Excel file contains **only** these columns in this exact order — #, Applicant
+ * Name, Email, Mobile, Resume File, Current Role, Current Company, Total
+ * Experience, Education. Do not download any extra fields ... Keep all extra
+ * data stored internally."* So the column list is exactly
+ * `["#", ...APPLICANT_TABLE_COLUMNS]` — one assertion in the tests holds the
+ * two together, and a column added to either without the other fails.
  *
- * **The resume is two columns, since 3.7.6, and this is a deliberate removal.**
- * 3.7.4 gave it five — `resume_file`, `resume_status`, `resume_link`,
- * `resume_viewer`, `resume_saved_as` — and five columns to answer one question
- * is a table nobody can read across. The two that were asked for are the two
- * that are acted on: **where the resume is** and **which file we have**.
- * `resume_link` is now the address to reach it — the document when one was
- * found, the LinkedIn viewer page when that is all there is, because the point
- * of the cell is that clicking it opens the CV. `resume_file` is the file
- * itself — the saved copy's path when there is one, and the file name LinkedIn
- * showed when there is not. `resume_status`, `resume_viewer` and
- * `resume_saved_as` are gone as columns; every one of the underlying record
- * fields is kept, because `downloadStatus` is what stops the same file being
- * fetched twice and `viewerUrl`/`localReference` are what these two columns are
- * built out of. The details drawer still shows all three.
+ * **This is a removal of columns, which the appending rule forbids, so the rule
+ * was amended first** (CLAUDE.md, "the applicant record"). Twenty-three detail
+ * columns are gone: `qualifications`, `must_have_qualifications`,
+ * `preferred_qualifications`, `screening_responses`, `experience`, `skills`,
+ * `application_status`, `collected_at`, `last_updated`, `all_emails`,
+ * `all_phone_numbers`, `website`, `profile_url`, `headline`, `applied`,
+ * `contacted`, `resume_link`, `resume_file_type`, `resume_pages`, `job_id`,
+ * `job_url`, `warnings`, `source_url` and `applicant_id`.
  *
- * **`qualifications` left the table the same way, and for the same reason.**
- * It was a table column in 3.7.7–3.7.8 and is detail from 3.7.9: a cell holding
- * one line per requirement is a paragraph in a table, and on a job with seven
- * must-haves it was the widest thing on every row. It is **demoted, not
- * dropped** — the whole list still exports, with each requirement's category,
- * verdict, explanation and source, and the details drawer still shows the
- * must-have and preferred lists in full.
+ * **Nothing was removed from the RECORD, and that distinction is the whole of
+ * this change.** Every field above is still extracted, still merged, still
+ * stored in IndexedDB and still rendered in the details drawer; `resume.url`,
+ * `viewerUrl` and `downloadStatus` in particular are load-bearing —
+ * `resumeAlreadyDownloaded()` is what stops every run re-fetching every file.
+ * The formatters they were exported through (`resumeLink`, `qualificationRows`,
+ * `allOf`, `formatScreening`, …) are all kept and all still tested, because the
+ * drawer renders through them and because a column is a *view*. There is no
+ * applicant CSV import, so shrinking the file cannot break a round trip.
  *
- * From here on the usual rule applies again: **append columns, never reorder.**
+ * **`#` is the row's position in the file it is written into**, 1..N over the
+ * rows being exported, which is what the table's own `#` means for the view it
+ * paints. It is not stored, it is not an identity, and it is deliberately not
+ * `applicant_id` — two exports of different filters number the same person
+ * differently, and that is correct for a serial number and would be a defect
+ * for a key.
+ *
+ * The usual rule resumes from here: **append columns, never reorder** — and
+ * appending one now means appending it to the table as well.
  */
 import "./applicants-core.js";
 import { buildCsvFile, downloadCsvText, escapeCell } from "./csv.js";
@@ -90,24 +99,33 @@ export function resumeFile(record) {
 }
 
 /**
- * Every column, in order: the table first, then the detail behind it.
+ * Every column of the file, in order — and there are no others.
  *
- * `read` takes the record and returns the cell's value. A list is returned as
- * an array and becomes one value per line inside the cell, which is what makes
- * five qualifications readable in a spreadsheet instead of one run-on string.
+ * `read` takes the record and its position in the export and returns the cell's
+ * value. A list is returned as an array and becomes one value per line inside
+ * the cell, which is what keeps three institutions readable in a spreadsheet
+ * instead of one run-on string.
+ *
+ * The detail block that used to follow `education` is gone (see the note at the
+ * top of this file). It was removed from the FILE, never from the record.
  */
 export const APPLICANT_CSV_COLUMNS = [
-  // --- the table, column for column -------------------------------------
+  // The row's position in this file, matching the table's own `#`. Derived from
+  // where the row lands, never read off the record — it is a serial number for
+  // one export and means nothing outside it, which is exactly why it may not be
+  // confused with `applicant_id`.
+  ["#", (_record, index) => index + 1],
   ["applicant_name", (record) => record.applicant.name],
   ["email", (record) => record.applicant.contact.email],
   ["mobile", (record) => record.applicant.contact.phone, { asText: true }],
-  // The resume, in ONE table column since 3.7.9: which file we have. Asked for
+  // The resume, in ONE column since 3.7.9: which file we have. Asked for
   // outright — "we can skip the link and remove it from table too" — because the
-  // recruiter wants the CV on disk, not an address to click. `resume_link` is
-  // **demoted into the detail block below, never dropped**: it is the only column
-  // carrying `url`/`viewerUrl`, so deleting it would take the document address
-  // out of the export altogether. The same treatment `qualifications` got.
+  // recruiter wants the CV on disk, not an address to click.
   ["resume_file", resumeFile],
+  // 3.7.15: the resume is ONE column in the file as well as in the table.
+  // `resume_link` was the last detail column standing and it goes with the
+  // rest — `url`, `viewerUrl`, `downloadStatus`, the file type and the page
+  // count are all still on the record and still in the details drawer.
   ["current_role", (record) => record.applicant.currentRole],
   ["current_company", (record) => record.applicant.currentCompany],
   ["total_experience", (record) => record.applicant.totalExperience],
@@ -115,56 +133,18 @@ export const APPLICANT_CSV_COLUMNS = [
   // a recruiter actually scans a shortlist for — "what did they study" — was
   // one the table could not answer. `education` moving up out of the detail
   // block is a **deliberate reorder**, the same kind 3.7.4 made.
-  ["education", (record) => record.applicant.education.map(formatEducation)],
-
-  // --- the detail the table keeps behind "View details" -----------------
-  // `application_status` and `collected_at` were TABLE columns through 3.7.7 and
-  // are detail from 3.7.8: the status was "—" on every row of the reference
-  // account, and the timestamp is not something a shortlist is scanned down.
-  // The two verdict tallies are gone outright rather than demoted — they are
-  // computed from `qualifications`, so the tally was a summary of the column
-  // below.
-  //
-  // `qualifications` was a TABLE column through 3.7.8 and is **detail from
-  // here**, on request: one line per requirement made it the widest cell on the
-  // row, and a job with seven must-haves turned every row into a paragraph.
-  // Demoted, deliberately, and **not dropped** — every requirement, verdict,
-  // explanation and source still exports here and still shows in the drawer.
-  // The same treatment 3.7.4 gave `resume_status` and its two neighbours: the
-  // column goes, the data does not.
-  ["qualifications", (record) => qualificationRows(record)],
-  ["application_status", (record) => record.applicant.applicationStatus],
-  ["collected_at", (record) => record.collectedAt],
-  // Every address and every number, not only the primary two: the contact
-  // disclosure often shows more than one of each, and an export that kept only
-  // the first would throw the rest away.
-  ["all_emails", (record) => allOf(record, "email")],
-  // Marked per entry rather than per cell: `asText` prefixes the whole cell,
-  // which would leave the second number in a multi-line cell unprotected and
-  // `04423456789` would lose its leading zero on the way into a spreadsheet.
-  ["all_phone_numbers", (record) => allOf(record, "phone").map((value) => `'${value}`)],
-  ["website", (record) => record.applicant.contact.website],
-  ["profile_url", (record) => record.applicant.profileUrl],
-  ["headline", (record) => record.applicant.headline],
-  ["applied", (record) => record.applicant.appliedAt],
-  ["contacted", (record) => record.applicant.contactedAt],
-  ["must_have_qualifications", (record) => formatQualifications(record, "must_have")],
-  ["preferred_qualifications", (record) => formatQualifications(record, "preferred")],
-  ["screening_responses", (record) => record.applicant.screeningResponses.map(formatScreening)],
-  ["experience", (record) => record.applicant.experience.map(formatExperience)],
-  ["skills", (record) => record.applicant.skills],
-  // Demoted out of the table in 3.7.9, kept here in full: the document address
-  // when one was proven, otherwise the viewer page. Removing the COLUMN must
-  // never drop the DATA — this is the only column carrying `url`/`viewerUrl`.
-  ["resume_link", resumeLink],
-  ["resume_file_type", (record) => record.applicant.resume.fileType],
-  ["resume_pages", (record) => record.applicant.resume.pages],
-  ["job_id", (record) => record.job.id],
-  ["job_url", (record) => record.job.url],
-  ["warnings", (record) => record.extraction.warnings],
-  ["source_url", (record) => record.extraction.sourceUrl],
-  ["last_updated", (record) => record.updatedAt],
-  ["applicant_id", (record) => record.id]
+  ["education", (record) => record.applicant.education.map(formatEducation)]
+  // The file ENDS here, from 3.7.15. Twenty-three detail columns stood below
+  // this line — the qualifications and their two split columns, the screening
+  // responses, the full experience history, the skills, the status, the three
+  // timestamps, the extra addresses and numbers, the website, the profile URL,
+  // the headline, the two application dates, the resume's link, type and page
+  // count, the job's id and URL, the extraction warnings, the source URL and
+  // the record's own id — and every one of them was removed from the FILE on
+  // request. Not one was removed from the record: they are all still extracted,
+  // merged, stored and shown in the details drawer, and the formatters below
+  // are all still exported and still tested because that drawer renders through
+  // them. Appending a column here now means appending it to the table too.
 ];
 
 /**
@@ -183,8 +163,14 @@ const TEXT_COLUMNS = new Set(
  *
  * The primary lives on `contact.email` / `contact.phone` and any further ones
  * were labelled into `contact.other` as `email: …` / `phone: …` when the record
- * was built. Both halves are put back together here so the export never drops
- * the second address a contact disclosure showed.
+ * was built. Both halves are put back together here so a reader that wants all
+ * of them can have all of them.
+ *
+ * The `all_emails` / `all_phone_numbers` columns this backed are gone from the
+ * file as of 3.7.15 — the export carries the primary two, which is what the
+ * table shows. This is kept because the extras are still *on the record*, and
+ * dropping the one function that can read them out would make them unreachable
+ * as well as unexported.
  */
 export function allOf(record, kind) {
   const contact = record?.applicant?.contact || {};
@@ -231,7 +217,16 @@ export function formatQualification(entry) {
   return parts.join(" ");
 }
 
-function formatQualifications(record, category) {
+/**
+ * One category's requirements, formatted.
+ *
+ * Backed the `must_have_qualifications` / `preferred_qualifications` columns
+ * until 3.7.15 took every detail column out of the file. Exported rather than
+ * deleted for the same reason as `allOf`: the qualifications are still on the
+ * record and the drawer still shows them split this way, so the rule for
+ * reading one category out is worth keeping in one place and tested.
+ */
+export function formatQualifications(record, category) {
   return (record?.applicant?.qualifications || [])
     .filter((entry) => entry.category === category)
     .map(formatQualification);
@@ -294,12 +289,15 @@ export function formatEducation(entry) {
 }
 
 export function applicantsToCsv(applicants) {
-  const rows = (applicants || []).map((raw) => {
+  const rows = (applicants || []).map((raw, index) => {
     // Normalized on the way out too, so a record written by an older build
     // exports with the current column set rather than a row of blanks.
     const record = Applicants.normalizeApplicantRecord(raw);
+    // `index` is the row's position in THIS file and is what `#` is read from.
+    // Every other column ignores it — a cell whose value depended on where the
+    // row happened to land would be a different kind of column entirely.
     return APPLICANT_CSV_COLUMNS
-      .map(([label, read]) => escapeCell(read(record), { asText: TEXT_COLUMNS.has(label) }))
+      .map(([label, read]) => escapeCell(read(record, index), { asText: TEXT_COLUMNS.has(label) }))
       .join(",");
   });
   return buildCsvFile(APPLICANT_CSV_COLUMNS.map(([label]) => label), rows);

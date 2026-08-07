@@ -94,55 +94,77 @@ test("a phone number survives a spreadsheet round trip", () => {
   assert.ok(mobileAt >= 0, "there must be a mobile column");
 });
 
-test("the CSV columns start with the applicants table, column for column", async () => {
+test("the file IS the applicants table — the same columns, in the same order, and no others", async () => {
+  // Requested outright in 3.7.15, against a screenshot of the rendered table:
+  // "the downloaded CSV or Excel file contains ONLY these columns in this exact
+  // order — #, Applicant Name, Email, Mobile, Resume File, Current Role,
+  // Current Company, Total Experience, Education ... keep all extra data stored
+  // internally". So this is not "the export LEADS with the table" any more; it
+  // is "the export IS the table", and that is a much cheaper thing to check.
   const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
   const head = page.slice(page.indexOf("<thead>"), page.indexOf("</thead>"));
   const headers = [...head.matchAll(/<th(?:\s[^>]*)?>([^<]+)<\/th>/g)]
     .map((match) => match[1].trim())
-    // Neither the row number nor the Actions cell is an export column: "#" is a
-    // position in the current filter, which changes when the filter does, and a
-    // number that means something different per view must never reach the CSV.
-    .filter((label) => label !== "Actions" && label !== "#")
+    // Actions is a pair of buttons, not a value. The select box holds an
+    // <input> rather than text, so it never matches in the first place.
+    .filter((label) => label !== "Actions")
     .map((label) => label.toLowerCase().replace(/ /g, "_"));
 
-  assert.deepEqual([...Csv.APPLICANT_TABLE_COLUMNS], headers, "the exported list must match the rendered header");
-  // And the file's first columns are exactly that list, in that order.
-  const leading = Csv.APPLICANT_CSV_COLUMNS.slice(0, headers.length).map(([label]) => label);
-  assert.deepEqual(leading, headers, "the export leads with the table, then adds the detail behind it");
+  assert.deepEqual(
+    Csv.APPLICANT_CSV_COLUMNS.map(([label]) => label),
+    headers,
+    "every column of the file is a column of the table, and every column of the table is in the file"
+  );
+  assert.deepEqual(headers, [
+    "#", "applicant_name", "email", "mobile", "resume_file",
+    "current_role", "current_company", "total_experience", "education"
+  ], "and this is the set that was asked for, in the order it was asked for");
+
+  // `#` is the only one that is not an `APPLICANT_TABLE_COLUMNS` entry, because
+  // it is a position rather than a field of the record.
+  assert.deepEqual([...Csv.APPLICANT_TABLE_COLUMNS], headers.slice(1), "the shared list is the table minus its row number");
 
   const source = await readFile(resolve(root, "src/applicant-csv.js"), "utf8");
   assert.match(source, /export const APPLICANT_TABLE_COLUMNS/, "the shared list must be exported, not duplicated");
 });
 
-test("the export leads with the applicant, and the resume is exactly two columns", () => {
+test("the row number counts this file's rows, and is never the record's identity", () => {
+  const csv = Csv.applicantsToCsv([
+    sampleApplicant(),
+    Applicants.normalizeApplicantRecord({ applicant: { name: "Second Person" } }),
+    Applicants.normalizeApplicantRecord({ applicant: { name: "Third Person" } })
+  ]);
+  const [header, ...rows] = parseRows(csv).filter(Boolean);
+  assert.equal(header.split(",")[0], '"#"', "the row number leads the header");
+  assert.deepEqual(rows.map((row) => row.split(",")[0]), ['"1"', '"2"', '"3"'],
+    "numbered from one, in the order the rows were exported");
+
+  // It is derived from where the row lands, never read off the record — which
+  // is the whole reason it may not be confused with `applicant_id`. Exporting a
+  // filtered or selected subset renumbers from one, and that is correct for a
+  // serial number and would be a defect for a key.
+  const alone = parseRows(Csv.applicantsToCsv([Applicants.normalizeApplicantRecord({ applicant: { name: "Third Person" } })]))[1];
+  assert.match(alone, /^"1","Third Person"/, "the same person is row 1 of an export that contains only them");
+  assert.ok(!Csv.APPLICANT_CSV_COLUMNS.some(([label]) => label === "applicant_id"),
+    "and the identity it is not is no longer exported at all");
+});
+
+test("the resume is one column in the file, and the rest of it stays on the record", () => {
   const labels = Csv.APPLICANT_CSV_COLUMNS.map(([label]) => label);
 
-  // 3.7.1: the applicant's own name is the first column — the export is read
-  // per person, not per posting.
-  assert.equal(labels[0], "applicant_name");
-  // 3.7.6: the resume is TWO columns. Five of them answered one question
-  // between them and made the table impossible to read across; the two that are
-  // acted on are where the resume is and which file we have.
-  // ...and ONE of those two from 3.7.9, on request: "we can skip the link and
-  // remove it from table too". What the row is scanned for is whether the CV is
-  // on disk, not an address to click.
-  assert.deepEqual(labels.slice(0, 4), [
-    "applicant_name", "email", "mobile", "resume_file"
-  ], "name, both ways to reach them, then which file we actually have");
-  for (const gone of ["resume_status", "resume_viewer", "resume_saved_as"]) {
-    assert.ok(!labels.includes(gone), `${gone} must no longer be a column`);
+  // 3.7.1: the applicant's own name leads the record's own columns — the export
+  // is read per person, not per posting. `#` sits in front of it from 3.7.15
+  // because the table has always painted a row number and the file was asked to
+  // match the table.
+  assert.deepEqual(labels.slice(0, 5), [
+    "#", "applicant_name", "email", "mobile", "resume_file"
+  ], "the position, the name, both ways to reach them, then which file we actually have");
+  // 3.7.4 had five resume columns, 3.7.6 cut them to two and 3.7.9 to one in
+  // the table. 3.7.15 makes the file agree: `resume_link` was the last of them
+  // still exporting and it goes with the other detail columns.
+  for (const gone of ["resume_status", "resume_viewer", "resume_saved_as", "resume_link", "resume_file_type", "resume_pages"]) {
+    assert.ok(!labels.includes(gone), `${gone} must no longer be a column of the file`);
   }
-  // **Demoted, never dropped** — the same treatment `qualifications` got. This
-  // is the only column carrying `url`/`viewerUrl`, so deleting it outright would
-  // take the document address out of the export altogether.
-  assert.ok(
-    !Csv.APPLICANT_TABLE_COLUMNS.includes("resume_link"),
-    "the resume link is no longer a table column"
-  );
-  assert.ok(
-    labels.includes("resume_link"),
-    "and it must still export — removing the column must never drop the data"
-  );
 
   const record = Applicants.normalizeApplicantRecord({
     applicant: {
@@ -158,14 +180,16 @@ test("the export leads with the applicant, and the resume is exactly two columns
     }
   });
   const read = (label) => Csv.APPLICANT_CSV_COLUMNS.find(([name]) => name === label)[1](record);
-  // The document wins the link cell, and the saved copy wins the file cell:
-  // "where do I click" and "which file on disk is theirs".
-  assert.equal(read("resume_link"), "https://media.licdn.com/dms/document/ABC/anamika-singh.pdf");
+  // The saved copy wins the one cell there is: "which file on disk is theirs".
   assert.equal(read("resume_file"), "profile-vault-resumes/anamika-singh.pdf");
+  // The link is still derivable, still exported as a function, and still what
+  // the details drawer renders — it simply is not a column any more.
+  assert.equal(Csv.resumeLink(record), "https://media.licdn.com/dms/document/ABC/anamika-singh.pdf",
+    "the document wins the link when there is one");
 
-  // A record with only a viewer still exports the one link it has, rather than
-  // an empty cell — the viewer page exists on almost every applicant even when
-  // the document address does not, and it is what opens the CV.
+  // A record with only a viewer still has one link, rather than nothing — the
+  // viewer page exists on almost every applicant even when the document address
+  // does not, and it is what opens the CV.
   const viewerOnly = Applicants.normalizeApplicantRecord({
     applicant: {
       name: "X",
@@ -173,7 +197,7 @@ test("the export leads with the applicant, and the resume is exactly two columns
     }
   });
   const readOne = (label) => Csv.APPLICANT_CSV_COLUMNS.find(([name]) => name === label)[1](viewerOnly);
-  assert.equal(readOne("resume_link"), "https://www.linkedin.com/hiring/applicants/?applicationId=1", "the viewer is the fallback link");
+  assert.equal(Csv.resumeLink(viewerOnly), "https://www.linkedin.com/hiring/applicants/?applicationId=1", "the viewer is the fallback link");
   assert.equal(readOne("resume_file"), "x.pdf", "and the file name stands in until a copy is saved");
 
   // Nothing at all stays empty. Never a guess, never "unavailable" in a link.
@@ -181,58 +205,69 @@ test("the export leads with the applicant, and the resume is exactly two columns
   assert.equal(Csv.resumeLink(none), "");
   assert.equal(Csv.resumeFile(none), "");
 
-  // The record still keeps all three apart — the columns were consolidated, the
-  // data was not. `downloadStatus` is what stops the same file being fetched
-  // twice, and a page address may never become the document.
+  // ⚠ The columns went; the RECORD did not, and that is the whole of 3.7.15.
+  // `downloadStatus` is what stops the same file being fetched twice on the
+  // next run, and `url`/`viewerUrl` are what a page address may never become.
+  // Dropping these from the record would break collection, not just the export.
   assert.equal(record.applicant.resume.downloadStatus, "downloaded");
+  assert.equal(record.applicant.resume.url, "https://media.licdn.com/dms/document/ABC/anamika-singh.pdf");
   assert.equal(record.applicant.resume.viewerUrl, "https://www.linkedin.com/hiring/applicants/?applicationId=31754123946");
   assert.equal(record.applicant.resume.localReference, "profile-vault-resumes/anamika-singh.pdf");
 
-  // Dropped in 3.7.1: the job is a filter on the page, not a column on every
-  // row, and the applicant's location is detail rather than a reason to pick
-  // them. `job_id` survives in the detail columns so the association is kept.
-  for (const gone of ["job_title", "location", "job_location", "job_company", "job_description"]) {
-    assert.ok(!labels.includes(gone), `${gone} must no longer be a column`);
+  // The details drawer is where all of it is still shown, so the formatters it
+  // renders through must stay exported however few columns there are.
+  for (const helper of ["resumeLink", "resumeSummary", "formatQualification", "formatScreening", "formatExperience", "formatEducation"]) {
+    assert.equal(typeof Csv[helper], "function", `${helper} backs the details drawer and may not be dropped with its column`);
   }
-  assert.ok(labels.includes("job_id"), "the job association is still exported");
-  assert.ok([...Csv.APPLICANT_TABLE_COLUMNS].every((label) => labels.includes(label)), "the table's columns all exist");
 });
 
-test("education is a column of the table; qualifications are detail behind it", () => {
+test("the detail columns are gone from the file, and every one of them is still on the record", () => {
   const labels = Csv.APPLICANT_CSV_COLUMNS.map(([label]) => label);
-  assert.ok(labels.includes("education"), "what they studied must be a column");
-  // 3.7.9: `qualifications` was a table column in 3.7.7–3.7.8 and is detail
-  // again, on request — a cell holding one line per requirement is a paragraph
-  // in a table. **Demoted, never dropped**: the export still carries every
-  // requirement, so this asserts both halves.
-  assert.ok(
-    !Csv.APPLICANT_TABLE_COLUMNS.includes("qualifications"),
-    "the qualifications column was removed from the table"
-  );
-  assert.ok(
-    labels.includes("qualifications"),
-    "and the verdicts must still export — removing the column must never drop the data"
-  );
-  // The table ENDS with education. The two verdict tallies that used to follow
-  // are gone — they summarised the `qualifications` cell beside them — and the
-  // application status and the collected-at timestamp are detail, not something
-  // a shortlist is scanned down.
+
+  // Requested outright: "do not download any extra fields such as
+  // qualifications, status, additional emails or numbers, profile URL,
+  // headline, dates, screening responses, full experience history, skills,
+  // resume metadata, job details, warnings, timestamps, applicant ID, or
+  // internal data." Every column that carried one of those is named here, so a
+  // reinstated column fails rather than silently widening the file again.
+  for (const gone of [
+    "qualifications", "must_have_qualifications", "preferred_qualifications",
+    "screening_responses", "experience", "skills",
+    "application_status", "collected_at", "last_updated",
+    "all_emails", "all_phone_numbers", "website",
+    "profile_url", "headline", "applied", "contacted",
+    "job_id", "job_url", "warnings", "source_url", "applicant_id",
+    // And the ones dropped earlier, which must not come back either.
+    "job_title", "location", "job_location", "job_company", "job_description"
+  ]) {
+    assert.ok(!labels.includes(gone), `${gone} must not be a column of the downloaded file`);
+  }
+  assert.equal(labels.length, 9, "nine columns, and a tenth is a deliberate change to the table as well");
+
+  // The table ENDS with education, and so therefore does the file.
   assert.deepEqual(
     [...Csv.APPLICANT_TABLE_COLUMNS].slice(4),
     ["current_role", "current_company", "total_experience", "education"],
     "the last columns are what the shortlist is actually read for"
   );
-  // `education` moved up out of the detail block, so it must not also be left
-  // there — one column, one place, or a row carries the same text twice.
   assert.equal(labels.filter((label) => label === "education").length, 1, "education is one column, not two");
 
+  // ⚠ The other half, and the half that matters: the data is still collected,
+  // still stored and still reachable. "Keep all extra data stored internally."
   const record = sampleApplicant();
-  const read = (label) => Csv.APPLICANT_CSV_COLUMNS.find(([name]) => name === label)[1](record);
+  assert.equal(record.applicant.qualifications.length, 3, "every requirement the platform judged is still stored");
+  assert.equal(record.applicant.screeningResponses.length, 1);
+  assert.equal(record.applicant.experience.length, 2, "the full history is still on the record");
+  assert.ok(record.applicant.skills.length);
+  assert.equal(record.applicant.profileUrl, "https://www.linkedin.com/in/mahak-ayani");
+  assert.ok(record.applicant.headline);
+  assert.equal(record.job.id, "4277798308");
+  assert.ok(record.id, "and it still has an identity — it is simply not a column");
 
-  // A single column has to say which category a requirement is, or a matched
-  // preferred and a matched must-have read identically.
-  const rows = read("qualifications");
-  assert.equal(rows.length, 3, "every requirement the platform judged, none dropped");
+  // And still formattable, because the details drawer renders through exactly
+  // these functions. A column that leaves must not take its formatter with it.
+  const rows = Csv.qualificationRows(record);
+  assert.equal(rows.length, 3, "every requirement, none dropped");
   assert.match(rows[0], /^must-have: matched · Bachelor's degree/);
   assert.match(rows[1], /^must-have: unknown · Knowledge of employment laws/);
   assert.match(rows[2], /^preferred: unknown · Strong communication/);
@@ -241,23 +276,26 @@ test("education is a column of the table; qualifications are detail behind it", 
     Csv.formatQualificationRow({ requirement: "Something", category: "", result: "matched", explanation: null, source: "" }),
     "matched · Something"
   );
+  assert.equal(Csv.formatQualifications(record, "must_have").length, 2, "and each category can still be read out on its own");
+  assert.equal(Csv.formatQualifications(record, "preferred").length, 1);
 
+  const read = (label) => Csv.APPLICANT_CSV_COLUMNS.find(([name]) => name === label)[1](record);
   assert.deepEqual(read("education"), ["University of Delhi — Bachelor of Arts, Psychology (2018-2021)"]);
   assert.deepEqual(Csv.educationRows({ applicant: { education: [] } }), [], "nobody's education is never invented");
   assert.deepEqual(Csv.qualificationRows({}), [], "and neither is anybody's qualifications");
 
-  // The split columns are untouched — they answer a different question, and
-  // nothing was removed that was not asked to be.
-  assert.ok(labels.includes("must_have_qualifications"));
-  assert.ok(labels.includes("preferred_qualifications"));
-
-  // And it reaches the file, one value per line inside the cell.
+  // The file itself carries none of it. Checked against the text, because a
+  // column list that looks right and a file that leaks are different failures.
   const csv = Csv.applicantsToCsv([record]);
-  assert.match(csv, /must-have: matched · Bachelor's degree/);
-  assert.match(csv, /University of Delhi — Bachelor of Arts/);
+  assert.ok(!csv.includes("must-have: matched"), "no verdict reaches the file");
+  assert.ok(!csv.includes("linkedin.com/in/mahak-ayani"), "and no profile URL");
+  assert.ok(!csv.includes("Talent Acquisition"), "and no skills");
+  assert.ok(!csv.includes("4277798308"), "and no job id");
+  assert.ok(!csv.includes(record.id), "and not the record's own id");
+  assert.match(csv, /University of Delhi — Bachelor of Arts/, "what was asked for is still there");
 });
 
-test("every address and every number reaches the file, not only the primary two", () => {
+test("the extra addresses and numbers stay on the record and out of the file", () => {
   const record = Applicants.normalizeApplicantRecord({
     applicant: {
       name: "Mahak Ayani",
@@ -269,20 +307,25 @@ test("every address and every number reaches the file, not only the primary two"
     }
   });
 
+  // Still collected, still labelled, still reachable — `allOf` is kept for
+  // exactly this reason even though no column calls it any more.
   assert.deepEqual(Csv.allOf(record, "email"), ["mahak@example.com", "alt@example.com"]);
   assert.deepEqual(Csv.allOf(record, "phone"), ["04423456789", "+919876543210"]);
-
-  const csv = Csv.applicantsToCsv([record]);
-  assert.match(csv, /mahak@example\.com\nalt@example\.com/, "both addresses, one per line");
-  // Marked per entry, not per cell: `asText` on the cell would protect only the
-  // first number and `04423456789` would lose its leading zero.
-  assert.match(csv, /'04423456789\n'\+919876543210/, "every number is marked as text");
-
-  // A duplicate between the primary and the extras is not exported twice.
+  // A duplicate between the primary and the extras is not counted twice.
   const duplicated = Applicants.normalizeApplicantRecord({
     applicant: { name: "X", contact: { email: "a@b.com", other: ["email: A@B.com"] } }
   });
   assert.deepEqual(Csv.allOf(duplicated, "email"), ["a@b.com"]);
+
+  // The file carries the primary two only — "additional emails or numbers" was
+  // named outright in the request.
+  const csv = Csv.applicantsToCsv([record]);
+  assert.match(csv, /"mahak@example\.com"/, "the primary address is a column");
+  assert.ok(!csv.includes("alt@example.com"), "the second address is not");
+  assert.ok(!csv.includes("+919876543210"), "and neither is the second number");
+  assert.ok(!csv.includes("https://example.com"), "nor the website");
+  // The one that IS exported is still marked as text, or the leading zero goes.
+  assert.match(csv, /"'04423456789"/, "the mobile column is still protected from Excel");
 });
 
 test("total experience is computed, including from the applicant card's spaceless range", () => {
@@ -323,17 +366,17 @@ test("the applicant export shares the connections export's safety rules rather t
   assert.match(csv, /export function downloadCsvText/);
 });
 
-test("a qualification cell says the verdict, the requirement, the reason and the source", () => {
+test("a qualification line says the verdict, the requirement, the reason and the source", () => {
   const record = sampleApplicant();
-  const csv = Csv.applicantsToCsv([record]);
 
+  // It is no longer a CSV cell — it is what the details drawer renders — but
+  // the formatting rule is unchanged and is still the one place it lives.
   assert.equal(
     Csv.formatQualification(record.applicant.qualifications[0]),
     "matched · Bachelor's degree in HR, Business Administration, or related field. — Mahak Ayani answered 'Yes' to having completed a Bachelor's Degree. [screening_response]"
   );
   // A requirement the platform could not evaluate still prints, as unknown.
   assert.match(Csv.formatQualification(record.applicant.qualifications[1]), /^unknown · Knowledge of employment laws\./);
-  assert.match(csv, /matched · Bachelor's degree/, "and it reaches the file");
 
   // The row-level tally is a count, not a colour.
   assert.equal(Csv.qualificationTally(record, "must_have"), "1 of 2");

@@ -1,5 +1,48 @@
 # CHANGELOG.md
 
+## 3.7.15 — the applicant export is the applicants table, and nothing else
+
+Requested outright, against a screenshot of the rendered table: *"update only the download/export
+function so the downloaded CSV or Excel file contains **only** these columns in this exact order —
+#, Applicant Name, Email, Mobile, Resume File, Current Role, Current Company, Total Experience,
+Education. Do not download any extra fields such as qualifications, status, additional emails or
+numbers, profile URL, headline, dates, screening responses, full experience history, skills, resume
+metadata, job details, warnings, timestamps, applicant ID, or internal data. Keep all extra data
+stored internally and do not change any other extension feature or behaviour."*
+
+`APPLICANT_CSV_COLUMNS` is now exactly `["#", ...APPLICANT_TABLE_COLUMNS]`. Twenty-three detail
+columns are gone from the file: `qualifications`, `must_have_qualifications`,
+`preferred_qualifications`, `screening_responses`, `experience`, `skills`, `application_status`,
+`collected_at`, `last_updated`, `all_emails`, `all_phone_numbers`, `website`, `profile_url`,
+`headline`, `applied`, `contacted`, `resume_link`, `resume_file_type`, `resume_pages`, `job_id`,
+`job_url`, `warnings`, `source_url` and `applicant_id`.
+
+**Not one field left the record.** Every value above is still extracted, still merged into the
+stored record, still in IndexedDB and still rendered in the details drawer. That is not a nicety:
+`resume.url`, `viewerUrl` and `downloadStatus` are what `resumeAlreadyDownloaded()` reads, and
+without them every run would re-download every file. The formatters those columns were built on —
+`resumeLink()`, `qualificationRows()`, `formatQualifications()`, `allOf()`, `formatScreening()`,
+`formatExperience()` — are all kept, all exported and all still tested, because the drawer renders
+through them and a column is a *view*. There is no applicant CSV import, so a narrower file cannot
+break a round trip.
+
+**`#` is the row's position in the file being written**, 1..N over the rows exported, which is what
+the table's own `#` means for the view it paints. It is derived from where the row lands rather than
+read off the record, and it is deliberately not `applicant_id`: two exports of different filters
+number the same person differently, which is correct for a serial number and would be a defect for a
+key. `applicantsToCsv` passes the index to every column reader; only `#` looks at it.
+
+**This removes columns, which the export's own "append columns; never reorder" rule forbids, so
+CLAUDE.md was amended in the same task and says so.** Two of the removals — `resume_link` and
+`qualifications` — were 3.7.9 demotions that carried a two-part test asserting each was *still in
+the export*; the second half of both is now the opposite assertion. Stated rather than quietly
+reversed.
+
+Nothing outside the export changed: the table paints the same nine columns it did before, the
+details drawer shows everything it did before, and the collection, resume download, storage and
+navigation paths are untouched. Two stale comments in `applicants-dashboard.tsx` that described the
+CSV's detail block were corrected; no markup moved.
+
 ## 3.7.14 — the applicant walk paces itself to the page instead of to fixed delays
 
 Requested outright: *"optimize applicant processing speed without changing any existing feature,

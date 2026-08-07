@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "TASK-0126",
+  "name": "Export only the applicant table's own columns, numbered",
+  "request": "Export only the applicant table's own columns, numbered",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T10:08:30.870Z",
+  "completedAt": "2026-08-07T10:15:24.235Z",
+  "startCommit": "8fe97d7f742975bc7fb48ce6270dc6080d34641c",
+  "gitRef": "task/TASK-0126",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicant-csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed - typecheck, build, 440 tests / 0 failed, validate (31 build files, 4 React entry points)",
+    "node --test tests/applicant-csv.test.js - 16/16 pass, including the four rewritten tests asserting each removed column is absent from the file and each removed value is still on the record",
+    "generated a sample export from three records and read the bytes back: the header is exactly the nine requested columns in the requested order, rows number 1/2/3, the alt email, second phone, profile URL, skills, job id and record id appear nowhere in the file, and mobile keeps its leading-apostrophe text marker"
+  ],
+  "result": "The applicant download is now exactly the applicants table: APPLICANT_CSV_COLUMNS is ['#', ...APPLICANT_TABLE_COLUMNS] - #, applicant_name, email, mobile, resume_file, current_role, current_company, total_experience, education - and nothing else. Twenty-three detail columns were removed from the FILE (qualifications, must_have_qualifications, preferred_qualifications, screening_responses, experience, skills, application_status, collected_at, last_updated, all_emails, all_phone_numbers, website, profile_url, headline, applied, contacted, resume_link, resume_file_type, resume_pages, job_id, job_url, warnings, source_url, applicant_id). Not one field left the record: all of it is still extracted, merged, stored in IndexedDB and rendered in the details drawer, and resume.url/viewerUrl/downloadStatus in particular are load-bearing because resumeAlreadyDownloaded() reads them. The formatters those columns were built on (resumeLink, qualificationRows, formatQualifications, allOf, formatScreening, formatExperience) are all kept, exported and still tested, because the drawer renders through them. '#' is the row's position in the file being written, 1..N over the rows exported, derived from where the row lands rather than read off the record, and deliberately not applicant_id. applicantsToCsv passes the index to every reader; only '#' looks at it. This removes columns, which the export's own append-never-reorder rule forbids, so CLAUDE.md was amended in the same task and names the reversal of two 3.7.9 demotions (resume_link, qualifications) whose tests asserted they were still in the export. Nothing outside the export changed: the table paints the same nine columns, the drawer shows the same detail, and collection, resume download, storage and navigation are untouched; two stale comments in applicants-dashboard.tsx describing the CSV's detail block were corrected without moving markup."
+}
