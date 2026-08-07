@@ -1380,22 +1380,38 @@ test("the list pass opens every applicant across every page and takes what the p
   // full collection uses, with the button-gated steps switched off.
   assert.match(pass, /await collectVisibleApplicant\(row, rowId\)/, "each applicant is opened and read");
   const reveal = source.slice(source.indexOf("const VISIBLE_ONLY_OPTIONS"), source.indexOf("async function extractAllApplicants"));
-  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false, contact: false, resume: false \}\)/,
-    "nothing behind a button is opened: no expander, no contact disclosure, no resume viewer");
+  // Requested outright: "I want the extension to be able to get contact info
+  // from the contact info button given in the profile AND I WANT THE RESUME TO
+  // BE DOWNLOADED IN THE DISK WITH THE NAME OF THE PROFILE OWNER." Both steps
+  // were already built and both were switched OFF here, which is the whole of
+  // why neither happened. Only the section expander stays off.
+  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false \}\)/,
+    "the contact disclosure and the resume are on; only the section expander is not");
   assert.match(reveal, /await extractApplicant\(\{ \.\.\.VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId \}\)/,
     "and the reading rule is the shared one, told which applicant it is for");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
   assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
   assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
 
-  // `expand: false` is what keeps this to ONE click per applicant — it is also
-  // the flag `extractApplicant` turns into a null expansion budget, so the
-  // second expander pass at the bottom of the walk is skipped too.
+  // `expand: false` is also the flag `extractApplicant` turns into a null
+  // expansion budget, so the second expander pass at the bottom of the walk is
+  // skipped too — one flag, both passes.
   const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
   assert.match(extract, /options\.expand === false \? null : expansion/,
     "expand:false must reach the scan's expansion budget, not only the first pass");
   assert.match(extract, /if \(options\.contact !== false\)/, "the contact disclosure is opt-out");
   assert.match(extract, /if \(options\.resume !== false\)/, "and so is the resume viewer");
+
+  // So a list pass reaches both steps: neither flag is set, and both are opt-out.
+  assert.ok(!/contact: false/.test(reveal), "a list pass must reach the contact disclosure");
+  assert.ok(!/resume: false/.test(reveal), "and must reach the resume");
+  // And the file it saves is named after the person, not after LinkedIn's media
+  // id — the record's own resolved name, which is settled before this runs.
+  assert.match(extract, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| ""\)/,
+    "the resume is saved under the applicant's own name");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  assert.match(worker, /Applicants\.resumeFileName\(\{\s*\n?\s*name: message\?\.applicantName/,
+    "and the worker builds the filename from it");
 
   // The derived columns come from the SAME rules a full collection uses, so
   // there is one definition of "current role" on this surface.

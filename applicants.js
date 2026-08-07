@@ -4174,37 +4174,43 @@
   const LIST_PROFILE_PACE_MS = 900;
 
   /**
-   * Read what the profile renders, and press nothing to get more of it.
+   * What the list pass reads, and what it presses to read it.
    *
-   * **Requested: name, current role, current company, total experience and
-   * education, in the columns the table already has.** Every one of those is
-   * what a full extraction already reads off the rendered panel — and the three
-   * things that make a full extraction *slow* and *clicky* are exactly the ones
-   * behind buttons, each of which is already a flag:
+   * **Requested outright: "I want the extension to be able to get contact info
+   * from the contact info button given in the profile AND I WANT THE RESUME TO
+   * BE DOWNLOADED IN THE DISK WITH THE NAME OF THE PROFILE OWNER."** Both were
+   * already built and both were switched **off** here, which is the whole of why
+   * neither happened: `contact: false` skipped `openContactAndCollect`, the one
+   * step that opens the disclosure holding the email and the phone number
+   * (rule 9d), and `resume: false` skipped `collectResume`, which is the entire
+   * PERMANENT resume chain — find the document address without opening anything,
+   * fall back to the viewer and its own Download control, record the link before
+   * the download is attempted, and hand the file to the worker, which saves it as
+   * `header.name` (`Applicants.resumeFileName`, sanitized and de-duplicated with
+   * ` (2)`). The applicant's own name was always what the file would be called;
+   * nothing on this surface ever asked for the file.
    *
-   *   - `expand: false` — no `expandCollapsedSections`, which is literally "open
-   *     what is hidden behind a button". It also becomes the scan's expansion
-   *     budget, so the second expander pass at the bottom of the walk is skipped.
-   *   - `contact: false` — the disclosure holding the email and phone is not
-   *     opened.
-   *   - `resume: false` — the viewer is not opened and nothing is downloaded.
+   * So the two flags are gone and the steps they gated are the ones rule 9
+   * already names and gates individually. `expand` stays **off**: it is the one
+   * remaining flag, it opens collapsed sections rather than revealing a field
+   * this pass is for, and it is worth up to `MAX_EXPANSIONS` (8) clicks per
+   * applicant on a walk that is already the slow part.
    *
-   * What is left is **one click per applicant** — the row — so rule 9's per-file
-   * budget is untouched. `current_role`, `current_company` and
-   * `total_experience` are then `deriveCurrentPosition` and
-   * `totalExperienceFrom` over the Experience cards the panel rendered, exactly
-   * as in a full collection: **one** definition of "current role" on this
-   * surface rather than a second, thinner one that can drift from it.
+   * `current_role`, `current_company` and `total_experience` are still
+   * `deriveCurrentPosition` and `totalExperienceFrom` over the Experience cards
+   * the panel rendered, exactly as in a full collection: **one** definition of
+   * "current role" on this surface rather than a second that can drift from it.
    */
-  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false, contact: false, resume: false });
+  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false });
 
   /**
-   * Open this row's applicant, let the panel load, walk it to the bottom, and
-   * take what it rendered.
+   * Open this row's applicant, let the panel load, walk it to the bottom, take
+   * what it rendered, disclose their contact details and save their resume.
    *
    * `extractApplicant` owns all of it — the wait for the applicant to be
-   * showing, the scan, the record and the save — so this adds no reading rule of
-   * its own. It is the full run's own path with the button-gated steps off.
+   * showing, the scan, the disclosure, the resume, the record and the save — so
+   * this adds no reading rule of its own and no click rule of its own. It is the
+   * full run's own path with the section expander off.
    */
   async function collectVisibleApplicant(row, rowId) {
     const openId = Applicants.parseHiringContext(location.href).applicationId || "";
@@ -4554,10 +4560,11 @@
         state.run.currentName = fromRow.applicant.name;
         state.run.updatedAt = new Date().toISOString();
 
-        // Open them, let the panel load, walk it to the bottom, and take what it
-        // rendered: name, current role, current company, total experience and
-        // education. `extractApplicant` saves the record it builds, so nothing
-        // here re-sends it.
+        // Open them, let the panel load, walk it to the bottom, take what it
+        // rendered — name, current role, current company, total experience and
+        // education — then disclose their contact details and save their resume
+        // under their own name. `extractApplicant` saves the record it builds,
+        // so nothing here re-sends it.
         let opened = true;
         let record = null;
         try {

@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0120",
+  "name": "The list pass opens the contact disclosure and downloads the resume under the applicant's name",
+  "request": "The list pass opens the contact disclosure and downloads the resume under the applicant's name",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T03:14:57.873Z",
+  "completedAt": "2026-08-07T03:17:05.553Z",
+  "startCommit": "2595f1aeefd6d48c9a2dfa074941fe542e4a7949",
+  "gitRef": "task/TASK-0120",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "Requested outright: contact info from the profile's Contact button, and the resume downloaded to disk under the profile owner's name. Both steps were already built and both were switched OFF for the list pass, which is the whole of why neither happened: VISIBLE_ONLY_OPTIONS carried contact:false, skipping openContactAndCollect (rule 9d's disclosure, the one control holding the email and phone together), and resume:false, skipping collectResume - the entire PERMANENT resume chain, which finds the document address without opening anything, falls back to the viewer and its own Download control, records the link BEFORE the download is attempted, and hands the file to the worker. The name the file is saved under was always the applicant's own: collectResume is passed header.name and the worker builds the path with Applicants.resumeFileName, sanitized and de-duplicated with ' (2)'. Nothing on this surface ever asked for the file. VISIBLE_ONLY_OPTIONS is now { expand: false } alone - the expander stays off because it opens collapsed sections rather than revealing a field this pass is for, and is worth up to MAX_EXPANSIONS (8) clicks per applicant on a walk that is already the slow part. Every control now pressed is one rule 9 names and gates individually, so the per-file click budget is untouched. The list-pass section of CLAUDE.md was amended and the test now asserts neither flag can come back and that the filename is built from the applicant's name in both halves."
+}

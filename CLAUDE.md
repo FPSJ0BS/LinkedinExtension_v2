@@ -743,16 +743,27 @@ questions, and the second costs hours where the first costs a walk down the list
   let it load fully, scroll to its bottom, then move onto the next"*, then *"capture name, current
   role, current company, total experience and education — what is normally visible on the profile
   page, not hidden behind any button"*).
-- **It is `extractApplicant` with three flags off, not a second reading rule.**
-  `VISIBLE_ONLY_OPTIONS` is `{ expand: false, contact: false, resume: false }`, and each flag is
-  exactly one thing behind a button: `expand` is `expandCollapsedSections` (and it also becomes the
-  scan's expansion budget, so the second expander pass at the bottom of the walk is skipped too),
-  `contact` is the disclosure holding the email and phone, `resume` is the viewer and the download.
-  What is left is **one click per applicant** — the row itself — plus the pager, and rule 9's
-  per-file budget is untouched. `current_role`, `current_company` and `total_experience` are
-  therefore `deriveCurrentPosition` and `totalExperienceFrom` over the Experience cards the panel
-  rendered, exactly as in a full collection: **one** definition of "current role" on this surface
-  rather than a second that can drift from it.
+- **And since 3.7.11 it discloses the contact details and saves the resume**, requested outright:
+  *"I want the extension to be able to get contact info from the contact info button given in the
+  profile AND I WANT THE RESUME TO BE DOWNLOADED IN THE DISK WITH THE NAME OF THE PROFILE OWNER."*
+  Both were already built and both were switched **off** for this pass, which is the whole of why
+  neither happened. `contact` gates `openContactAndCollect`, the control rule 9d already names and
+  already opens once per applicant; `resume` gates `collectResume`, which is the entire PERMANENT
+  resume chain — the address is looked for without opening anything, the viewer and its own Download
+  control are the fallback, the link is recorded *before* the download is attempted, and the worker
+  saves the file. **The name it is saved under was always the applicant's**
+  (`Applicants.resumeFileName` over `header.name`, sanitized, de-duplicated with ` (2)`); nothing on
+  this surface ever asked for the file.
+- **It is `extractApplicant` with one flag off, not a second reading rule.**
+  `VISIBLE_ONLY_OPTIONS` is `{ expand: false }`: `expand` is `expandCollapsedSections`, and it also
+  becomes the scan's expansion budget so the second expander pass at the bottom of the walk is
+  skipped too. It stays off because it opens *collapsed sections* rather than revealing a field this
+  pass exists for, and it is worth up to `MAX_EXPANSIONS` (8) clicks per applicant on a walk that is
+  already the slow part. Every control that is now pressed is one rule 9 names and gates
+  individually, so the per-file click budget is untouched. `current_role`, `current_company` and
+  `total_experience` are still `deriveCurrentPosition` and `totalExperienceFrom` over the Experience
+  cards the panel rendered, exactly as in a full collection: **one** definition of "current role" on
+  this surface rather than a second that can drift from it.
 - **The row's own name is the FLOOR, and only when it is needed.** `extractApplicant` saves whatever
   the panel gave it; a row that never opened, or a panel that resolved no name, would otherwise
   leave the column the whole export is read by empty while the row plainly rendered it. Safe because
