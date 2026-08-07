@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0130",
+  "name": "Start Full Collection and Discover Connections Only raise the Connections tab into view",
+  "request": "Start Full Collection and Discover Connections Only raise the Connections tab into view",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T13:11:18.497Z",
+  "completedAt": "2026-08-07T13:15:13.385Z",
+  "startCommit": "b1901d366481a5ea7c811eb7d293768db784300c",
+  "gitRef": "task/TASK-0130",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-tabs.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 442 tests, validate)"
+  ],
+  "result": "Start Full Collection and Discover Connections Only now raise the Connections tab into view. Both already did every other step - rememberOrigin, then resolveConnectionsTab() opening or reusing the one Connections tab in that window, navigating it to the Connections page, waiting for it and making it the ACTIVE tab - but neither raised its window: ensureConnectionsTab passed only { activateTab: true } where ensureApplicantTab has passed { activateTab: true, focusWindow: true } since 3.7.5, so the redirect landed off screen (the popup has no sender tab, so rememberOrigin falls back to the last focused window, and the importer page is routinely a window of its own). New revealConnectionsTab() in background.ts mirrors revealApplicantTab and is deliberately NOT folded into resolveConnectionsTab, which runDiscovery also reaches on the heartbeat resume path; prepareCollectorStep is untouched and still never focuses. It is called BEFORE checkLoginState() in both startCollectingWorkflow and discoveryOnlyWorkflow, because that check costs an injection and a round trip and a page arriving seconds later reads as the same dead button - the check then reuses the revealed tab, and the signed-out path still sends that same tab to LinkedIn's own sign-in page. Adds no tab, no click and no control. CLAUDE.md rule 12c amended in the same task from two focus points to three, and CHANGELOG.md 3.7.17. New test 'a connections command brings the Connections page to the front, before the slow part' asserts the reveal, its position ahead of the session check in both workflows, and that neither prepareCollectorStep nor runDiscovery ever takes focus; the existing step-order test moved with the design. Files: src/background.ts, tests/collector-tabs.test.js, CLAUDE.md, CHANGELOG.md."
+}

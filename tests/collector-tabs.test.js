@@ -589,10 +589,15 @@ test("the automatic workflow performs the steps in the order the design requires
   const start = worker.indexOf("async function startCollectingWorkflow");
   const body = worker.slice(start, worker.indexOf("/** Find All Connections, detached", start));
 
+  // Steps 2-3 moved AHEAD of the session check in 3.7.17, deliberately and by
+  // request: this is a button press, the check costs an injection and a round
+  // trip, and a Connections page that arrives seconds later reads as a button
+  // that did nothing. The check then reuses the tab that was just revealed, and
+  // the signed-out path still sends that same tab to LinkedIn's sign-in page.
   const order = [
     "COLLECTION_STATE.OPENING_CONNECTIONS",
+    "revealConnectionsTab()",
     "checkLoginState()",
-    "resolveConnectionsTab()",
     "COLLECTION_STATE.DISCOVERING_CONNECTIONS",
     "runDiscovery(",
     "COLLECTION_STATE.CONNECTIONS_COMPLETE",
@@ -711,4 +716,51 @@ test("the applicant commands take the recruiter to the page instead of refusing"
   }
   assert.match(worker, /handleApplicantCommand\(message\.type, message, _sender\)/, "the sender must reach the handler");
   assert.match(worker, /await Tabs\.activate\(tab\.id, \{ focusWindow: true \}\)/, "and the window is raised, not just the tab");
+});
+
+// Reported as "I want these buttons to directly redirect on the connections page
+// and start collecting", against a Start Full Collection / Discover Connections
+// Only that appeared to do nothing at all. Both already opened or reused the one
+// Connections tab and made it ACTIVE — but never raised its window, and the
+// importer page is routinely a window of its own while the popup has no sender
+// tab at all, so the redirect landed off screen. Rule 12c's third focus point.
+test("a connections command brings the Connections page to the front, before the slow part", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // The reveal is its own step, exactly as revealApplicantTab is, and it raises
+  // the window through the controller that owns every tab decision (rule 12).
+  assert.match(worker, /async function revealConnectionsTab\(\): Promise<number> \{/,
+    "the direct-command reveal must exist as its own function");
+  const reveal = worker.slice(worker.indexOf("async function revealConnectionsTab"));
+  const revealBody = reveal.slice(0, reveal.indexOf("\n}") + 2);
+  assert.match(revealBody, /await resolveConnectionsTab\(\)/, "it resolves the one Connections tab");
+  assert.match(revealBody, /await Tabs\.activate\(tabId, \{ focusWindow: true \}\)/,
+    "and raises its window, because a tab activated out of sight is a button that did nothing");
+
+  // Both buttons take it, and both take it BEFORE the session check: that check
+  // costs an injection and a round trip, and a page that arrives seconds later
+  // reads as the same dead button.
+  for (const workflow of ["startCollectingWorkflow", "discoveryOnlyWorkflow"]) {
+    const start = worker.indexOf(`async function ${workflow}`);
+    assert.ok(start > 0, `${workflow} must exist`);
+    const rest = worker.slice(start);
+    const body = rest.slice(0, rest.indexOf("\n// ---"));
+    assert.match(body, /await revealConnectionsTab\(\)/, `${workflow} must reveal the Connections tab`);
+    assert.ok(
+      body.indexOf("await revealConnectionsTab()") < body.indexOf("await checkLoginState()"),
+      `${workflow} must redirect before the session check, not after it`
+    );
+  }
+
+  // And the other half of rule 12c is unchanged: the heartbeat-driven run
+  // activates a collector tab without ever stealing focus from whatever the user
+  // is typing into. Only a pressed button is allowed to.
+  const prepare = worker.slice(worker.indexOf("async function prepareCollectorStep"));
+  const prepareBody = prepare.slice(0, prepare.indexOf("\n}") + 2);
+  assert.match(prepareBody, /await Tabs\.activate\(tabId\)\.catch/, "the background step activates the tab");
+  assert.ok(!/focusWindow/.test(prepareBody), "and the background step must never take focus");
+  assert.ok(
+    !/focusWindow: true/.test(worker.slice(worker.indexOf("async function runDiscovery"), worker.indexOf("function reconcileState"))),
+    "nor may the discovery loop itself, which the heartbeat's resume path also drives"
+  );
 });

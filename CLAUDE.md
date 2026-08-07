@@ -361,11 +361,28 @@ commands are unrecoverable.
     tracked tab in 3.7.5 (`KEYS.APPLICANT_TAB`), reused not duplicated and opened only at an address
     the extension has actually been on — but it is **not a collector tab**: `closeCollectorTabs()`
     never touches it, because it is the recruiter's own working page.
-12c. **Focus is taken in exactly two places, and both are a direct user command:** the sign-in page,
-    and an applicant command's hiring tab (`activate(id, { focusWindow: true })`). Everything driven
+12c. **Focus is taken in exactly three places, and all three are a direct user command:** the
+    sign-in page, an applicant command's hiring tab, and — added in 3.7.17 — a **connections
+    command's Connections tab** (`activate(id, { focusWindow: true })`). Everything driven
     by the heartbeat activates the tab without focusing the window — stealing focus from whatever the
     user is typing into is worse than a background run taking longer. A button press is the opposite
     case: a tab activated in a window they are not looking at is a button that did nothing.
+    **The third was the same defect as the second, left unfixed on the older surface.** Reported
+    outright: *"I want these buttons to directly redirect on the connections page and start
+    collecting"*, about `Start Full Collection` and `Discover Connections Only`, which appeared to do
+    nothing at all. Both already did everything else right — `rememberOrigin`, then
+    `resolveConnectionsTab()` opening or reusing the **one** Connections tab in that window and making
+    it the **active** tab — but `ensureConnectionsTab` passed only `{ activateTab: true }` where
+    `ensureApplicantTab` had passed `{ activateTab: true, focusWindow: true }` since 3.7.5. The popup
+    has no sender tab of its own, so `rememberOrigin` falls back to the last focused window, and the
+    importer page is routinely a window of its own — so the redirect kept landing off screen.
+    `revealConnectionsTab()` is its own step, exactly as `revealApplicantTab` is, and deliberately
+    **not** folded into `resolveConnectionsTab`, which `runDiscovery` also reaches on the heartbeat's
+    resume path; `prepareCollectorStep` is what that path uses and it still never focuses. It is
+    called **before** `checkLoginState()`, because that check costs a content-script injection and a
+    round trip and a page that arrives seconds later reads as the same dead button — the check then
+    reuses the tab it just revealed. Locked by *"a connections command brings the Connections page to
+    the front, before the slow part"*, which asserts both halves.
 12a. **A hidden collector page is never a finished one.** Chrome throttles background tabs and
     LinkedIn does not render a hidden page, so the DOM freezes — and every completion signal in this
     codebase is "the page stopped changing". Both content scripts gate on

@@ -1,5 +1,45 @@
 # CHANGELOG.md
 
+## 3.7.17 — the connections buttons bring the Connections page to the front
+
+Reported outright: *"I want these buttons to directly redirect on the connections page and start
+collecting"* — about `Start Full Collection` and `Discover Connections Only`, which appeared to do
+nothing at all when pressed.
+
+They were not broken. Both already did every step the workflow claims: `rememberOrigin(sender)`,
+then `resolveConnectionsTab()`, which opens or reuses the **one** Connections tab in that window,
+navigates it to `linkedin.com/mynetwork/invite-connect/connections/`, waits for it, makes it the
+**active** tab, and then walks the list. The one thing neither did was **raise the window**:
+
+```js
+ensureConnectionsTab(url)  ->  ensureTab(KEYS.CONNECTIONS_TAB, url, { activateTab: true })
+ensureApplicantTab(url)    ->  ensureTab(KEYS.APPLICANT_TAB,   url, { activateTab: true, focusWindow: true })
+```
+
+The applicant surface fixed exactly this in 3.7.5 and rule 12c has named it since: *a tab activated
+in a window the user is not looking at is, to them, a button that did nothing.* The older surface
+was simply never brought along. It bites hardest where these buttons actually live — the popup has
+no sender tab of its own, so `rememberOrigin` falls back to the last focused window, and the
+importer page is routinely a window of its own — so the redirect kept landing off screen.
+
+`revealConnectionsTab()` is its own step, mirroring `revealApplicantTab`, and three things about it
+are deliberate:
+
+- **It is not folded into `resolveConnectionsTab`.** `runDiscovery` calls that too, on the
+  heartbeat's resume path, which must go on never stealing focus from whatever the user is typing
+  into. `prepareCollectorStep` is what that path uses and it is untouched.
+- **It runs before `checkLoginState()`, not after.** The session check costs a content-script
+  injection and a round trip; a page that arrives seconds after the click reads as the same dead
+  button. The check then reuses the very tab that was just revealed, and the signed-out path still
+  navigates that same tab to LinkedIn's own sign-in page.
+- **It adds no tab and no click.** Still one Connections tab, still one profile collector tab, still
+  no control activated but allowlisted pagination.
+
+Rule 12c is amended in the same task, from two focus points to three. Locked by *"a connections
+command brings the Connections page to the front, before the slow part"*, which asserts the reveal,
+its position ahead of the session check in **both** workflows, and that neither
+`prepareCollectorStep` nor `runDiscovery` ever takes focus.
+
 ## 3.7.16 — "already open" is the panel's answer, never the address bar's
 
 Reported in two halves that are one cause: *"after extracting one applicant the extension opens a

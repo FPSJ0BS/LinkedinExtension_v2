@@ -190,6 +190,37 @@ async function resolveConnectionsTab(): Promise<number> {
 }
 
 /**
+ * Steps 2-3 as a DIRECT COMMAND: the Connections tab, raised into view.
+ *
+ * `resolveConnectionsTab()` already opens or reuses the one Connections tab and
+ * makes it the active tab of its window — but activating a tab in a window the
+ * user is not looking at is, to them, a button that did nothing. Reported
+ * exactly that way: *"I want these buttons to directly redirect on the
+ * connections page and start collecting"*, against a Start Full Collection /
+ * Discover Connections Only that appeared to do nothing at all. The popup has no
+ * sender tab of its own, so `rememberOrigin` falls back to the last focused
+ * window, and the importer page is routinely a window of its own — so the
+ * redirect was landing somewhere off screen.
+ *
+ * This is the third of exactly three places allowed to take focus (rule 12c),
+ * and like the other two it is a button the user just pressed: the sign-in page,
+ * an applicant command's hiring tab, and now a connections command's Connections
+ * tab. It is deliberately NOT inside `resolveConnectionsTab`, because that is
+ * also reached from `runDiscovery` on the heartbeat's resume path, which must go
+ * on never stealing focus from whatever the user is typing into —
+ * `prepareCollectorStep` below is what that path uses and it is unchanged.
+ *
+ * Called BEFORE the session check, not after it: the check costs a content-script
+ * injection and a round trip, and a button whose page arrives seconds later reads
+ * as the same dead button. The check then reuses this very tab.
+ */
+async function revealConnectionsTab(): Promise<number> {
+  const tabId = await resolveConnectionsTab();
+  await Tabs.activate(tabId, { focusWindow: true }).catch(() => false);
+  return tabId;
+}
+
+/**
  * Put a collector tab in a state LinkedIn will actually render.
  *
  * Chrome throttles a background tab and paints nothing in a minimized window, so
@@ -890,6 +921,13 @@ async function startCollectingWorkflow(options: any = {}): Promise<void> {
   workflowRunning = true;
   await setDiscoveryRunning(true);
   try {
+    // Steps 2-3, and they happen FIRST because this is a button press: the
+    // Connections tab is opened or reused in the user's own window and raised
+    // into view, so the redirect is what they see rather than something that
+    // happens off screen while the session check runs. `checkLoginState` then
+    // reuses this same tab.
+    await revealConnectionsTab();
+
     // Signed in? If not, open LinkedIn's own login page and stop here.
     const auth = await checkLoginState();
     if (!isCurrent(generation)) return;
@@ -907,9 +945,8 @@ async function startCollectingWorkflow(options: any = {}): Promise<void> {
       return;
     }
 
-    // Steps 2-3. The Connections tab is opened or reused in the user's window
-    // and made the active tab before a single card is read.
-    await resolveConnectionsTab();
+    // Steps 2-3 already happened above, before the session check, so the tab is
+    // on screen rather than merely resolved.
 
     // Steps 4-5. Enumerate the whole list. Every pass is persisted as it goes.
     await moveCollectionTo(Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS);
@@ -973,6 +1010,11 @@ async function discoveryOnlyWorkflow(options: any = {}): Promise<void> {
   if (!(await moveCollectionTo(Queue.COLLECTION_STATE.OPENING_CONNECTIONS))) return;
   await setDiscoveryRunning(true);
   try {
+    // Same direct-command reveal as the full workflow, and for the same reason:
+    // Discover Connections Only is a button press, so the Connections page is
+    // brought to the front before anything slower happens.
+    await revealConnectionsTab();
+
     const auth = await checkLoginState();
     if (!isCurrent(generation)) return;
     if (auth.state === Connections.AUTH_STATE.LOGIN_REQUIRED) {
@@ -982,7 +1024,6 @@ async function discoveryOnlyWorkflow(options: any = {}): Promise<void> {
       await moveCollectionTo(Queue.COLLECTION_STATE.PAUSED_CHALLENGE);
       return;
     }
-    await resolveConnectionsTab();
     await moveCollectionTo(Queue.COLLECTION_STATE.DISCOVERING_CONNECTIONS);
     const discovery = await runDiscovery(Number(options.maxPasses) || MAX_DISCOVERY_PASSES, generation);
     if (!isCurrent(generation) || discovery.aborted) return;
