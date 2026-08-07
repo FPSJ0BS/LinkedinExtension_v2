@@ -1169,7 +1169,16 @@ test("the next applicant is only scanned once the panel is showing them", async 
   // The live defect: waiting for the address to change and the DOM to go quiet
   // meant the scan started on the previous applicant's panel or on an empty one.
   assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
-  assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
+  assert.match(select, /waitForDomQuiet\(PANEL_SETTLE_QUIET_MS, PANEL_SETTLE_TIMEOUT_MS\)/,
+    "and it must then be given time to mount");
+  // Short, deliberately. It used to be (450, 4000), immediately followed by the
+  // scan's own waitForDomQuiet(400, 2600) — six and a half seconds of a page
+  // visibly doing nothing per applicant, which is the reported "it looks like
+  // the extension is frozen". This settle only has to notice a re-mount during
+  // itself; the scan keeps the generous one, because the read depends on it.
+  assert.match(source, /const PANEL_SETTLE_TIMEOUT_MS = (\d+);/, "the settle is a named budget");
+  const settleMs = Number(/const PANEL_SETTLE_TIMEOUT_MS = (\d+);/.exec(source)[1]);
+  assert.ok(settleMs <= 1500, `the post-arrival settle must stay short (found ${settleMs}ms)`);
 
   // And the defect after it, which cost every applicant their name: a TEXT
   // fingerprint, satisfied by the teardown alone.
@@ -1199,7 +1208,7 @@ test("the next applicant is only scanned once the panel is showing them", async 
     "teardown is waited for first, so arrival cannot be satisfied by the panel already on screen"
   );
   assert.ok(
-    select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
+    select.indexOf("await waitForDomQuiet(PANEL_SETTLE_QUIET_MS") < select.indexOf("const settled = describeApplicantArrival"),
     "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
   );
   // And the verdict the caller acts on. Not "did the wait succeed" — that was
@@ -3055,7 +3064,7 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
     "and 'the fingerprint differs' must not come back: a teardown satisfies it");
   assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
     "the click is followed by waiting for THIS applicant to be mounted");
-  assert.match(select, /await waitForDomQuiet\(450, 4000\);\s*\n\s*const settled = describeApplicantArrival\(expected, before\);/,
+  assert.match(select, /await waitForDomQuiet\(PANEL_SETTLE_QUIET_MS, PANEL_SETTLE_TIMEOUT_MS\);\s*\n\s*const settled = describeApplicantArrival\(expected, before\);/,
     "then the panel is allowed to finish mounting, and is asked again");
 
   // Amended again in 3.7.11, and the permanent clause is untouched: the wait is

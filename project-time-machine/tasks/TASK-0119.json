@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0119",
+  "name": "The pause between arriving at a profile and scrolling it is two settles doing one job",
+  "request": "The pause between arriving at a profile and scrolling it is two settles doing one job",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T03:13:19.152Z",
+  "completedAt": "2026-08-07T03:14:50.354Z",
+  "startCommit": "4f4715ae8fb009cbd4bff906ff9b4c4b87273a88",
+  "gitRef": "task/TASK-0119",
+  "files": [
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed"
+  ],
+  "result": "Reported: 'when the extension goes to the next profile it waits a bit before scrolling - it looks like the extension is frozen.' It was two settles doing one job. selectApplicantRow ended with waitForDomQuiet(450, 4000) and scanApplicantPanel's very first act is its own waitForDomQuiet(400, 2600), back to back with one identity check between them: up to 6.6 seconds of a visibly idle page per applicant to answer a question the next line asks again anyway. The post-arrival settle is now PANEL_SETTLE_QUIET_MS/PANEL_SETTLE_TIMEOUT_MS (250/1200) - it only has to notice a re-mount during itself - and the scan keeps the generous one, because the read depends on that one. Reading a moment early costs nothing: snapshotPanel is merge-only, the walk re-reads on every step, and revealPanelContent will not stop until the panel has been quiet for REVEAL_QUIET_PASSES. PANEL_ARRIVAL_TIMEOUT_MS 10s to 6s and the teardown 1.5s to 0.9s: both end the instant identity changes, so the budget is only ever spent in full when the answer is not coming, and then it buys nothing because the caller proceeds regardless. Worst case per applicant falls from about 18s to about 10s. A test asserts the post-arrival settle stays under 1.5s."
+}

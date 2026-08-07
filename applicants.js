@@ -3486,7 +3486,7 @@
   // flag is checked before every single row.
 
   /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 1500;
+  const PANEL_TEARDOWN_TIMEOUT_MS = 900;
   /**
    * How long the applicant that was asked for is given to mount.
    *
@@ -3495,8 +3495,32 @@
    * enough that markup this cannot identify at all costs seconds per row rather
    * than tens of them — a 665-applicant job is walked one at a time, so every
    * second spent waiting for an answer that will not come is spent 665 times.
+   *
+   * The wait ends the instant the panel's identity changes, so this budget is
+   * only ever spent in full when the answer is not coming at all — and then it
+   * buys nothing, because the caller proceeds regardless.
    */
-  const PANEL_ARRIVAL_TIMEOUT_MS = 10000;
+  const PANEL_ARRIVAL_TIMEOUT_MS = 6000;
+  /**
+   * How long the arrived panel is left alone before the verdict is re-read.
+   *
+   * **Reported: "when the extension goes to the next profile it waits a bit
+   * before scrolling — it looks like the extension is frozen."** It was two
+   * settles doing one job: this one, and then `scanApplicantPanel`'s own
+   * `waitForDomQuiet(400, 2600)` as the very first thing it does, back to back
+   * with nothing between them but one identity check. Six and a half seconds of
+   * a page that is visibly doing nothing, per applicant, to answer a question
+   * the next line asks again anyway.
+   *
+   * So this one is cut to what it is actually for — noticing a re-mount that
+   * happens *during* the settle — and the scan keeps its own, which is the one
+   * that has to be generous because the read depends on it. Reading a moment too
+   * early costs nothing here: `snapshotPanel` is merge-only, the walk re-reads on
+   * every step, and `revealPanelContent` will not stop until the panel has been
+   * quiet for `REVEAL_QUIET_PASSES`.
+   */
+  const PANEL_SETTLE_QUIET_MS = 250;
+  const PANEL_SETTLE_TIMEOUT_MS = 1200;
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
@@ -3570,8 +3594,9 @@
 
     // 3. Let it finish hydrating — a panel that has arrived is not a panel that
     //    is complete — and re-ask, because a re-mount during that wait would
-    //    otherwise go unseen.
-    await waitForDomQuiet(450, 4000);
+    //    otherwise go unseen. Short, because the scan's own first act is another
+    //    settle: see `PANEL_SETTLE_QUIET_MS`.
+    await waitForDomQuiet(PANEL_SETTLE_QUIET_MS, PANEL_SETTLE_TIMEOUT_MS);
     const settled = describeApplicantArrival(expected, before);
     state.lastArrival = settled;
     state.lastArrivalConfirmed = Boolean(arrival);
