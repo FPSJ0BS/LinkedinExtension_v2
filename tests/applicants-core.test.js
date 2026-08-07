@@ -1067,23 +1067,11 @@ test("the resume is downloaded, not previewed, whenever the page already has the
 
 test("the detail panel can never be a container that holds the applicant list", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const panel = source.slice(source.indexOf("function mountedApplicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
+  const panel = source.slice(source.indexOf("function applicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
 
   // The live defect: a wrapper around both columns satisfies "two sections", so
   // it won, and the first line of its text was the list's heading.
   assert.match(panel, /if \(rowLinksIn\(element\) > 1\) continue/, "a container holding the list must be refused");
-
-  // The scoring resolver may answer NULL, and that is what makes "nothing is
-  // mounted" expressible. Without it, everything asking WHO the panel is showing
-  // had to accept the loose fallback's answer — and mid-re-mount that answer is
-  // a container holding the list, which is the defect above returning by the one
-  // door left open.
-  assert.match(panel, /let best = null;[\s\S]*?return best;\s*\}\s*function applicantPanel\(\)/,
-    "the strict resolver returns null when nothing qualifies");
-  assert.match(panel, /function applicantPanel\(\) \{\s*const mounted = mountedApplicantPanel\(\);/,
-    "and the loose one is built on it, so there is one scoring rule");
-  assert.match(panel, /score < Applicants\.PANEL_MIN_SECTIONS/,
-    "with the same section bar the arrival policy judges a mounted panel by");
   assert.ok(!/return best \|\| document\.querySelector\("main"\) \|\| document\.body;\s*\n\s*}\s*\n\s*\/\*\* A link/.test(source),
     "the fallback must not be document.body, which always contains the list");
   assert.match(panel, /rowLinksIn\(element\) <= 1/, "even the fallback must exclude the list");
@@ -1128,43 +1116,16 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
-  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("async function loadEveryApplicantRow"));
 
   // The live defect: waiting for the address to change and the DOM to go quiet
   // meant the scan started on the previous applicant's panel or on an empty
   // one, so every row after the first had no name, role or company.
+  assert.match(source, /function panelIdentity\(\)/, "the panel must have a fingerprint");
+  assert.match(select, /const before = panelIdentity\(\)/, "taken before the click");
+  assert.match(select, /waitFor\(\(\) => panelIdentity\(\) !== before/, "and waited on after it");
   assert.ok(!/waitFor\(\(\) => location\.href !== before/.test(select), "a route change is not a rendered panel");
   assert.match(select, /waitForDomQuiet\(450, 4000\)/, "and it must then be given time to mount");
-
-  // And the defect after it, reported as "it moved to the next profile without
-  // even letting it load": a TEXT fingerprint, which the teardown alone
-  // satisfies. The moment the previous panel is torn out the text changes, the
-  // wait returns, and the scan reads an empty column — where "the content
-  // stopped growing" is trivially true, so it settles at once.
-  assert.match(source, /function panelIdentity\(panel = mountedApplicantPanel\(\)\)/,
-    "the panel's identity must be asked of a MOUNTED panel");
-  const identity = source.slice(source.indexOf("function panelIdentity(panel"), source.indexOf("function panelSectionCount"));
-  assert.ok(!/innerText/.test(identity), "identity must never be built from the panel's text");
-  assert.match(identity, /application \? `id:\$\{application\}` : ""/, "the application id is the identity");
-  assert.match(identity, /profile \? `in:\$\{profile\}` : ""/, "with the member's own slug beside it");
-
-  // Arrival is "this applicant, mounted", decided by the tested pure policy.
-  assert.match(select, /const expected = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
-    "the row states which applicant is expected, from its own href");
-  assert.match(select, /describeApplicantArrival\(expected, before\)/, "and arrival is judged against it");
-  assert.match(source, /const panel = mountedApplicantPanel\(\);[\s\S]{0,700}?connected: Boolean\(panel\)/,
-    "'nothing is mounted' must be expressible, so the STRICT resolver is used");
-
-  // Three steps, in order: teardown, then arrival, then settle-and-confirm.
-  assert.ok(
-    select.indexOf("applicant-panel-teardown") < select.indexOf("const arrival = await waitFor"),
-    "teardown is waited for first, so arrival cannot be satisfied by the panel already on screen"
-  );
-  assert.ok(
-    select.indexOf("await waitForDomQuiet(450, 4000)") < select.indexOf("const settled = describeApplicantArrival"),
-    "and the verdict is re-read AFTER the settle, because a re-mount during it is the whole point"
-  );
-  assert.match(select, /return Boolean\(arrival\) && settled\.arrived;/, "either half failing is a row that did not open");
 
   // A row that never opened is a skip, not a record — scanning anyway would
   // save the previous applicant a second time under this row's identity.
@@ -1224,10 +1185,9 @@ test("a run that stopped short on the job it is still showing continues itself",
     "which is the guard the delay exists for");
 });
 
-test("the list pass opens every applicant across every page and takes what the panel renders", async () => {
+test("the list pass opens every applicant across every page and saves only the name", async () => {
   const source = await readFile(resolve(root, "applicants.js"), "utf8");
   const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
-  const Csv = await import("../src/applicant-csv.js");
 
   // The record: the name and the two ids, and deliberately nothing else. The row
   // also renders a headline and a location, and taking them would mean deciding
@@ -1317,87 +1277,56 @@ test("the list pass opens every applicant across every page and takes what the p
   // once, this one is the per-row work.
   const pass = run.slice(run.lastIndexOf("if (options.listOnly === true) {"), run.indexOf("if (collected.has({ applicationId: rowId"));
   assert.ok(pass.length > 200, "the list-pass branch must be found, not an empty slice");
+  assert.ok(!/extractApplicant\(/.test(pass), "no panel is READ");
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
 
-  // Each applicant is opened, the panel walked to the bottom, and what it
-  // RENDERED is taken: name, current role, current company, total experience,
-  // education. Not a second reading rule — `extractApplicant` is the one the
-  // full collection uses, with the three button-gated steps switched off.
-  assert.match(pass, /await collectVisibleApplicant\(row, rowId\)/, "each applicant is opened and read");
-  // From the options constant, so the doc comment reasoning about the click
-  // budget is inside the slice.
-  const reveal = source.slice(source.indexOf("const FULL_APPLICANT_OPTIONS"), source.indexOf("async function extractAllApplicants"));
-  // Built up in stages on request, and this is the last of them: the contact
-  // disclosure and the resume are back, so nothing is suppressed any more.
-  assert.match(reveal, /const FULL_APPLICANT_OPTIONS = Object\.freeze\(\{\}\)/,
-    "the contact disclosure and the resume are collected again");
-  assert.match(reveal, /await extractApplicant\(FULL_APPLICANT_OPTIONS\)/, "and the reading rule is the shared one");
+  // Since 3.7.10 it DOES open each applicant and walk their panel to the bottom
+  // before moving on — requested outright — and only the name is still saved.
+  // The walk is there so every profile is genuinely reached and rendered, not
+  // so that more is read from it.
+  assert.match(pass, /await revealApplicantProfile\(row, rowId\)/, "each applicant is opened and walked");
+  // From the pace constant, so the doc comment above the function — which is
+  // where the click budget is reasoned about — is inside the slice.
+  const reveal = source.slice(source.indexOf("const LIST_PROFILE_PACE_MS"), source.indexOf("async function extractAllApplicants"));
+  assert.match(reveal, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
   assert.match(reveal, /if \(!rowId \|\| rowId !== openId\)/, "and not re-clicked when the panel already shows them");
-  assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
+  assert.match(reveal, /await scanApplicantPanel\(applicantPanel\(\), accumulator, diagnostics, null\)/,
+    "walked by the SAME scan a full collection uses, so 'loaded' and 'scrolled to the bottom' mean one thing");
+  // `null` for the expansion budget is what keeps this to one click per
+  // applicant: it is the flag `scanApplicantPanel` gates the expander on, so
+  // the eight clicks a full extraction may spend are never spent here.
+  assert.match(reveal, /expandCollapsedSections/,
+    "and the reason the expander is not run must be stated where the budget is passed");
 
-  // `expand: false` is what keeps this to ONE click per applicant — it is also
-  // the flag `extractApplicant` turns into a null expansion budget, so the
-  // second expander pass at the bottom of the walk is skipped too.
-  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
-  assert.match(extract, /options\.expand === false \? null : expansion/,
-    "expand:false must reach the scan's expansion budget, not only the first pass");
-  assert.match(extract, /if \(options\.contact !== false\)/, "the contact disclosure is opt-out");
-  assert.match(extract, /if \(options\.resume !== false\)/, "and so is the resume viewer");
+  // The name still comes from the ROW, never from the opened panel: opening is
+  // for loading, not for reading.
+  assert.match(pass, /name: row\.name,/, "the saved name is the row's");
+  assert.ok(!/findApplicantName|accumulator\.snapshot\(\)/.test(pass), "nothing is taken out of the panel");
 
-  // The derived columns come from the SAME rules a full collection uses, so
-  // there is one definition of "current role" on this surface.
-  const derived = Applicants.normalizeApplicantRecord({
-    applicant: {
-      name: "Komal Sharma",
-      experience: [
-        { title: "Human Resources Manager", company: "GTECH LLC", dateRange: "2026-Present", current: true },
-        { title: "Human Resources Executive", company: "FCS Software Solutions Ltd", dateRange: "2025-2026" }
-      ],
-      education: [{ institution: "Dr. A.P.J. Abdul Kalam Technical University" }]
-    }
-  });
-  assert.equal(derived.applicant.currentRole, "Human Resources Manager", "current role is the Present card");
-  assert.equal(derived.applicant.currentCompany, "GTECH LLC");
-  assert.ok(derived.applicant.totalExperience, "and total experience is derived from the cards");
-  assert.equal(derived.applicant.education[0].institution, "Dr. A.P.J. Abdul Kalam Technical University");
-  // Every one of those is a column of the table this pass fills.
-  for (const column of ["applicant_name", "current_role", "current_company", "total_experience", "education"]) {
-    assert.ok(Csv.APPLICANT_TABLE_COLUMNS.includes(column), `${column} must be a table column`);
-  }
-
-  // The row's name is the FLOOR, and only when it is needed: a row that never
-  // opened, or a panel that resolved no name, would otherwise leave the one
-  // column this pass exists for empty while the row plainly rendered it.
-  assert.match(pass, /const named = cleanText\(record\?\.applicant\?\.name\);/, "the panel's name is preferred");
-  assert.match(pass, /if \(!named\) await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_SAVE", record: fromRow \}\)/,
-    "and the row's name only fills a gap");
-  assert.match(pass, /opened = false;/, "a profile that would not open still reaches the floor save");
+  // A panel that would not open must not lose the person: the name came from
+  // the row and is unaffected.
+  assert.match(pass, /opened = false;[\s\S]{0,1200}?type: "PV_APPLICANT_SAVE"/,
+    "a profile that would not open still saves the name");
   // And a hidden page is a pause with the SAME bound the full run applies, or a
   // panel that reliably hides the tab re-runs one applicant forever.
   assert.match(pass, /if \(error\?\.hidden\) \{[\s\S]{0,900}?hiddenRetries > MAX_HIDDEN_RETRIES/,
     "a hidden page pauses, bounded");
+  assert.match(pass, /type: "PV_APPLICANT_SAVE", record/, "each name is saved as it is read");
   assert.match(pass, /processed\.add\(key\)/, "and the row is retired by identity, like every other outcome");
-  // A row the policy refused is skipped, never opened and never saved — and
-  // never left pending, or the walk would offer it again on every turn.
-  assert.match(pass, /if \(!fromRow\) \{[\s\S]{0,300}?state\.run\.skipped \+= 1;[\s\S]{0,300}?continue;/,
+  // A row the policy refused is skipped, never saved — and never left pending,
+  // or the walk would offer it again on every turn.
+  assert.match(pass, /if \(!record\) \{[\s\S]{0,300}?state\.run\.skipped \+= 1;[\s\S]{0,300}?continue;/,
     "a link that is not a person is skipped rather than saved");
   assert.ok(
-    pass.indexOf("if (!fromRow) {") < pass.indexOf("await collectVisibleApplicant"),
-    "and refused before the row is even opened, not after"
+    pass.indexOf("if (!record) {") < pass.indexOf('type: "PV_APPLICANT_SAVE"'),
+    "and refused before anything is sent, not after"
   );
 
-  // The full extraction is unchanged and is still what a full run calls — this
-  // pass reaches it through the same function, and since 3.7.10 with nothing
-  // suppressed, so the two commands now read identically.
+  // The profile extraction is STOPPED, never removed: `extractApplicant` and
+  // everything it drives is still here and still the only path for a full run.
   assert.match(source, /async function extractApplicant\(options = \{\}\)/, "the full extraction must still exist");
   assert.match(run, /const \{ record \} = await extractApplicant\(options\);/, "and still be what a full run calls");
-  // Every flag is still honoured by `extractApplicant`, so suppressing any of
-  // them stays a one-word change rather than a rewrite.
-  const extractOptions = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
-  assert.match(extractOptions, /if \(options\.expand !== false\)/, "the expander stays opt-out");
-  assert.match(extractOptions, /if \(options\.contact !== false\)/, "the contact disclosure stays opt-out");
-  assert.match(extractOptions, /if \(options\.resume !== false\)/, "and so does the resume");
 
   // The job header is read ONCE. It sits above both columns and does not change
   // as the list is walked, so reading it per row would be hundreds of forced
@@ -1412,95 +1341,8 @@ test("the list pass opens every applicant across every page and takes what the p
     "which asks for a list pass and nothing else");
   // `listOnly` travels with the armed options, so returning to the tab resumes a
   // list pass as a list pass rather than starting to open people.
-  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading each applicant's profile/,
+  assert.match(ui, /APPLICANT_MESSAGES\.COLLECT_ALL,\s*"Reading the applicant list/,
     "and rides the same command, so the auto-run remembers it");
-});
-
-test("a scan interrupted by a hidden tab keeps what it read while the page was visible", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
-
-  // THE REPORT: "when it is in the middle of a profile and I change to another
-  // tab and come back, it moves to the next profile without saving it." The
-  // walk throws `hidden` the moment the tab goes to the background — correctly,
-  // rule 12a — and that throw took the whole applicant with it, because the
-  // accumulator is local to `extractApplicant` and nothing had been built from
-  // it yet. Sections read minutes earlier, while the page was plainly on
-  // screen, went with it.
-  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
-  assert.match(extract, /if \(!error\?\.hidden\) throw error;/, "only a hidden page is salvaged");
-  assert.match(extract, /await saveInterruptedApplicant\(\{ accumulator, context, sourceUrl, diagnostics \}\);\s*throw error;/,
-    "what was read is written, and the error is STILL re-thrown");
-
-  // Re-thrown is the load-bearing half: the row must not be retired, so the run
-  // comes back to it once the page is renderable again. The store merge means
-  // the retry's fuller read wins and the partial can only ever be a floor.
-  assert.match(source, /async function saveInterruptedApplicant\(\{ accumulator, context, sourceUrl, diagnostics \}\)/,
-    "the salvage is its own named step");
-  const salvage = source.slice(source.indexOf("async function saveInterruptedApplicant"), source.indexOf("* Collect the applicant currently open in the detail panel."));
-  assert.match(salvage, /if \(!Applicants\.isCollectedApplicant\(record\) && !cleanText\(record\.applicant\?\.name\)\) return;/,
-    "an empty record is not written — it would claim the applicant was looked at and found bare");
-  assert.match(salvage, /catch \(error\) \{[\s\S]{0,200}?partialSaveError/,
-    "and a salvage that threw would replace the error the caller is actually reporting");
-
-  // `stopped` is untouched and still propagates: rule 13a means a Stop ends the
-  // work, and it is the one interruption that must not become a saved record.
-  assert.ok(!/if \(error\?\.stopped\)[\s\S]{0,80}?saveInterruptedApplicant/.test(extract),
-    "a Stop is never salvaged into a record");
-
-  // The same argument the two disclosures below already win, one level up — so
-  // all three now agree that a hidden page is a lost REMAINDER, not a lost
-  // applicant.
-  assert.equal((extract.match(/error\?\.hidden/g) || []).length >= 3, true,
-    "the scan, the contact disclosure and the resume must all treat `hidden` the same way");
-});
-
-test("a torn-down panel is never mistaken for the next applicant arriving", () => {
-  const ARRIVAL = Applicants.PANEL_ARRIVAL;
-  const arrival = (patch) => Applicants.describePanelArrival({
-    expected: "111", applicationId: "111", identity: "id:111", previousIdentity: "id:222",
-    sections: 4, connected: true, ...patch
-  });
-
-  // The happy case: this applicant, hydrated.
-  assert.equal(arrival({}).state, ARRIVAL.ARRIVED);
-  assert.equal(arrival({}).arrived, true);
-
-  // THE DEFECT. Mid-teardown there is no panel at all — and the old text
-  // fingerprint read that as "a different applicant has arrived", because the
-  // text had plainly changed. The scan then started on nothing, settled at once
-  // because nothing was growing, and the run moved on.
-  assert.equal(arrival({ connected: false }).state, ARRIVAL.TORN_DOWN);
-  assert.equal(arrival({ connected: false }).arrived, false);
-
-  // A shell that has painted but not hydrated is not an arrival either. The bar
-  // is the same one the panel resolver itself qualifies on.
-  assert.equal(arrival({ sections: 1 }).state, ARRIVAL.MOUNTING);
-  assert.equal(arrival({ sections: Applicants.PANEL_MIN_SECTIONS }).state, ARRIVAL.ARRIVED);
-
-  // The previous applicant still on screen, and somebody else entirely, are
-  // different facts: only the second means LinkedIn opened a row other than the
-  // one that was clicked.
-  assert.equal(arrival({ applicationId: "222", identity: "id:222" }).state, ARRIVAL.PREVIOUS);
-  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).state, ARRIVAL.OTHER);
-  assert.equal(arrival({ applicationId: "999", identity: "id:999" }).arrived, false);
-
-  // A row whose href carries no parseable id still has to be walkable, so the
-  // link fingerprint stands in — it can only say "nobody new is here yet",
-  // which is weaker than the id test and never a guess.
-  const unnumbered = (patch) => Applicants.describePanelArrival({
-    expected: "", applicationId: "", previousIdentity: "in:linkedin.com/in/asha", sections: 3, connected: true, ...patch
-  });
-  assert.equal(unnumbered({ identity: "in:linkedin.com/in/asha" }).state, ARRIVAL.PREVIOUS,
-    "a panel that has not changed applicant has not arrived");
-  assert.equal(unnumbered({ identity: "in:linkedin.com/in/bhavna" }).state, ARRIVAL.ARRIVED);
-
-  // A mounted panel that rendered no id at all is accepted rather than stalling
-  // the run — stated in the verdict, so nothing pretends it was checked.
-  const unchecked = Applicants.describePanelArrival({
-    expected: "111", applicationId: "", identity: "", previousIdentity: "id:222", sections: 3, connected: true
-  });
-  assert.equal(unchecked.state, ARRIVAL.ARRIVED);
-  assert.match(unchecked.reason, /no id was rendered/);
 });
 
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
@@ -2297,29 +2139,21 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 
   // The live complaint: a run stopped half way went back to the first applicant
   // and collected all of them again.
-  assert.match(source, /async function loadCollectedIndex\(jobId\)/, "the run must ask what is already saved");
+  assert.match(source, /async function loadCollectedIndex\(jobId, \{ listed = false \} = \{\}\)/,
+    "the run must ask what is already saved");
   assert.match(source, /type: "PV_APPLICANT_COLLECTED"/, "of the worker, which is the only thing with a store");
-  assert.match(run, /Applicants\.createCollectedIndex\(\[\], \{ jobId \}\)\s*:\s*await loadCollectedIndex\(jobId\)/,
+  assert.match(run, /Applicants\.createCollectedIndex\(\[\], \{ jobId \}\)\s*:\s*await loadCollectedIndex\(jobId, \{ listed \}\)/,
     "and `recollect` is how the whole list is asked for on purpose");
 
-  // ONE question, asked the same way by both commands. 3.7.10's first cut gave
-  // the list pass a "do I already HAVE them" index, because that pass wrote
-  // name-only records which `isCollectedApplicant` correctly refuses to call
-  // collected. The moment it started writing full records the reason evaporated,
-  // and what was left was harmful: an interrupted scan now SAVES what it read,
-  // so a have-them index counted that partial as done and the very applicants
-  // left half-read were the ones walked straight past.
-  assert.ok(!/createListedIndex/.test(source), "the have-them index must not come back");
-  assert.equal(typeof Applicants.createListedIndex, "undefined", "and it is gone from the core");
-  assert.match(run, /const collected = options\.recollect === true/, "one index serves the whole run");
-
-  // The test that tells them apart: one substantive field. A full read is
-  // skipped; a thin or partial one is tried again.
-  const thin = { applicationId: "1", jobId: "9", name: "Half Read", collected: false };
-  const full = { applicationId: "2", jobId: "9", name: "Fully Collected", collected: true };
-  const index = Applicants.createCollectedIndex([thin, full], { jobId: "9" });
-  assert.equal(index.has({ applicationId: "1" }), false, "a partial record must never be skipped");
-  assert.equal(index.has({ applicationId: "2" }), true, "a complete one is");
+  // WHICH question is asked of the same payload depends on the pass, and the
+  // two are genuinely different. A full run asks "is this person COLLECTED",
+  // because a record with nothing substantive on it is a run that failed on
+  // them and must be tried again. A list pass asks "do I already HAVE them" —
+  // every record it writes is name-only, so the collected test always answers
+  // no, and a resumed pass would walk the entire job over again.
+  assert.match(run, /const listed = options\.listOnly === true;/, "the list pass asks the other question");
+  assert.match(source, /const build = listed \? Applicants\.createListedIndex : Applicants\.createCollectedIndex;/,
+    "and one loader serves both, so the payload is fetched once either way");
 
   // The worker must therefore stop dropping the merely-listed entries: a page
   // filtering on `collected` can never tell "already listed" from "never seen".
@@ -2329,19 +2163,23 @@ test("a run resumes over the applicants it has not collected yet", async () => {
     workerSource.indexOf("if (type === APPLICANT_MESSAGES.AUTO_RUN) {")
   );
   assert.match(collectedBranch, /collected: Applicants\.isCollectedApplicant\(record\)/, "the verdict still travels");
-  // Every stored entry is sent with the verdict beside it rather than filtered
-  // on it. The index applies the verdict; the worker just reports.
   assert.ok(!/\.filter\(\(entry: any\) => entry\.collected\)/.test(collectedBranch),
-    "the verdict is applied by the index, not by the worker");
+    "but it must not be applied as a filter, or only one of the two questions can be answered");
 
-  // Scoped to the job — an applicant is a person on a job — and a record that
-  // names no job is trusted for any job rather than none.
+  // And the two indexes must stay distinguishable, or the list pass would make
+  // a full run walk past people it never actually collected.
   const entries = [
-    { applicationId: "1", jobId: "9", name: "Half Read", collected: false },
+    { applicationId: "1", jobId: "9", name: "Listed Only", collected: false },
     { applicationId: "2", jobId: "9", name: "Fully Collected", collected: true }
   ];
-  assert.equal(Applicants.createCollectedIndex(entries, { jobId: "9" }).has({ applicationId: "2" }), true);
-  assert.equal(Applicants.createCollectedIndex(entries, { jobId: "8" }).has({ applicationId: "2" }), false);
+  const onlyCollected = Applicants.createCollectedIndex(entries, { jobId: "9" });
+  assert.equal(onlyCollected.has({ applicationId: "1" }), false, "a name-only row is NOT collected");
+  assert.equal(onlyCollected.has({ applicationId: "2" }), true);
+  const everyRecord = Applicants.createListedIndex(entries, { jobId: "9" });
+  assert.equal(everyRecord.has({ applicationId: "1" }), true, "but it HAS been listed");
+  assert.equal(everyRecord.has({ applicationId: "2" }), true);
+  // Still scoped to the job — an applicant is a person on a job.
+  assert.equal(Applicants.createListedIndex(entries, { jobId: "8" }).has({ applicationId: "1" }), false);
 
   // Decided from the row's own href, before anything is opened.
   assert.match(run, /const rowId = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
@@ -2353,7 +2191,9 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 
   // A worker that cannot answer must never mean "collect everything again".
   const loader = source.slice(source.indexOf("async function loadCollectedIndex"), source.indexOf("async function extractAllApplicants"));
-  assert.match(loader, /catch \{[\s\S]*?Applicants\.createCollectedIndex\(\[\], \{ jobId: jobId \|\| "" \}\)/,
+  // `build` is whichever index this pass asked for, so the empty fallback is
+  // the same shape either way.
+  assert.match(loader, /catch \{[\s\S]*?return build\(\[\], \{ jobId: jobId \|\| "" \}\)/,
     "an unreachable worker skips nobody");
 
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
@@ -2887,17 +2727,11 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   //    applicant, then lets it finish mounting. No second click can happen while
   //    a profile is still loading, because the caller only advances on the
   //    resolved value.
-  // Amended in 3.7.10 with rule 9g, which this locks: "wait for the right panel"
-  // is unchanged and is the permanent clause — what changed is that a text
-  // fingerprint was never a way to tell whether the right panel was there, since
-  // the teardown alone satisfied it.
-  assert.match(select, /const before = panelIdentity\(heldPanel\);[\s\S]{0,120}?click\(\)/,
+  assert.match(select, /const before = panelIdentity\(\);[\s\S]{0,200}?click\(\)/,
     "the panel's identity is taken before the click");
-  assert.ok(!/panelIdentity\(\) !== before/.test(select),
-    "and 'the fingerprint differs' must not come back: a teardown satisfies it");
-  assert.match(select, /const arrival = await waitFor\(\(\) => \{[\s\S]{0,300}?describeApplicantArrival\(expected, before\)/,
-    "the click is followed by waiting for THIS applicant to be mounted");
-  assert.match(select, /await waitForDomQuiet\([\s\S]{0,400}?return Boolean\(arrival\) && settled\.arrived;/,
+  assert.match(select, /await waitFor\(\(\) => panelIdentity\(\) !== before/,
+    "and the click is followed by waiting for the panel to actually change");
+  assert.match(select, /await waitForDomQuiet\([\s\S]{0,80}?return Boolean\(changed\);/,
     "then the panel is allowed to finish mounting before the caller proceeds");
 
   // The caller does not re-click an applicant already shown, and treats a row

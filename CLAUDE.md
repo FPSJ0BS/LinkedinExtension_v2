@@ -279,23 +279,9 @@ commands are unrecoverable.
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
-      the applicant that row leads to to be *mounted*, never for the address bar and never for the
-      panel's text to differ** (amended in 3.7.10) — LinkedIn routes without a navigation and the DOM
-      is briefly quiet between tearing the old applicant down and mounting the new one, so both of
-      those signals fire while the panel still shows the previous person. A text fingerprint is no
-      better and was the live defect: **the teardown alone satisfies it.** The moment the previous
-      panel is torn out the text changes, the wait returns, and the scan starts on an empty or
-      half-built column — where "the content stopped growing" is trivially true, so it settles at
-      once and moves on. That is the reported *"it moved to the next profile without even letting it
-      load"*, and it looks like a fixed timer while being nothing of the kind.
-      `selectApplicantRow` therefore waits in three steps —
-      **teardown** (best-effort and short, so arrival cannot be satisfied by the panel already on
-      screen), **arrival**, then **settle and confirm again** — and arrival is decided by
-      `Applicants.describePanelArrival()` from **identifiers only**: the application id on the panel's
-      own link (the address bar second, because it moves ahead of the render) and the member's `/in/`
-      slug, plus at least `PANEL_MIN_SECTIONS` (2) hydrated sections. `mountedApplicantPanel()` is the
-      strict resolver that may answer **null**, which is what makes "nothing is mounted" expressible
-      at all; `applicantPanel()` keeps the loose fallback for a scan already in flight. A row
+      `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a
+      navigation and the DOM is briefly quiet between tearing the old applicant down and mounting the
+      new one, so both of those signals fire while the panel still shows the previous person. A row
       that never opens is **skipped**, not scanned; scanning anyway saved the previous applicant a
       second time under this row's identity. Since 3.7.3 a row whose applicant is **already saved for
       this job is walked past without being clicked at all** — see "Collecting every applicant" below.
@@ -630,22 +616,6 @@ applicants view is `null`, never assembled out of the panel; a resume the accoun
 - `extraction.rawData` keeps the verbatim text every section was parsed from, so a LinkedIn layout
   change is diagnosable from the exported record rather than only from a live page.
 
-**A scan interrupted by a hidden tab keeps what it read** (3.7.10). Reported: *"when it is in the
-middle of a profile and I change to another tab and come back, it moves to the next profile without
-saving it."* `scanApplicantPanel` throws `hidden` the moment the tab goes to the background —
-correctly, rule 12a — and that throw took the **whole applicant** with it, because the accumulator
-is local to `extractApplicant` and nothing had been built from it yet: sections read minutes
-earlier, while the page was plainly on screen, went with it. This is the same argument the two
-disclosures already win, one level up — **a hidden page is a lost *remainder*, not a lost
-applicant** — so `saveInterruptedApplicant()` writes what was read and the error is **still
-re-thrown**. Re-throwing is the load-bearing half: the row is not retired, so the run returns to it
-once the page is renderable again, and because `saveApplicant` merges and `mergeApplicantRecord`
-never overwrites a filled field with a blank, the retry's fuller read wins and the partial can only
-ever be a floor. A record with nothing on it is not written at all — an empty save would claim the
-applicant had been looked at and found bare. The salvage swallows its own failures, because a
-salvage that threw would replace the error the caller is actually reporting. `stopped` is untouched
-and still propagates (rule 13a): a Stop must never become a saved record.
-
 **Merging is enrichment, exactly like the profile accumulator.** `mergeApplicantRecord` concatenates
 the lists and never overwrites a filled field with a blank, and **a resume already `downloaded` keeps
 its filename and its status** — that is what stops the second visit fetching the same file again.
@@ -718,43 +688,33 @@ questions, and the second costs hours where the first costs a walk down the list
   resume-after-a-reload. The only difference is what happens to a row: `Applicants.buildApplicantListRecord()`
   is built from the row itself and streamed to the store with `PV_APPLICANT_SAVE`, one at a time as
   it is read, exactly as the full run streams a finished applicant.
-- **It opens each applicant, lets the panel load, walks it to the bottom, and takes what the panel
-  rendered** (`collectVisibleApplicant`, 3.7.10 — requested outright: *"slow down on every profile,
-  let it load fully, scroll to its bottom, then move onto the next"*, then *"capture name, current
-  role, current company, total experience and education — what is normally visible on the profile
-  page, not hidden behind any button"*).
-- **It is `extractApplicant`, not a second reading rule** — `FULL_APPLICANT_OPTIONS`, and since
-  3.7.10 that is `{}`. It was built up in stages on request: names only, then "open each profile and
-  scroll it", then "capture name, role, company, experience and education — nothing behind a
-  button", and finally *"collect contact info like email and mobile, then download the resume to
-  disk."* Email, phone and the resume file are precisely the things **behind** buttons, so the flags
-  that suppressed them are gone, and `expand` came back with them: a "Show all 5 experiences" left
-  collapsed is an incomplete history, and history is what `current_role`, `current_company` and
-  `total_experience` are derived from. Every flag is still honoured by `extractApplicant`, so
-  suppressing any of them again is a one-word change.
-  ⚠ **The two whole-job commands now do the same thing.** They differ only in which "already have
-  them" index they consult (`createListedIndex` vs `createCollectedIndex`), and with full records
-  being written even that has almost no effect. Both are kept deliberately rather than one being
-  quietly removed — which to keep is the recruiter's call, not a side effect.
-- **The row's own name is the FLOOR, and only when it is needed.** `extractApplicant` saves whatever
-  the panel gave it; a row that never opened, or a panel that resolved no name, would otherwise
-  leave the one column this pass exists for empty while the row plainly rendered it. Safe because
-  both halves of the store are merge-only — `saveApplicant` reconciles on job + applicationId so the
-  floor lands *on* the record just written rather than beside it, and `mergeApplicantRecord` never
-  overwrites a filled field with a blank, so it can only fill the gap and never flatten the details.
-- **A profile that would not open never loses the person**, and the failure is named in `lastError`.
-  A hidden page is a pause with the same `MAX_HIDDEN_RETRIES` bound the full run applies, or a panel
-  that reliably hides the tab would re-run one applicant for as long as the tab is left alone.
+- **It opens each applicant, lets the panel load and walks it to the bottom before moving on**
+  (`revealApplicantProfile`, 3.7.10 — requested outright: *"slow down on every profile, let it load
+  fully, scroll to its bottom, then move onto the next"*). It is the full run's **movement** without
+  the full run's **reading**: the same single gated row click (rule 9g), the same wait for the panel
+  to be showing that applicant, and the same `scanApplicantPanel` walk — so "loaded" and "scrolled to
+  the bottom" mean here exactly what they mean there, rather than a second, thinner idea of both.
+  **The saved name still comes from the list row, never from the opened panel**: opening is for
+  loading, not for reading. The accumulator the walk fills is discarded, and that is not waste — the
+  walk's stop rule *is* "the panel stopped producing new content", and only the accumulator's own
+  signature can answer it.
+- **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel` gates
+  `expandCollapsedSections` on, so the eight expander clicks a full extraction may spend are never
+  spent here: **one click per applicant** — the row itself — plus the pager. `extractApplicant` and
+  everything it drives is untouched and is still the only path a full collection takes.
+- **A profile that would not open never loses the person.** The name came from the row and is
+  unaffected, so it is still saved and the failure is named in `lastError`. A hidden page is a pause
+  with the same `MAX_HIDDEN_RETRIES` bound the full run applies, or a panel that reliably hides the
+  tab would re-run one applicant for as long as the tab is left alone.
 - **It paces itself** (`LIST_PROFILE_PACE_MS`), because a run walks hundreds of panels back to back
   on the recruiter's own session and the connections importer has paced between profiles since 3.3.
   ⚠ This makes a pass cost **tens of seconds per applicant** rather than a millisecond — a
   665-applicant job is hours, not minutes. That is what makes the listed-index skip below load-bearing
   rather than an optimisation.
-- **From the row itself: the name and the two ids, and deliberately nothing else.** The row also
-  renders a headline and a location; taking them would mean deciding that line two is the headline
-  and line three is the location — positional guessing on generated markup, which rule 11 refuses and
-  rule 6 makes worse than an empty field. Everything beyond the name comes from the **panel**, which
-  labels its own sections. `cleanApplicantName` still strips the `· 2nd` degree badge, and
+- **The name and the two ids, and deliberately nothing else.** The row also renders a headline and a
+  location; taking them would mean deciding that line two is the headline and line three is the
+  location — positional guessing on generated markup, which rule 11 refuses and rule 6 makes worse
+  than an empty field. `cleanApplicantName` still strips the `· 2nd` degree badge.
   `extraction.rawData.list_row` records the provenance, because a name-only record and a full
   extraction that found nothing call for opposite responses.
 - **A row that is not a person is no record at all.** `buildApplicantListRecord()` returns `null`
@@ -771,18 +731,18 @@ questions, and the second costs hours where the first costs a walk down the list
   unchanging answer — the same reason `applicantRows()` made its name a lazy getter.
 - **A listed applicant is not a collected one.** `isCollectedApplicant` needs one substantive field,
   so a later full run still opens these people rather than walking past them forever.
-- **One "already have them" question, asked the same way by both commands** — `createCollectedIndex`,
-  "is this person **collected**", meaning *carries one substantive field*. 3.7.10 briefly gave the
-  list pass its own `createListedIndex` ("do I already *have* them"), because that pass wrote
-  name-only records which `isCollectedApplicant` correctly refuses to count. **The moment it started
-  writing full records the reason evaporated, and what was left was harmful**: an interrupted scan
-  now *saves what it read*, so a have-them index counted that partial as done — and the very
-  applicants left half-read were the ones the next pass walked straight past, frozen at whatever had
-  loaded. That was reported directly: *"it is skipping those profiles too which I switch in the
-  middle."* `isCollectedApplicant` is exactly the test that tells them apart, so it is the only one
-  used. `PV_APPLICANT_COLLECTED` still sends **every** stored entry with the verdict beside it rather
-  than filtering on it — the index applies the verdict, the worker only reports.
-  `options.recollect` asks for the whole list again regardless.
+- **Which "already have them" question is asked depends on the pass** (3.7.10). A full run asks
+  `createCollectedIndex` — "is this person **collected**" — because a record with nothing substantive
+  on it is a run that *failed* on them and must be tried again. A list pass asks
+  `createListedIndex` — "do I already **have** them" — because every record it writes is name-only,
+  so the collected test always answers no and a resumed pass would walk the whole job again. That
+  matters most once the pass opens each applicant: a row then costs tens of seconds, and since an
+  interrupted run continues itself, a pass that keeps being interrupted would walk the first page
+  over and over — the re-saves reading as progress, which is exactly what clears the
+  fruitless-return budget that would otherwise stop it. `PV_APPLICANT_COLLECTED` therefore sends
+  **every** stored entry with the verdict beside it rather than filtering on the verdict, because a
+  page filtering on `collected` can never tell "already listed" from "never seen".
+  `options.recollect` asks for the whole list again either way.
 - **Two earlier changes are what make running it first safe**, and neither is incidental:
   `saveApplicant` reconciles on `job.id + applicationId` (rule 14, v6) so the later full pass enriches
   *this* record instead of creating a second one under a different hash, and `mergeApplicantRecord`
@@ -895,15 +855,11 @@ save → click next applicant`. Every clause of it is load-bearing.
   and LinkedIn swaps only the right panel underneath.
 - **One click per applicant, and only a row of the left list** — `selectApplicantRow`, gated by
   `classifyApplicantControl` and proven inside the list (rule 9g), with exactly one `.click()`.
-- **Then it waits for the right panel** — for *that applicant* to be **mounted**, decided by
-  `Applicants.describePanelArrival()` from identifiers rather than from the address bar or the
-  panel's text (rule 9g, amended in 3.7.10), then for the DOM to go quiet so the shell has finished
-  mounting, and then it **asks again**, because a re-mount during that quiet wait is exactly what
-  this clause exists to survive. **Nothing may click again
+- **Then it waits for the right panel**, on `panelIdentity()` changing rather than on the address bar,
+  and then for the DOM to go quiet so the shell has finished mounting. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
   already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
-  rather than scanned as somebody else — with the arrival verdict's own reason on `state.lastArrival`,
-  so "would not open" and "opened somebody else" are distinguishable.
+  rather than scanned as somebody else.
 - **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
   `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
   document position and putting it back on the same frame. `scrollIntoView` stays the mechanism

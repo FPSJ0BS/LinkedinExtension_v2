@@ -1,0 +1,52 @@
+{
+  "schema": 2,
+  "id": "TASK-0110",
+  "name": "Restore project to TASK-0100 (The list pass opens each applicant, lets the panel load and walks it to the bottom)",
+  "request": "Restore project to TASK-0100 (The list pass opens each applicant, lets the panel load and walks it to the bottom)",
+  "type": "restore",
+  "status": "completed",
+  "startedAt": "2026-08-07T01:31:17.832Z",
+  "completedAt": "2026-08-07T01:31:19.815Z",
+  "startCommit": "14ab18eb70a1fd48bf5b79b7f3cdedc9272b58b1",
+  "commit": null,
+  "gitRef": "task/TASK-0110",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-07T01-31-17-356Z created and verified"
+  ],
+  "result": "Restored project to the state after TASK-0100 — The list pass opens each applicant, lets the panel load and walks it to the bottom",
+  "target": {
+    "taskId": "TASK-0100",
+    "taskName": "The list pass opens each applicant, lets the panel load and walks it to the bottom",
+    "commit": "3592cf9886ad76eea625ef3e604c8c1aa6f8b165"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-07T01-31-17-356Z",
+    "commit": "14ab18eb70a1fd48bf5b79b7f3cdedc9272b58b1"
+  }
+}

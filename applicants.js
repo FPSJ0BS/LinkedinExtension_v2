@@ -97,14 +97,6 @@
     extracting: null,
     running: null,
     run: Applicants.createRunState(),
-    /**
-     * Why the last row open ended the way it did.
-     *
-     * A row that will not open is otherwise indistinguishable from a row that
-     * opened somebody else, and both are reported as "could not open" — which
-     * is the sentence that tells a recruiter nothing. The verdict names which.
-     */
-    lastArrival: null,
     /** Set by Stop. Every loop checks it before it does anything else. */
     aborted: false,
     /**
@@ -683,18 +675,7 @@
    * came back named "Applicants". One row link is allowed, because the panel
    * legitimately links to the application it is showing; two or more is a list.
    */
-  /**
-   * The panel, **only when one is genuinely mounted** — null while LinkedIn is
-   * between applicants.
-   *
-   * This is the strict half of `applicantPanel()`, split out because two callers
-   * want opposite things from a torn-down panel. A scan in progress wants
-   * *something* to keep reading, so it takes the loose answer below. Anything
-   * deciding **who the panel is showing** wants the truth, and "no panel is
-   * mounted" is a truth the loose answer cannot express: its last resort is a
-   * container that holds the applicant list.
-   */
-  function mountedApplicantPanel() {
+  function applicantPanel() {
     const candidates = [
       ...document.querySelectorAll("main,[role='main'],section,[class*='applicant'],[class*='profile-card'],[class*='detail']")
     ].filter((element) => element instanceof Element && isVisible(element) && !isExcludedContext(element));
@@ -706,7 +687,7 @@
       if (rowLinksIn(element) > 1) continue;
       const keys = new Set(headingsIn(element).map((heading) => heading.key).filter(Boolean));
       const score = keys.size;
-      if (score < Applicants.PANEL_MIN_SECTIONS) continue;
+      if (score < 2) continue;
       const size = (element.innerText || "").length;
       if (score > bestScore || (score === bestScore && size < bestSize)) {
         best = element;
@@ -714,12 +695,7 @@
         bestSize = size;
       }
     }
-    return best;
-  }
-
-  function applicantPanel() {
-    const mounted = mountedApplicantPanel();
-    if (mounted) return mounted;
+    if (best) return best;
 
     // Nothing qualified. Fall back to the widest container that is still not
     // the list, rather than to `document.body`, which always contains it.
@@ -3149,34 +3125,6 @@
   }
 
   /**
-   * Write down what a half-finished read had already found.
-   *
-   * Only ever called on the way out of an interrupted scan, and deliberately
-   * silent about its own failures: this is a salvage, and a salvage that throws
-   * would replace the error the caller is actually reporting.
-   *
-   * A record with nothing on it is not written at all — an empty save would
-   * claim the applicant had been looked at and found bare, which is the opposite
-   * of what happened, and `isCollectedApplicant` would still (correctly) call it
-   * uncollected, so it buys nothing either.
-   */
-  async function saveInterruptedApplicant({ accumulator, context, sourceUrl, diagnostics }) {
-    try {
-      const record = Applicants.buildApplicantRecord({
-        snapshot: accumulator.snapshot(),
-        context,
-        sourceUrl,
-        buildId: BUILD_ID
-      });
-      if (!Applicants.isCollectedApplicant(record) && !cleanText(record.applicant?.name)) return;
-      await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
-      if (diagnostics) diagnostics.partialSave = true;
-    } catch (error) {
-      if (diagnostics) diagnostics.partialSaveError = error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  /**
    * Collect the applicant currently open in the detail panel.
    *
    * The order is fixed and asserted by a test: expand what is collapsed, walk
@@ -3222,35 +3170,8 @@
       await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
     }
     if (options.scan !== false) {
-      try {
-        const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
-        panel = walked.panel || panel;
-      } catch (error) {
-        if (!error?.hidden) throw error;
-        // **THE REPORT: "when it is in the middle of a profile and I change to
-        // another tab and come back, it moves to the next profile without
-        // saving it."**
-        //
-        // The walk throws `hidden` the moment the tab goes to the background —
-        // correctly, rule 12a — and that throw took the whole applicant with it,
-        // because the accumulator is local to this function and nothing had been
-        // built from it yet. Sections read minutes earlier, while the page was
-        // plainly on screen, went with it.
-        //
-        // This is the same argument the two disclosures below already win, one
-        // level up: **a hidden page is a lost REMAINDER, not a lost applicant.**
-        // What was read while the page was visible is legitimate, so it is
-        // written now — and the error is still re-thrown, so the row is NOT
-        // retired and the run comes back to it once the page is renderable
-        // again. `saveApplicant` merges and `mergeApplicantRecord` never
-        // overwrites a filled field with a blank, so the retry's fuller read
-        // wins and this can only ever be a floor.
-        //
-        // `stopped` is untouched and still propagates: rule 13a.
-        accumulator.addWarning("scan: the page was hidden part-way through this applicant, so this is a partial read");
-        await saveInterruptedApplicant({ accumulator, context, sourceUrl, diagnostics });
-        throw error;
-      }
+      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
+      panel = walked.panel || panel;
     } else snapshotPanel(panel, accumulator, diagnostics);
 
     // The overlays are opened on whatever the panel is now, not on the node the
@@ -3362,109 +3283,26 @@
   // row of the list. Never parallel, never a tab per applicant, and the stop
   // flag is checked before every single row.
 
-  /**
-   * The application the panel is showing, from the panel's OWN link first.
-   *
-   * The address bar is the second source and never the only one, because on this
-   * surface it moves ahead of the render: LinkedIn routes the id in the moment a
-   * row is clicked, while the column it names is still being built. Asking the
-   * panel is asking the thing whose content is about to be read.
-   */
-  function panelApplicationId(panel) {
-    if (panel?.isConnected) {
-      for (const anchor of panel.querySelectorAll("a[href]")) {
-        if (!isApplicantRowLink(anchor)) continue;
-        const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
-        if (id) return id;
-      }
-    }
-    return Applicants.parseHiringContext(location.href).applicationId || "";
+  /** A fingerprint of who the detail panel is currently showing. */
+  function panelIdentity() {
+    const panel = applicantPanel();
+    const text = cleanText(panel?.innerText || "");
+    const { applicationId } = Applicants.parseHiringContext(location.href);
+    return `${applicationId || ""}|${text.length}|${text.slice(0, 300)}`;
   }
-
-  /**
-   * Who the panel is showing — built from links, never from its text.
-   *
-   * The old fingerprint was two thirds `innerText`, so a teardown, a spinner and
-   * a re-render of the same person all read as "a different applicant arrived".
-   * Everything here is an identifier: the application id and the member's own
-   * `/in/` slug.
-   */
-  function panelIdentity(panel = mountedApplicantPanel()) {
-    const live = panel?.isConnected ? panel : null;
-    const application = panelApplicationId(live);
-    let profile = "";
-    if (live) {
-      const anchor = [...live.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
-      if (anchor) profile = Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "");
-    }
-    return [application ? `id:${application}` : "", profile ? `in:${profile}` : ""].filter(Boolean).join("|");
-  }
-
-  /** How many distinct applicant sections have hydrated in the panel. */
-  function panelSectionCount(panel) {
-    if (!panel?.isConnected) return 0;
-    return new Set(headingsIn(panel).map((heading) => heading.key).filter(Boolean)).size;
-  }
-
-  /**
-   * Is the panel showing `expected`, and has it finished mounting?
-   *
-   * The DOM half of `Applicants.describePanelArrival` — this reads the page, the
-   * core decides. `mountedApplicantPanel()` rather than `applicantPanel()` on
-   * purpose: the loose resolver answers with a container that holds the
-   * applicant list when nothing is mounted, and "the list is on screen" must
-   * never be able to look like "the applicant arrived".
-   */
-  function describeApplicantArrival(expected, previousIdentity) {
-    const panel = mountedApplicantPanel();
-    return Applicants.describePanelArrival({
-      expected,
-      applicationId: panel ? panelApplicationId(panel) : "",
-      identity: panelIdentity(panel),
-      previousIdentity,
-      sections: panelSectionCount(panel),
-      connected: Boolean(panel)
-    });
-  }
-
-  /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 4000;
-  /** How long the applicant that was asked for has to mount before the row is skipped. */
-  const PANEL_ARRIVAL_TIMEOUT_MS = 15000;
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
    *
-   * TWO defects, one after the other, and the second is what this replaces.
+   * The live defect: this waited for the address to change and then for the DOM
+   * to go quiet. Neither means the panel has re-rendered — LinkedIn routes
+   * without a full navigation, and the DOM is briefly quiet between tearing the
+   * old applicant down and mounting the new one. So the scan started on the
+   * previous applicant's panel or on an empty one, which is why every row after
+   * the first came back with no role, no company and no name.
    *
-   * First it waited for the address to change and the DOM to go quiet. Neither
-   * means the panel re-rendered — LinkedIn routes without a navigation, and the
-   * DOM is briefly quiet *between* tearing the old applicant down and mounting
-   * the new one.
-   *
-   * Then it waited for a **text** fingerprint to differ from the one taken
-   * before the click. **The teardown alone satisfies that.** The moment the
-   * previous applicant's panel is torn out the text changes, the wait returns,
-   * and the scan starts on an empty or half-built column — where "the content
-   * stopped growing" is trivially true, so it settles at once and moves on. That
-   * is the reported "it moved to the next profile without even letting it load",
-   * and it looks like a fixed timer while being nothing of the kind.
-   *
-   * What is waited for now is what was always meant: **the applicant this row
-   * leads to, mounted.** In three steps, because a re-mount has three phases and
-   * conflating them is what went wrong.
-   *
-   *   1. **Teardown** — the panel we were holding goes away, or stops being that
-   *      applicant. Best-effort and short: LinkedIn may swap content in place
-   *      fast enough that no torn-down state is ever observable, and that is not
-   *      a failure. It is here so that step 2 cannot be satisfied by the panel
-   *      that was already on screen.
-   *   2. **Arrival** — a mounted panel, at least `PANEL_MIN_SECTIONS` sections
-   *      hydrated, showing this row's own application id. Not "different from
-   *      before".
-   *   3. **Settle**, and then **confirm again**, because a panel that arrives and
-   *      is immediately re-mounted underneath the quiet wait is exactly the case
-   *      this surface keeps producing.
+   * The condition is now the only one that means anything: the panel's own
+   * fingerprint has changed from the one it had before the click.
    */
   async function selectApplicantRow(row) {
     const list = applicantList();
@@ -3477,33 +3315,19 @@
     if (!verdict.allowed) return false;
 
     const control = { element: row.control, verdict };
-    const expected = Applicants.parseHiringContext(row.href).applicationId || "";
-    const heldPanel = mountedApplicantPanel();
-    const before = panelIdentity(heldPanel);
+    const before = panelIdentity();
     control.element.click();
 
-    // 1. Teardown, best-effort: a null result here means the column was reused
-    //    in place, which the arrival test below handles on its own merits.
-    await waitFor(() => {
-      if (heldPanel && !heldPanel.isConnected) return true;
-      const now = mountedApplicantPanel();
-      return !now || panelIdentity(now) !== before;
-    }, { timeoutMs: PANEL_TEARDOWN_TIMEOUT_MS, pollMs: 120, label: "applicant-panel-teardown" });
-
-    // 2. Arrival: this applicant, mounted. `waitFor` returns the verdict itself,
-    //    so a timeout is a null and the row is skipped rather than scanned.
-    const arrival = await waitFor(() => {
-      const seen = describeApplicantArrival(expected, before);
-      return seen.arrived ? seen : null;
-    }, { timeoutMs: PANEL_ARRIVAL_TIMEOUT_MS, pollMs: 200, label: "applicant-panel" });
-
-    // 3. Then let it finish hydrating — a panel that has arrived is not a panel
-    //    that is complete; the scan's own quiet count takes it from here — and
-    //    re-ask, because a re-mount during that wait would otherwise go unseen.
+    const changed = await waitFor(() => panelIdentity() !== before, {
+      timeoutMs: 12000,
+      pollMs: 200,
+      label: "applicant-panel"
+    });
+    // Then let it finish mounting. A panel that changed is not a panel that has
+    // arrived: the sections hydrate after the shell, and the scan's own quiet
+    // count takes it from here.
     await waitForDomQuiet(450, 4000);
-    const settled = describeApplicantArrival(expected, before);
-    state.lastArrival = settled;
-    return Boolean(arrival) && settled.arrived;
+    return Boolean(changed);
   }
 
   /**
@@ -3990,33 +3814,24 @@
    * stored applicant rather than the records themselves.
    */
   /**
-   * Who this job already has a **usable** record for.
+   * Who this job already has records for.
    *
-   * **One question, asked the same way by both commands** — and that is a change
-   * from 3.7.10's first cut, which gave the list pass its own "do I already
-   * *have* them" index. That existed for one reason: the list pass wrote
-   * name-only records, which `isCollectedApplicant` correctly refuses to call
-   * collected, so a resumed pass would have re-walked the whole job. The moment
-   * that pass started writing full records, the reason evaporated — and what was
-   * left was actively harmful.
-   *
-   * **THE DEFECT IT CAUSED, reported directly: "it is skipping those profiles
-   * too which I switch in the middle."** A scan interrupted by the tab going to
-   * the background now saves what it read, deliberately, so nothing is lost. But
-   * a "do I have them" index counts that partial as done — so the very
-   * applicants that were left half-read were the ones the next pass walked
-   * straight past, freezing them at whatever had loaded. `isCollectedApplicant`
-   * is exactly the test that tells those apart: it wants one substantive field,
-   * so a full read is skipped and a thin one is tried again.
+   * `listOnly` decides WHICH question is asked of the same payload, and the two
+   * are genuinely different. A full run asks "is this person **collected**",
+   * because a record with nothing substantive on it is a run that failed on them
+   * and must be tried again. A list pass asks "do I already **have** them",
+   * because every record it writes is name-only — so the collected test always
+   * answers no, and a resumed pass would re-walk the entire job.
    */
-  async function loadCollectedIndex(jobId) {
+  async function loadCollectedIndex(jobId, { listed = false } = {}) {
+    const build = listed ? Applicants.createListedIndex : Applicants.createCollectedIndex;
     try {
       const reply = await chrome.runtime.sendMessage({ type: "PV_APPLICANT_COLLECTED", jobId: jobId || "" });
-      return Applicants.createCollectedIndex(reply?.entries || [], { jobId: jobId || "" });
+      return build(reply?.entries || [], { jobId: jobId || "" });
     } catch {
       // The worker being unreachable must never mean "collect everything
       // again"; an empty index simply skips nobody.
-      return Applicants.createCollectedIndex([], { jobId: jobId || "" });
+      return build([], { jobId: jobId || "" });
     }
   }
 
@@ -4054,43 +3869,38 @@
   const LIST_PROFILE_PACE_MS = 900;
 
   /**
-   * Everything: the rendered panel, the contact disclosure, and the resume.
+   * Open this row's applicant, let the panel finish loading, walk it to the
+   * bottom — and read nothing out of it.
    *
-   * **This was built up in stages, on request, and this is the last of them.**
-   * It began as names only, then "open each profile and scroll it", then
-   * "capture name, role, company, experience and education — nothing behind a
-   * button", and now: *"collect data and contact info like email and mobile no.
-   * then download the resume in disk."* Email, phone and the resume file are the
-   * three things that ARE behind buttons, so the flags that suppressed them are
-   * gone and `expand` comes back with them — a "Show all 5 experiences" left
-   * collapsed is an incomplete history, and history is what `current_role`,
-   * `current_company` and `total_experience` are derived from.
+   * **Requested: "let the profile load fully, scroll to its bottom, then move on
+   * to the next one … still we are only saving the name."** So this is the full
+   * run's own movement without the full run's reading: the same single gated row
+   * click (rule 9g), the same wait for the panel to be showing that applicant,
+   * and the same `scanApplicantPanel` walk that the collection uses — which is
+   * what makes "loaded fully" and "scrolled to the bottom" mean here exactly
+   * what they mean there, rather than a second, thinner idea of both.
    *
-   * ⚠ **The two whole-job commands now do the same thing**, and since the
-   * have-them index was retired they no longer differ even in what they skip.
-   * Left as two deliberately rather than quietly removing one: the recruiter has
-   * been pressing the first one throughout, and which of them to keep is their
-   * call, not a side effect of this change.
+   * **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel`
+   * gates `expandCollapsedSections` on, so the eight expander clicks a full
+   * extraction may spend are never spent here: one click per applicant, the row
+   * itself, and rule 9's per-file budget is untouched.
+   *
+   * The accumulator it fills is thrown away, and that is not waste — the walk's
+   * stop rule *is* "the panel stopped producing new content", and the only thing
+   * that can answer it is the accumulator's own signature. A walk with nothing
+   * to measure would settle on the first screenful.
    */
-  const FULL_APPLICANT_OPTIONS = Object.freeze({});
-
-  /**
-   * Open this row's applicant, let the panel load, walk it to the bottom, and
-   * take what it rendered.
-   *
-   * `extractApplicant` owns the whole of that — the wait for the applicant to be
-   * mounted (rule 9g), the scan, the disclosures, the resume, the record and the
-   * save — so this adds no reading rule of its own.
-   */
-  async function collectVisibleApplicant(row, rowId) {
+  async function revealApplicantProfile(row, rowId) {
     const openId = Applicants.parseHiringContext(location.href).applicationId || "";
     // Not re-clicked when the panel is already showing them — the same test the
     // full run makes, and it costs no extra click either way.
     if (!rowId || rowId !== openId) {
-      if (!(await selectApplicantRow(row))) return { opened: false, record: null };
+      if (!(await selectApplicantRow(row))) return { opened: false, stoppedBy: "" };
     }
-    const { record } = await extractApplicant(FULL_APPLICANT_OPTIONS);
-    return { opened: true, record };
+    const accumulator = Applicants.createApplicantAccumulator();
+    const diagnostics = { snapshots: 0, totals: {}, sections: [] };
+    const walked = await scanApplicantPanel(applicantPanel(), accumulator, diagnostics, null);
+    return { opened: true, stoppedBy: walked?.stoppedBy || "", snapshots: diagnostics.snapshots };
   }
 
   async function extractAllApplicants(options = {}) {
@@ -4119,9 +3929,10 @@
     // walks past those rows without opening them; `recollect` is the way to ask
     // for the whole list again on purpose.
     const jobId = Applicants.parseHiringContext(location.href).jobId || "";
+    const listed = options.listOnly === true;
     const collected = options.recollect === true
       ? Applicants.createCollectedIndex([], { jobId })
-      : await loadCollectedIndex(jobId);
+      : await loadCollectedIndex(jobId, { listed });
     listDiagnostics.alreadyCollected = collected.size;
 
     // The job header, read ONCE for a list pass and attached to every row.
@@ -4361,29 +4172,27 @@
 
       // ---------------------------------------------------------- list pass
       // "Collect all the applicants like we did in connections": the whole
-      // list, across every page, one at a time.
+      // list, across every page, one at a time, saving each person's name.
       //
-      // Built up in stages on request and now the full read — it opens each
-      // applicant, lets the panel load, walks it to the bottom, presses the
-      // contact disclosure and downloads the resume. What still distinguishes it
-      // from the branch below is only that the row's own name is kept as a
-      // floor, so a panel that resolves no name cannot leave the column this
-      // pass exists for empty.
+      // Since 3.7.10 it also **opens each applicant, lets the panel load and
+      // walks it to the bottom before moving on**, which was asked for
+      // outright. Only the name is still saved: the walk is there so every
+      // profile is genuinely reached and rendered, not so that more is read
+      // from it. `extractApplicant` and everything it drives is untouched and
+      // still the only path for the full collection — it is simply not called
+      // here.
       //
-      // Rows already **collected** were retired in bulk above — one substantive
-      // field, `isCollectedApplicant`, so a run interrupted half way through
-      // somebody is tried again rather than frozen at what had loaded.
-      // `options.recollect` asks for the whole list regardless.
+      // Rows this pass has already listed were retired in bulk above, against
+      // `createListedIndex` rather than `createCollectedIndex` — every record a
+      // list pass writes is name-only, which is deliberately *not* "collected",
+      // so the collected test always answers no and a resumed pass would walk
+      // the whole job again. `options.recollect` is how to ask for it anyway.
       if (options.listOnly === true) {
         // Rule 12a and rule 13a inside the loop, not between items: a hidden
         // tab renders nothing, so its rows are not worth reading, and a Stop
         // must land within one row.
         assertRunnable();
-        // The row's own name, and the FLOOR for this applicant. The panel scan
-        // below is what fills the other columns, but a panel that resolves no
-        // name would otherwise leave the one column this pass exists for empty —
-        // and the row plainly rendered it.
-        const fromRow = Applicants.buildApplicantListRecord({
+        const record = Applicants.buildApplicantListRecord({
           name: row.name,
           href: row.href,
           job: listJob,
@@ -4400,7 +4209,7 @@
         // the panel path a release earlier. Skipped, never saved: a record with
         // a wrong name in the column the export is read by is worse than no
         // record (rule 6).
-        if (!fromRow) {
+        if (!record) {
           processed.add(key);
           state.run.skipped += 1;
           state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
@@ -4408,19 +4217,15 @@
           state.run.updatedAt = new Date().toISOString();
           continue;
         }
-        state.run.currentName = fromRow.applicant.name;
+        state.run.currentName = record.applicant.name;
         state.run.updatedAt = new Date().toISOString();
 
-        // Open them, let the panel load, walk it to the bottom, and take what it
-        // rendered — name, current role, current company, total experience and
-        // education. `extractApplicant` saves the record it builds, so nothing
-        // here re-sends it.
+        // Open them, let the panel load, walk it to the bottom. The name is
+        // already known from the row, so nothing here decides whether this
+        // person is saved — only whether their profile was reached.
         let opened = true;
-        let record = null;
         try {
-          const outcome = await collectVisibleApplicant(row, rowId);
-          opened = outcome.opened;
-          record = outcome.record;
+          opened = (await revealApplicantProfile(row, rowId)).opened;
         } catch (error) {
           if (error?.stopped) {
             state.run.state = Applicants.RUN_STATE.STOPPED;
@@ -4446,37 +4251,29 @@
               processed.add(key);
               state.run.failed += 1;
               state.run.lastError =
-                `The page kept going hidden while reading ${fromRow.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
+                `The page kept going hidden while reading ${record.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
               state.run.index = processed.size;
             }
             continue;
           }
-          // A panel that would not open, would not scroll, or would not parse.
-          // The NAME came from the list row and is unaffected, so it is still
-          // saved below — losing a person from the list because their panel
-          // misbehaved would defeat the one thing this pass is for.
+          // A panel that would not open or would not scroll. The NAME came from
+          // the list row and is unaffected, so it is still saved — losing a
+          // person from the list because their panel misbehaved would defeat
+          // the one thing this pass is for.
           opened = false;
           state.run.lastError = error instanceof Error ? error.message : String(error);
         }
         if (!opened && !state.run.lastError) {
           state.run.lastError =
-            `Could not open ${fromRow.applicant.name}'s profile; the name from their list row was still saved.`;
+            `Could not open ${record.applicant.name}'s profile; the name from their list row was still saved.`;
         }
 
-        // `extractApplicant` has already saved whatever the panel gave it. This
-        // is the FLOOR, and only when it is needed: a row that never opened, or
-        // a panel that resolved no name, would otherwise leave the one column
-        // this pass exists for empty while the row plainly rendered it.
-        //
-        // Safe because both halves of the store are merge-only:
-        // `saveApplicant` reconciles on job + applicationId so this lands on the
-        // record just written rather than beside it, and `mergeApplicantRecord`
-        // never overwrites a filled field with a blank — so a name-only record
-        // can only ever fill the gap, never flatten the details.
-        const named = cleanText(record?.applicant?.name);
+        // Saved one at a time — the same streaming the full run uses, and for
+        // the same reason: a pass the recruiter walks away from keeps every
+        // name it had already reached.
         try {
-          if (!named) await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
-          results.push(record || fromRow);
+          await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
+          results.push(record);
           state.run.collected += 1;
           // Added to the index as well as to the store, so a virtualized list
           // that renders the same row twice in one pass is not walked twice.

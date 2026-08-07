@@ -330,7 +330,7 @@ class PopupApp extends React.Component {
    */
   collectApplicantList = () => this.runApplicantJob(
     { listOnly: true },
-    "Reading each applicant's profile, page by page…"
+    "Reading the applicant list, page by page…"
   );
 
   /**
