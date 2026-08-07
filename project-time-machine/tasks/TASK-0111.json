@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0111",
+  "name": "Save current role, current company, total experience and education, not only the name",
+  "request": "Save current role, current company, total experience and education, not only the name",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-07T01:38:13.319Z",
+  "completedAt": "2026-08-07T01:43:01.979Z",
+  "startCommit": "8532cd2d85ce7249a1b2845490472a6ee6c9346b",
+  "gitRef": "task/TASK-0111",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 427 tests, validate)"
+  ],
+  "result": "Re-applied on top of the restore to TASK-0100, which had taken it out. The list pass had been walking each panel to the bottom and then discarding everything it read, saving only the row's name; it now keeps the read. collectVisibleApplicant() replaces revealApplicantProfile() and calls extractApplicant(VISIBLE_ONLY_OPTIONS) - { expand: false, contact: false, resume: false } - so the record carries name, current role, current company, total experience and education, which are exactly the pre-made table's columns. Deliberately NOT a second reading rule: current_role and current_company are deriveCurrentPosition over the Experience card marked Present, and total_experience is totalExperienceFrom over all the cards, the same functions a full collection uses, so there is one definition of 'current role' on this surface rather than two that can drift. Each of the three flags is one thing behind a button - expand is expandCollapsedSections and also becomes the scan's expansion budget so the second expander pass is skipped too, contact is the email/phone disclosure, resume is the viewer and download - so what is left is one click per applicant, the row itself, and rule 9's per-file budget is untouched. The row's own name is kept as a floor and sent only when the panel resolved no name or the row never opened, which is safe because saveApplicant reconciles on job + applicationId so it lands on the record just written, and mergeApplicantRecord never overwrites a filled field with a blank - it can only fill the gap, never flatten the details."
+}

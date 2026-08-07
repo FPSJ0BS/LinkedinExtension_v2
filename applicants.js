@@ -3869,38 +3869,47 @@
   const LIST_PROFILE_PACE_MS = 900;
 
   /**
-   * Open this row's applicant, let the panel finish loading, walk it to the
-   * bottom — and read nothing out of it.
+   * Read what the profile renders, and press nothing to get more of it.
    *
-   * **Requested: "let the profile load fully, scroll to its bottom, then move on
-   * to the next one … still we are only saving the name."** So this is the full
-   * run's own movement without the full run's reading: the same single gated row
-   * click (rule 9g), the same wait for the panel to be showing that applicant,
-   * and the same `scanApplicantPanel` walk that the collection uses — which is
-   * what makes "loaded fully" and "scrolled to the bottom" mean here exactly
-   * what they mean there, rather than a second, thinner idea of both.
+   * **Requested: name, current role, current company, total experience and
+   * education, in the columns the table already has.** Every one of those is
+   * what a full extraction already reads off the rendered panel — and the three
+   * things that make a full extraction *slow* and *clicky* are exactly the ones
+   * behind buttons, each of which is already a flag:
    *
-   * **It presses nothing extra.** `budget: null` is the flag `scanApplicantPanel`
-   * gates `expandCollapsedSections` on, so the eight expander clicks a full
-   * extraction may spend are never spent here: one click per applicant, the row
-   * itself, and rule 9's per-file budget is untouched.
+   *   - `expand: false` — no `expandCollapsedSections`, which is literally "open
+   *     what is hidden behind a button". It also becomes the scan's expansion
+   *     budget, so the second expander pass at the bottom of the walk is skipped.
+   *   - `contact: false` — the disclosure holding the email and phone is not
+   *     opened.
+   *   - `resume: false` — the viewer is not opened and nothing is downloaded.
    *
-   * The accumulator it fills is thrown away, and that is not waste — the walk's
-   * stop rule *is* "the panel stopped producing new content", and the only thing
-   * that can answer it is the accumulator's own signature. A walk with nothing
-   * to measure would settle on the first screenful.
+   * What is left is **one click per applicant** — the row — so rule 9's per-file
+   * budget is untouched. `current_role`, `current_company` and
+   * `total_experience` are then `deriveCurrentPosition` and
+   * `totalExperienceFrom` over the Experience cards the panel rendered, exactly
+   * as in a full collection: **one** definition of "current role" on this
+   * surface rather than a second, thinner one that can drift from it.
    */
-  async function revealApplicantProfile(row, rowId) {
+  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false, contact: false, resume: false });
+
+  /**
+   * Open this row's applicant, let the panel load, walk it to the bottom, and
+   * take what it rendered.
+   *
+   * `extractApplicant` owns all of it — the wait for the applicant to be
+   * showing, the scan, the record and the save — so this adds no reading rule of
+   * its own. It is the full run's own path with the button-gated steps off.
+   */
+  async function collectVisibleApplicant(row, rowId) {
     const openId = Applicants.parseHiringContext(location.href).applicationId || "";
     // Not re-clicked when the panel is already showing them — the same test the
     // full run makes, and it costs no extra click either way.
     if (!rowId || rowId !== openId) {
-      if (!(await selectApplicantRow(row))) return { opened: false, stoppedBy: "" };
+      if (!(await selectApplicantRow(row))) return { opened: false, record: null };
     }
-    const accumulator = Applicants.createApplicantAccumulator();
-    const diagnostics = { snapshots: 0, totals: {}, sections: [] };
-    const walked = await scanApplicantPanel(applicantPanel(), accumulator, diagnostics, null);
-    return { opened: true, stoppedBy: walked?.stoppedBy || "", snapshots: diagnostics.snapshots };
+    const { record } = await extractApplicant(VISIBLE_ONLY_OPTIONS);
+    return { opened: true, record };
   }
 
   async function extractAllApplicants(options = {}) {
@@ -4192,7 +4201,11 @@
         // tab renders nothing, so its rows are not worth reading, and a Stop
         // must land within one row.
         assertRunnable();
-        const record = Applicants.buildApplicantListRecord({
+        // The row's own name, and the FLOOR for this applicant. The panel scan
+        // below is what fills the other columns, but a panel that resolves no
+        // name would otherwise leave the column the whole export is read by
+        // empty while the row plainly rendered it.
+        const fromRow = Applicants.buildApplicantListRecord({
           name: row.name,
           href: row.href,
           job: listJob,
@@ -4209,7 +4222,7 @@
         // the panel path a release earlier. Skipped, never saved: a record with
         // a wrong name in the column the export is read by is worse than no
         // record (rule 6).
-        if (!record) {
+        if (!fromRow) {
           processed.add(key);
           state.run.skipped += 1;
           state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
@@ -4217,15 +4230,19 @@
           state.run.updatedAt = new Date().toISOString();
           continue;
         }
-        state.run.currentName = record.applicant.name;
+        state.run.currentName = fromRow.applicant.name;
         state.run.updatedAt = new Date().toISOString();
 
-        // Open them, let the panel load, walk it to the bottom. The name is
-        // already known from the row, so nothing here decides whether this
-        // person is saved — only whether their profile was reached.
+        // Open them, let the panel load, walk it to the bottom, and take what it
+        // rendered: name, current role, current company, total experience and
+        // education. `extractApplicant` saves the record it builds, so nothing
+        // here re-sends it.
         let opened = true;
+        let record = null;
         try {
-          opened = (await revealApplicantProfile(row, rowId)).opened;
+          const outcome = await collectVisibleApplicant(row, rowId);
+          opened = outcome.opened;
+          record = outcome.record;
         } catch (error) {
           if (error?.stopped) {
             state.run.state = Applicants.RUN_STATE.STOPPED;
@@ -4251,29 +4268,37 @@
               processed.add(key);
               state.run.failed += 1;
               state.run.lastError =
-                `The page kept going hidden while reading ${record.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
+                `The page kept going hidden while reading ${fromRow.applicant.name}; moved on after ${MAX_HIDDEN_RETRIES} retries.`;
               state.run.index = processed.size;
             }
             continue;
           }
-          // A panel that would not open or would not scroll. The NAME came from
-          // the list row and is unaffected, so it is still saved — losing a
-          // person from the list because their panel misbehaved would defeat
-          // the one thing this pass is for.
+          // A panel that would not open, would not scroll, or would not parse.
+          // The NAME came from the list row and is unaffected, so it is still
+          // saved below — losing a person from the list because their panel
+          // misbehaved would defeat the one thing this pass is for.
           opened = false;
           state.run.lastError = error instanceof Error ? error.message : String(error);
         }
         if (!opened && !state.run.lastError) {
           state.run.lastError =
-            `Could not open ${record.applicant.name}'s profile; the name from their list row was still saved.`;
+            `Could not open ${fromRow.applicant.name}'s profile; the name from their list row was still saved.`;
         }
 
-        // Saved one at a time — the same streaming the full run uses, and for
-        // the same reason: a pass the recruiter walks away from keeps every
-        // name it had already reached.
+        // `extractApplicant` has already saved whatever the panel gave it. This
+        // is the FLOOR, and only when it is needed: a row that never opened, or
+        // a panel that resolved no name, would otherwise leave the column the
+        // export is read by empty.
+        //
+        // Safe because both halves of the store are merge-only:
+        // `saveApplicant` reconciles on job + applicationId so this lands on the
+        // record just written rather than beside it, and `mergeApplicantRecord`
+        // never overwrites a filled field with a blank — so a name-only record
+        // can only ever fill the gap, never flatten the details.
+        const named = cleanText(record?.applicant?.name);
         try {
-          await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
-          results.push(record);
+          if (!named) await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
+          results.push(record || fromRow);
           state.run.collected += 1;
           // Added to the index as well as to the store, so a virtualized list
           // that renders the same row twice in one pass is not walked twice.
