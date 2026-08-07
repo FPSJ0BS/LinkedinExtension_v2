@@ -2023,96 +2023,6 @@
     return (rows || []).filter((row) => !processed.has(applicantRowKey(row)));
   }
 
-  // ------------------------------------------------------------ panel arrival
-  /**
-   * Has the applicant we asked for actually mounted?
-   *
-   * **THE DEFECT THIS EXISTS FOR: every applicant was saved under the first
-   * applicant's name.** Reported with the recruiter's own table — three rows,
-   * three different people in the list (Komal Sharma, Neha Singh, Mahak Ayani),
-   * all stored as "Komal Sharma", the one that happened to be open when the run
-   * started.
-   *
-   * The chain is worth writing down, because the last link is the surprising
-   * one. The row click routes the address bar immediately, so each record was
-   * keyed to the *right* application — that is why there were three rows and not
-   * one. But the panel had not re-rendered yet, and the wait before the scan was
-   * "the panel's text differs from what it was before the click", which **the
-   * teardown alone satisfies**. So the scan read the previous applicant's panel.
-   * `findApplicantName` then offered the correct name from the list row *and*
-   * the stale panel's own name — and `chooseApplicantName` arbitrates with
-   * `nameFromExplanations`, LinkedIn's qualification prose, which on that stale
-   * panel says "Komal Sharma has…" over and over. So the wrong name won as the
-   * **corroborated** one, and `addName` latches a corroborated name against
-   * every later read. The policy did exactly what it was designed to do; it was
-   * pointed at the wrong panel.
-   *
-   * Hence: identity, never text. The id comes from the panel's own application
-   * link and from the address, never from prose; "mounted" is the same "at least
-   * two applicant sections" bar the panel resolver itself qualifies on, so a
-   * shell that has painted nothing cannot pass it. `identity` — the application
-   * id plus the member's `/in/` slug — is the fallback for a row whose href
-   * carries no parseable id, and is still built from links rather than text.
-   */
-  const PANEL_ARRIVAL = Object.freeze({
-    /** Nothing is mounted: the old applicant has gone and the new one has not arrived. */
-    TORN_DOWN: "torn-down",
-    /** A shell is up but the sections have not hydrated. */
-    MOUNTING: "mounting",
-    /** Still the applicant that was showing before the click. */
-    PREVIOUS: "previous",
-    /** Somebody, but not the person this row leads to. */
-    OTHER: "other",
-    ARRIVED: "arrived"
-  });
-
-  /**
-   * How many distinct applicant sections make a panel "mounted".
-   *
-   * The same bar the panel resolver scores on, deliberately: a container that
-   * would not qualify as the panel cannot be a panel that has arrived.
-   */
-  const PANEL_MIN_SECTIONS = 2;
-
-  function describePanelArrival({
-    expected = "",
-    applicationId = "",
-    identity = "",
-    previousIdentity = "",
-    sections = 0,
-    connected = false,
-    minSections = PANEL_MIN_SECTIONS
-  } = {}) {
-    const verdict = (state, reason) => ({ state, reason, arrived: state === PANEL_ARRIVAL.ARRIVED });
-    if (!connected) return verdict(PANEL_ARRIVAL.TORN_DOWN, "no panel is mounted");
-
-    const want = cleanText(expected).toLowerCase();
-    const has = cleanText(applicationId).toLowerCase();
-    const now = cleanText(identity).toLowerCase();
-    const was = cleanText(previousIdentity).toLowerCase();
-
-    if (want && has) {
-      // The authoritative test, and the only one that can tell "this is the
-      // wrong person" from "this person has not finished rendering".
-      if (has !== want) {
-        return now && now === was
-          ? verdict(PANEL_ARRIVAL.PREVIOUS, "the panel is still showing the previous applicant")
-          : verdict(PANEL_ARRIVAL.OTHER, "the panel is showing a different applicant");
-      }
-    } else if (was && now && now === was) {
-      // No id to compare, so the most that can be said is that nobody new is
-      // here yet. Deliberately not treated as arrival: a re-mount of the same
-      // person is exactly what this guard exists to notice.
-      return verdict(PANEL_ARRIVAL.PREVIOUS, "the panel has not changed applicant");
-    }
-
-    if (Number(sections) < Number(minSections)) {
-      return verdict(PANEL_ARRIVAL.MOUNTING, "the panel has not finished mounting");
-    }
-    if (want && !has) return verdict(PANEL_ARRIVAL.ARRIVED, "mounted, and no id was rendered to check it against");
-    return verdict(PANEL_ARRIVAL.ARRIVED, "mounted, and it is the applicant that was asked for");
-  }
-
   /**
    * Why a list walk stopped, and whether that answer is worth believing.
    *
@@ -2189,7 +2099,6 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex, createListedIndex,
     applicantRowKey, unprocessedApplicantRows,
-    PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // shared helpers the adapter needs and must not re-implement

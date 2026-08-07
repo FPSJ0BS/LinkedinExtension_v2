@@ -675,18 +675,7 @@
    * came back named "Applicants". One row link is allowed, because the panel
    * legitimately links to the application it is showing; two or more is a list.
    */
-  /**
-   * The panel, **only when one is genuinely mounted** — null while LinkedIn is
-   * between applicants.
-   *
-   * The strict half of `applicantPanel()`, split out because two callers want
-   * opposite things from a torn-down panel. A scan already in flight wants
-   * *something* to keep reading, so it takes the loose answer below. Anything
-   * deciding **who the panel is showing** wants the truth, and "nobody is
-   * mounted" is a truth the loose answer cannot express — its last resort is a
-   * container that holds the applicant list.
-   */
-  function mountedApplicantPanel() {
+  function applicantPanel() {
     const candidates = [
       ...document.querySelectorAll("main,[role='main'],section,[class*='applicant'],[class*='profile-card'],[class*='detail']")
     ].filter((element) => element instanceof Element && isVisible(element) && !isExcludedContext(element));
@@ -698,7 +687,7 @@
       if (rowLinksIn(element) > 1) continue;
       const keys = new Set(headingsIn(element).map((heading) => heading.key).filter(Boolean));
       const score = keys.size;
-      if (score < Applicants.PANEL_MIN_SECTIONS) continue;
+      if (score < 2) continue;
       const size = (element.innerText || "").length;
       if (score > bestScore || (score === bestScore && size < bestSize)) {
         best = element;
@@ -706,12 +695,7 @@
         bestSize = size;
       }
     }
-    return best;
-  }
-
-  function applicantPanel() {
-    const mounted = mountedApplicantPanel();
-    if (mounted) return mounted;
+    if (best) return best;
 
     // Nothing qualified. Fall back to the widest container that is still not
     // the list, rather than to `document.body`, which always contains it.
@@ -719,74 +703,6 @@
       .filter((element) => isVisible(element) && rowLinksIn(element) <= 1)
       .sort((a, b) => (b.innerText || "").length - (a.innerText || "").length)[0];
     return fallback || document.querySelector("main") || document.body;
-  }
-
-  /**
-   * The application the panel is showing, from the panel's OWN link first.
-   *
-   * The address bar is the second source and never the only one, because on this
-   * surface it moves **ahead of the render**: LinkedIn routes the id the instant
-   * a row is clicked while the column it names is still being torn down and
-   * rebuilt. Asking the panel is asking the thing whose content is about to be
-   * read — which is the whole question.
-   *
-   * `applicantPanel()` legitimately holds one application link, the one it is
-   * showing, which is exactly why the resolver refuses a candidate holding two.
-   */
-  function panelApplicationId(panel) {
-    if (panel?.isConnected) {
-      for (const anchor of panel.querySelectorAll("a[href]")) {
-        if (!isApplicantRowLink(anchor)) continue;
-        const id = Applicants.parseHiringContext(anchor.href || anchor.getAttribute("href") || "").applicationId;
-        if (id) return id;
-      }
-    }
-    return Applicants.parseHiringContext(location.href).applicationId || "";
-  }
-
-  /**
-   * Who the panel is showing — built from links, never from its text.
-   *
-   * The old fingerprint was two thirds `innerText`, so a teardown, a spinner and
-   * a re-render of the same person all read as "a different applicant arrived".
-   * Everything here is an identifier.
-   */
-  function panelIdentity(panel = mountedApplicantPanel()) {
-    const live = panel?.isConnected ? panel : null;
-    const application = panelApplicationId(live);
-    let profile = "";
-    if (live) {
-      const anchor = [...live.querySelectorAll("a[href*='/in/']")].find((element) => isVisible(element));
-      if (anchor) profile = Core.canonicalizeProfileUrl(anchor.href || anchor.getAttribute("href") || "");
-    }
-    return [application ? `id:${application}` : "", profile ? `in:${profile}` : ""].filter(Boolean).join("|");
-  }
-
-  /** How many distinct applicant sections have hydrated in the panel. */
-  function panelSectionCount(panel) {
-    if (!panel?.isConnected) return 0;
-    return new Set(headingsIn(panel).map((heading) => heading.key).filter(Boolean)).size;
-  }
-
-  /**
-   * Is the panel showing `expected`, and has it finished mounting?
-   *
-   * The DOM half of `Applicants.describePanelArrival` — this reads the page, the
-   * core decides. `mountedApplicantPanel()` rather than `applicantPanel()` on
-   * purpose: the loose resolver answers with a container holding the applicant
-   * list when nothing is mounted, and "the list is on screen" must never be able
-   * to look like "the applicant arrived".
-   */
-  function describeApplicantArrival(expected, previousIdentity = "") {
-    const panel = mountedApplicantPanel();
-    return Applicants.describePanelArrival({
-      expected,
-      applicationId: panel ? panelApplicationId(panel) : "",
-      identity: panelIdentity(panel),
-      previousIdentity,
-      sections: panelSectionCount(panel),
-      connected: Boolean(panel)
-    });
   }
 
   /**
@@ -3208,37 +3124,6 @@
     });
   }
 
-  /** The panel is showing somebody other than the applicant that was asked for. */
-  function wrongApplicantError(reason) {
-    const error = new Error(`The panel is not showing the applicant that was asked for (${reason}).`);
-    error.wrongApplicant = true;
-    return error;
-  }
-
-  /**
-   * Refuse to build a record out of somebody else's panel.
-   *
-   * The belt to the arrival wait's braces, and it is the one that makes the
-   * reported failure *impossible* rather than merely unlikely. Waiting is a
-   * race that can be lost — the column re-mounts, the address bar leads the
-   * render — and when it is lost the cost is not a thin record but a **wrong**
-   * one: three different applicants stored under one person's name, which is
-   * indistinguishable at a glance from three real records.
-   *
-   * So the identity is checked again at the two moments that matter: after the
-   * scan, and immediately before the record is built. Only `OTHER` throws — a
-   * torn-down or half-mounted panel is a *wait*, which the caller has already
-   * done, and a panel with no id rendered cannot contradict anything.
-   *
-   * Rule 6: no record is better than a wrong one.
-   */
-  function assertExpectedApplicant(expected) {
-    if (!cleanText(expected)) return;
-    const seen = describeApplicantArrival(expected);
-    if (seen.state !== Applicants.PANEL_ARRIVAL.OTHER) return;
-    throw wrongApplicantError(seen.reason);
-  }
-
   /**
    * Collect the applicant currently open in the detail panel.
    *
@@ -3274,14 +3159,6 @@
       sections: []
     };
 
-    // WHO this extraction is for. The caller supplies it — the run knows which
-    // row it clicked — and it is checked against the panel before anything is
-    // kept. Absent (a single "Collect This Applicant"), nothing is asserted,
-    // because there is no expectation to contradict.
-    const expected = cleanText(options.expectApplicationId);
-    diagnostics.expectApplicationId = expected || null;
-    assertExpectedApplicant(expected);
-
     let panel = applicantPanel();
     diagnostics.panel = `${panel.tagName?.toLowerCase() || "body"}${panel.id ? `#${panel.id}` : ""}`;
     const accumulator = Applicants.createApplicantAccumulator();
@@ -3296,10 +3173,6 @@
       const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
       panel = walked.panel || panel;
     } else snapshotPanel(panel, accumulator, diagnostics);
-
-    // The scan can run for a minute and a half, and the column re-mounts on this
-    // surface. Asked again now rather than trusted from before it.
-    assertExpectedApplicant(expected);
 
     // The overlays are opened on whatever the panel is now, not on the node the
     // extraction started with — a detached one contains no control at all.
@@ -3363,18 +3236,9 @@
       }
     }
 
-    // The last word before anything is kept. Everything above read the page;
-    // this asks whether the page was still showing the person the record is
-    // about. A record saved under somebody else's name is the failure this
-    // whole task exists to make impossible (rule 6).
-    assertExpectedApplicant(expected);
-
     const record = Applicants.buildApplicantRecord({
       snapshot: accumulator.snapshot(),
-      // Keyed to the applicant that was ASKED for when the caller named one.
-      // `context` is a read of `location.href` taken when the extraction
-      // started, and on this surface the address bar moves ahead of the render.
-      context: expected ? { ...context, applicationId: expected } : context,
+      context,
       sourceUrl,
       buildId: BUILD_ID
     });
@@ -3419,42 +3283,26 @@
   // row of the list. Never parallel, never a tab per applicant, and the stop
   // flag is checked before every single row.
 
-  /** Long enough for LinkedIn to unmount the old column; not a failure if it never does. */
-  const PANEL_TEARDOWN_TIMEOUT_MS = 4000;
-  /** How long the applicant that was asked for has to mount before the row is skipped. */
-  const PANEL_ARRIVAL_TIMEOUT_MS = 15000;
+  /** A fingerprint of who the detail panel is currently showing. */
+  function panelIdentity() {
+    const panel = applicantPanel();
+    const text = cleanText(panel?.innerText || "");
+    const { applicationId } = Applicants.parseHiringContext(location.href);
+    return `${applicationId || ""}|${text.length}|${text.slice(0, 300)}`;
+  }
 
   /**
    * Open the next applicant and wait until the panel is actually showing them.
    *
-   * TWO defects, one after the other, and the second is what this replaces.
+   * The live defect: this waited for the address to change and then for the DOM
+   * to go quiet. Neither means the panel has re-rendered — LinkedIn routes
+   * without a full navigation, and the DOM is briefly quiet between tearing the
+   * old applicant down and mounting the new one. So the scan started on the
+   * previous applicant's panel or on an empty one, which is why every row after
+   * the first came back with no role, no company and no name.
    *
-   * First it waited for the address to change and the DOM to go quiet. Neither
-   * means the panel re-rendered — LinkedIn routes without a navigation, and the
-   * DOM is briefly quiet *between* tearing the old applicant down and mounting
-   * the new one.
-   *
-   * Then it waited for a **text** fingerprint to differ from the one taken
-   * before the click. **The teardown alone satisfies that**, and the cost was
-   * not subtle: every applicant was saved under the first applicant's name. The
-   * scan read the stale panel; `chooseApplicantName` then arbitrated with
-   * LinkedIn's own qualification prose, which on that panel names the previous
-   * person over and over — so the wrong name won as the *corroborated* one and
-   * `addName` latched it against every later read.
-   *
-   * What is waited for now is what was always meant: **the applicant this row
-   * leads to, mounted.** In three steps, because a re-mount has three phases and
-   * conflating them is what went wrong.
-   *
-   *   1. **Teardown** — the panel we were holding goes away, or stops being that
-   *      applicant. Best-effort and short: LinkedIn may swap content in place
-   *      fast enough that no torn-down state is observable, and that is not a
-   *      failure. It is here so step 2 cannot be satisfied by the panel that was
-   *      already on screen.
-   *   2. **Arrival** — a mounted panel, at least `PANEL_MIN_SECTIONS` sections
-   *      hydrated, showing this row's own application id. Not "different".
-   *   3. **Settle**, then **ask again**, because a panel that arrives and is
-   *      re-mounted underneath the quiet wait is exactly what this surface does.
+   * The condition is now the only one that means anything: the panel's own
+   * fingerprint has changed from the one it had before the click.
    */
   async function selectApplicantRow(row) {
     const list = applicantList();
@@ -3467,33 +3315,19 @@
     if (!verdict.allowed) return false;
 
     const control = { element: row.control, verdict };
-    const expected = Applicants.parseHiringContext(row.href).applicationId || "";
-    const heldPanel = mountedApplicantPanel();
-    const before = panelIdentity(heldPanel);
+    const before = panelIdentity();
     control.element.click();
 
-    // 1. Teardown, best-effort: a null result means the column was reused in
-    //    place, which the arrival test below handles on its own merits.
-    await waitFor(() => {
-      if (heldPanel && !heldPanel.isConnected) return true;
-      const now = mountedApplicantPanel();
-      return !now || panelIdentity(now) !== before;
-    }, { timeoutMs: PANEL_TEARDOWN_TIMEOUT_MS, pollMs: 120, label: "applicant-panel-teardown" });
-
-    // 2. Arrival: this applicant, mounted. `waitFor` returns the verdict, so a
-    //    timeout is a null and the row is skipped rather than scanned.
-    const arrival = await waitFor(() => {
-      const seen = describeApplicantArrival(expected, before);
-      return seen.arrived ? seen : null;
-    }, { timeoutMs: PANEL_ARRIVAL_TIMEOUT_MS, pollMs: 200, label: "applicant-panel" });
-
-    // 3. Let it finish hydrating — a panel that has arrived is not a panel that
-    //    is complete — and re-ask, because a re-mount during that wait would
-    //    otherwise go unseen.
+    const changed = await waitFor(() => panelIdentity() !== before, {
+      timeoutMs: 12000,
+      pollMs: 200,
+      label: "applicant-panel"
+    });
+    // Then let it finish mounting. A panel that changed is not a panel that has
+    // arrived: the sections hydrate after the shell, and the scan's own quiet
+    // count takes it from here.
     await waitForDomQuiet(450, 4000);
-    const settled = describeApplicantArrival(expected, before);
-    state.lastArrival = settled;
-    return Boolean(arrival) && settled.arrived;
+    return Boolean(changed);
   }
 
   /**
@@ -4074,9 +3908,7 @@
     if (!rowId || rowId !== openId) {
       if (!(await selectApplicantRow(row))) return { opened: false, record: null };
     }
-    // The row's own id travels with the request, so the extraction can refuse to
-    // build a record out of anybody else's panel.
-    const { record } = await extractApplicant({ ...VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId });
+    const { record } = await extractApplicant(VISIBLE_ONLY_OPTIONS);
     return { opened: true, record };
   }
 
@@ -4178,20 +4010,6 @@
     const MAX_HIDDEN_RETRIES = 2;
     let retryingKey = "";
     let hiddenRetries = 0;
-
-    /**
-     * How many times this row may be re-opened because the panel came up
-     * showing somebody else.
-     *
-     * Refusing the record is the correct answer — a wrong name is worse than no
-     * record — but refusing it forever is not: without a bound, one row whose
-     * panel never resolves would hold the run for the rest of the job. So the
-     * row is re-opened a few times and then recorded as failed, with the reason
-     * on the run, and the walk moves on to somebody it can read.
-     */
-    const MAX_WRONG_APPLICANT_RETRIES = 2;
-    let wrongApplicantKey = "";
-    let wrongApplicantRetries = 0;
 
     /**
      * How many growth attempts in a row may end without telling us where the
@@ -4455,30 +4273,6 @@
             }
             continue;
           }
-          // The panel was showing somebody else. The record was refused rather
-          // than written under the wrong person's name — which is the whole
-          // point — and the row is left for the next turn to open again, so it
-          // is neither lost nor saved wrongly.
-          if (error?.wrongApplicant) {
-            wrongApplicantRetries = key === wrongApplicantKey ? wrongApplicantRetries + 1 : 1;
-            wrongApplicantKey = key;
-            if (wrongApplicantRetries > MAX_WRONG_APPLICANT_RETRIES) {
-              // Re-opened enough. Recorded as failed rather than saved under
-              // whoever the panel insisted on showing, and the walk moves on.
-              processed.add(key);
-              state.run.failed += 1;
-              state.run.lastError =
-                `The panel kept showing somebody else when ${fromRow.applicant.name} was opened; `
-                + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
-              state.run.index = processed.size;
-              await wait(LIST_PROFILE_PACE_MS);
-              continue;
-            }
-            state.run.lastError = `${error.message} ${fromRow.applicant.name} will be opened again.`;
-            state.run.updatedAt = new Date().toISOString();
-            await wait(LIST_PROFILE_PACE_MS);
-            continue;
-          }
           // A panel that would not open, would not scroll, or would not parse.
           // The NAME came from the list row and is unaffected, so it is still
           // saved below — losing a person from the list because their panel
@@ -4555,10 +4349,7 @@
             continue;
           }
         }
-        // The row's own id travels with the request here too: the full run has
-        // exactly the same exposure, and a record saved under the wrong
-        // applicant's name is the same defect whichever command produced it.
-        const { record } = await extractApplicant({ ...options, expectApplicationId: rowId });
+        const { record } = await extractApplicant(options);
         results.push(record);
         processed.add(key);
         state.run.collected += 1;
@@ -4569,22 +4360,6 @@
         if (error?.stopped) {
           state.run.state = Applicants.RUN_STATE.STOPPED;
           break;
-        }
-        if (error?.wrongApplicant) {
-          // Refused rather than saved under whoever the panel was showing, and
-          // bounded so one unresolvable row cannot hold the rest of the job.
-          wrongApplicantRetries = key === wrongApplicantKey ? wrongApplicantRetries + 1 : 1;
-          wrongApplicantKey = key;
-          state.run.lastError = error.message;
-          if (wrongApplicantRetries > MAX_WRONG_APPLICANT_RETRIES) {
-            processed.add(key);
-            state.run.failed += 1;
-            state.run.lastError =
-              `The panel kept showing somebody else when ${row.name || "this applicant"} was opened; `
-              + `moved on after ${MAX_WRONG_APPLICANT_RETRIES} retries rather than save the wrong name.`;
-            state.run.index = processed.size;
-          }
-          continue;
         }
         if (error?.hidden) {
           // A hidden page is a PAUSE, not the end of the run. It used to break

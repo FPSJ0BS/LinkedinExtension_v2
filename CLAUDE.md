@@ -279,27 +279,10 @@ commands are unrecoverable.
       `PERMANENT: the resume is downloaded without opening it whenever the address is already known`.
    g. A **row of the applicant list** (`purpose: "applicant-row"`), proven inside the list, which is
       how "Collect Every Applicant" advances. It is a navigation click and nothing else. **Wait for
-      the applicant that row leads to to be *mounted*, never for the address bar and never for the
-      panel's text to differ** (amended in 3.7.10) — LinkedIn routes without a navigation and the DOM
-      is briefly quiet between tearing the old applicant down and mounting the new one, so both of
-      those signals fire while the panel still shows the previous person. **A text fingerprint is no
-      better, and it cost every applicant their name.** The teardown alone satisfies it, so the scan
-      read the stale panel; `chooseApplicantName` then arbitrated with LinkedIn's own qualification
-      prose, which on that panel names the *previous* person over and over — so the wrong name won as
-      the **corroborated** one, and `addName` latches a corroborated name against every later read.
-      Three different applicants were stored as "Komal Sharma", the one open when the run started.
-      `selectApplicantRow` now waits in three steps — **teardown** (best-effort and short, so arrival
-      cannot be satisfied by the panel already on screen), **arrival**, then **settle and confirm
-      again** — and arrival is decided by `Applicants.describePanelArrival()` from **identifiers
-      only**: the application id on the panel's own link (the address bar second, because it moves
-      ahead of the render) and the member's `/in/` slug, plus at least `PANEL_MIN_SECTIONS` (2)
-      hydrated sections. `mountedApplicantPanel()` is the strict resolver that may answer **null**,
-      which is what makes "nothing is mounted" expressible at all. **And waiting is not trusted on its
-      own** (rule 6): `extractApplicant` takes `expectApplicationId`, `assertExpectedApplicant()`
-      re-checks it before the scan, after it and immediately before the record is built, and a panel
-      showing somebody else throws rather than saving — bounded by `MAX_WRONG_APPLICANT_RETRIES` so
-      one unresolvable row cannot hold the job. A row that never opens is **skipped**, not scanned;
-      scanning anyway saved the previous applicant a
+      `panelIdentity()` to change afterwards, never for the address bar** — LinkedIn routes without a
+      navigation and the DOM is briefly quiet between tearing the old applicant down and mounting the
+      new one, so both of those signals fire while the panel still shows the previous person. A row
+      that never opens is **skipped**, not scanned; scanning anyway saved the previous applicant a
       second time under this row's identity. Since 3.7.3 a row whose applicant is **already saved for
       this job is walked past without being clicked at all** — see "Collecting every applicant" below.
 
@@ -889,15 +872,11 @@ save → click next applicant`. Every clause of it is load-bearing.
   and LinkedIn swaps only the right panel underneath.
 - **One click per applicant, and only a row of the left list** — `selectApplicantRow`, gated by
   `classifyApplicantControl` and proven inside the list (rule 9g), with exactly one `.click()`.
-- **Then it waits for the right panel** — for *that applicant* to be **mounted**, decided by
-  `Applicants.describePanelArrival()` from identifiers rather than from the address bar or the
-  panel's text (rule 9g, amended in 3.7.10), then for the DOM to go quiet, then it **asks again**.
-  And the record is refused outright if the panel is showing anybody else
-  (`assertExpectedApplicant`), because a wait is a race that can be lost and losing it saved three
-  applicants under one name. **Nothing may click again
+- **Then it waits for the right panel**, on `panelIdentity()` changing rather than on the address bar,
+  and then for the DOM to go quiet so the shell has finished mounting. **Nothing may click again
   while a profile is still loading**: the caller advances only on the resolved value, an applicant
   already shown is not re-clicked (`rowId !== openId`), and a row that never opened is *skipped*
-  rather than scanned as somebody else — with the arrival verdict's own reason on `state.lastArrival`.
+  rather than scanned as somebody else.
 - **Only a column scrolls, never the recruiter's page.** `anchorPage()` wraps **every**
   `scrollIntoView` on this surface — the detail-panel reveal and the list nudge — snapshotting the
   document position and putting it back on the same frame. `scrollIntoView` stays the mechanism
