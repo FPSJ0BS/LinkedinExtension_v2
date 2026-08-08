@@ -3227,7 +3227,6 @@
    */
   function nextRevealStep(root, stuck) {
     if (!(root instanceof Element)) return null;
-    const fold = window.innerHeight || document.documentElement?.clientHeight || 0;
     /**
      * The other column is never an anchor for this one.
      *
@@ -3253,11 +3252,37 @@
      * in the same both-directions form, so a wrapper holding the list is refused
      * too — its own children are still offered, so the panel's content is still
      * reachable through them.
+     *
+     * **⚠ THE GUARD MAY REFUSE AN ANCHOR; IT MAY NEVER LEAVE THE WALK WITHOUT
+     * ONE.** Reported the first time it shipped, in three words: *"it stopped
+     * scrolling the profile."* `applicantList()` is a resolver, not a fact — it
+     * takes the container carrying the most row links, and its candidate list
+     * includes `main` and `[role='main']`. Let it answer with something that
+     * holds the panel's content as well and every candidate is refused,
+     * `nextRevealStep` returns null, and `revealPanelContent` breaks on its first
+     * pass with `nothing-to-reveal`: the profile column never moves at all, and
+     * everything below its fold is never rendered, so it is never read. A
+     * refinement about *which* anchor to prefer must never be able to cost the
+     * whole walk.
+     *
+     * Two things make that impossible rather than unlikely. A "list" that also
+     * holds the root is this resolver reaching too wide, not the other column, so
+     * it is disregarded outright. And the scan is then run **again without the
+     * guard** if the guarded pass found nothing — so the worst the guard can now
+     * do is one extra walk of the candidates, and the walk always has the anchors
+     * it had before it existed.
      */
     const list = applicantList();
+    const other = list && !list.contains(root) ? list : null;
+    return revealStepIn(root, stuck, other) || (other ? revealStepIn(root, stuck, null) : null);
+  }
+
+  /** One pass of the candidates, optionally refusing a column and its wrappers. */
+  function revealStepIn(root, stuck, avoid) {
+    const fold = window.innerHeight || document.documentElement?.clientHeight || 0;
     let tail = null;
     for (const element of root.querySelectorAll("section,article,div,li,p,h1,h2,h3,h4")) {
-      if (list && (list.contains(element) || element.contains(list))) continue;
+      if (avoid && (avoid.contains(element) || element.contains(avoid))) continue;
       // Cheapest test first, and the reason is layout.
       //
       // `isVisible` costs a `getComputedStyle` and two rect reads, and
@@ -4446,6 +4471,38 @@
       walk.stoppedBy = "no-list";
       return false;
     }
+    /**
+     * A SETTLE DEFINES THE PAGE'S ORDER, so it may not inherit one guessed from
+     * wherever the list happened to be sitting.
+     *
+     * **THE REPORT: "it saves the list upside down — it collects the list top to
+     * down, the first name gets saved first, so while saving data it starts from
+     * the bottom."** Exactly right, and the cause is a seeding order rather than
+     * anything in the roster's own merge.
+     *
+     * `roster.add()` places an unknown window relative to the first row of it the
+     * roster already knows. With no known row at all it has genuinely nothing to
+     * anchor on, so it appends — "this window is new ground" — and that rule is
+     * sound while the page is walked **downward from the top**, which is what this
+     * function does: every step overlaps the last, so every window anchors.
+     *
+     * But the run's very first act is `unprocessedRows()`, and that feeds the
+     * roster too. It runs *before* this settle, with the list wherever LinkedIn
+     * left it — scrolled to the applicant whose panel is open, i.e. somewhere in
+     * the middle. Those middle rows are therefore roster positions 0..n. Then this
+     * settle scrolls to the top and adds the **first** window, which shares no row
+     * with them, so it anchors on nothing and is appended **after** them. The page
+     * order becomes "the middle, then the top": `roster.next()` hands back a row
+     * from the middle of the page, and the walk appears to start at the bottom and
+     * reach the first name last.
+     *
+     * Clearing first is the whole fix, and it is safe because the roster holds
+     * *order*, never progress — `processed` is a separate ledger and is untouched,
+     * so nothing already collected is collected again. Only a settle does this: a
+     * sweep asked to find one owed row (`wanted`) must keep the membership this
+     * page already established, which is the thing it is searching within.
+     */
+    if (typeof wanted !== "function") roster.reset();
     // The top, because the rows this is here to find are the ones above wherever
     // the list happens to be sitting. A run resumed on a half-scrolled list, or
     // one LinkedIn scrolled to the open applicant, has them all behind it.

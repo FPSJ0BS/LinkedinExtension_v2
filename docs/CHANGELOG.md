@@ -1,5 +1,54 @@
 # CHANGELOG.md
 
+## 3.7.24 — the guard that stopped the scroll, and the page that was walked from its middle
+
+Two reports, one of them a regression 3.7.23 caused.
+
+**1. "It stopped scrolling the profile" — caused by 3.7.23, fixed here.** The list guard added to
+`nextRevealStep` last release refuses an anchor inside the applicant list. `applicantList()` is a
+**resolver, not a fact**: it takes whichever container carries the most row links, and its candidate
+list includes `main` and `[role='main']`. Let it answer with something that also holds the panel's
+content and **every** candidate is refused — `nextRevealStep` returns `null`, `revealPanelContent`
+breaks on its first pass with `nothing-to-reveal`, the profile column never moves at all, and
+everything below its fold is never rendered and so never read. A refinement about *which* anchor to
+prefer was able to cost the whole walk.
+
+**⚠ The rule this establishes: the guard may refuse an anchor; it may never leave the walk without
+one.** Two things now make that structural rather than lucky. A "list" that also contains the root is
+this resolver reaching too wide rather than the other column, so it is disregarded outright
+(`list.contains(root)`). And the candidate scan — lifted into `revealStepIn` — is **run again without
+the guard** whenever the guarded pass found nothing. The worst the guard can now do is one extra walk
+of the candidates, and the walk always has at least the anchors it had before the guard existed. The
+benefit is unchanged in the normal case, where the list resolves to the narrow list wrapper.
+
+**2. "It saves the list upside down — it collects the list top to down, the first name gets saved
+first, so while saving data it starts from the bottom."** Exactly right, and long-standing rather than
+new. The cause is a **seeding order**, not anything wrong in the roster's own merge.
+
+`roster.add()` places an unknown window relative to the first row of it the roster already knows, and
+with no known row it has genuinely nothing to anchor on, so it appends — *"this window is new
+ground"*. That rule is sound while the page is walked **downward from the top**, which is exactly what
+`sweepCurrentPage` does: every step overlaps the last, so every window anchors.
+
+But the run's very first act is `unprocessedRows()`, and that feeds the roster too — **before** the
+settle, with the list wherever LinkedIn left it, which is scrolled to the applicant whose panel is
+open, i.e. the *middle*. Those middle rows therefore took roster positions 0..n. The settle then
+scrolled to the top and added the first window, which shared no row with them, anchored on nothing,
+and was appended **after** them. The page order became "the middle, then the top": `roster.next()`
+handed back a row from the middle and the page's first name was reached last.
+
+So a settle now **clears the roster before it walks**, because a settle *defines* the page's order and
+may not inherit one guessed from an arbitrary scroll offset. It clears **order, never progress** — the
+run's `processed` ledger is a separate object, so nothing already collected is collected twice — and
+it is scoped to a settle: a sweep asked to find one owed row (`wanted`) keeps the membership it is
+searching within. The pager path already reset, so it is unchanged.
+
+Locked by *"a roster seeded before the page is settled walks it from the middle, not the top"*, which
+**drives the pure roster** rather than asserting about source: it reproduces the reported ordering
+from the two windows in the order the run produced them, then proves the cleared sweep yields
+`1..9` and still walks past rows already finished with. Files:
+`extension/content-scripts/applicants.js`, `tests/applicants-core.test.js`, `docs/CHANGELOG.md`.
+
 ## 3.7.23 — the reveal walk scrolls one column, and stops paying for the other
 
 Three changes on the per-applicant reveal path, from

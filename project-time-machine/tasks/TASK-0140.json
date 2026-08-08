@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0140",
+  "name": "Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted",
+  "request": "Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T07:44:11.732Z",
+  "completedAt": "2026-08-08T07:50:45.240Z",
+  "startCommit": "543eede11f53b6524218174d316a513f7f05af05",
+  "gitRef": "task/TASK-0140",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 456 tests, 0 failures, including the new executable roster-ordering proof",
+    "npm run validate passed - 31 build files, 4 React entry points, service-worker imports",
+    "npm run docs:check still FAILS on the same 15 pre-existing broken CLAUDE.md links recorded under TASK-0139; unrelated to this task and untouched by it"
+  ],
+  "result": "Two reports, one of them a regression TASK-0139 caused.\n\n(1) It"
+}

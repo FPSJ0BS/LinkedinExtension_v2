@@ -2225,11 +2225,24 @@ test("the reveal walk scrolls the applicant's column and never the recruiter's l
   // holding more than one row link, landing on `document.querySelector("main")
   // || document.body`. From there the last rendered element, which is the tail
   // this walk aims at, is usually the last list row.
-  assert.match(step, /if \(list && \(list\.contains\(element\) \|\| element\.contains\(list\)\)\) continue;/,
+  assert.match(step, /if \(avoid && \(avoid\.contains\(element\) \|\| element\.contains\(avoid\)\)\) continue;/,
     "the other column is never an anchor for this one");
   // Resolved once for the whole pass: applicantList() is a document-wide scan
   // with an isVisible per candidate, and this loop runs over every element.
   assert.match(step, /const list = applicantList\(\);/, "and the list is resolved once per pass, not per element");
+
+  // ⚠ THE GUARD MAY REFUSE AN ANCHOR; IT MAY NEVER LEAVE THE WALK WITHOUT ONE.
+  // Reported the first time it shipped, in three words: "it stopped scrolling the
+  // profile." applicantList() is a RESOLVER, not a fact — it takes the container
+  // carrying the most row links and its candidates include main and [role=main].
+  // Let it answer with something holding the panel's content too and every
+  // candidate is refused, nextRevealStep returns null, and revealPanelContent
+  // breaks on its first pass with "nothing-to-reveal": the profile column never
+  // moves, so everything below its fold is never rendered and never read.
+  assert.match(step, /const other = list && !list\.contains\(root\) \? list : null;/,
+    "a list that also holds the root is this resolver reaching too wide, not the other column");
+  assert.match(step, /return revealStepIn\(root, stuck, other\) \|\| \(other \? revealStepIn\(root, stuck, null\) : null\);/,
+    "and a guarded pass that found nothing is retried unguarded, so the guard can never cost the walk");
 
   // Nothing readable is given up by refusing it, and that is what makes the
   // guard safe rather than merely faster: a list row is not the open applicant's
@@ -3116,6 +3129,38 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   assert.match(sweep, /scrollPanelTo\(0, chooseScrollTarget\(\(await waitForApplicantList\(\)\) \|\| live\)\)/,
     "a settled page is handed back at its top");
 
+  // THE REPORT: "it saves the list upside down — it collects the list top to
+  // down, the first name gets saved first, so while saving data it starts from
+  // the bottom."
+  //
+  // `roster.add()` places an unknown window relative to the first row of it the
+  // roster already knows, and with no known row it has nothing to anchor on, so
+  // it appends. That rule is sound while the page is walked DOWNWARD FROM THE
+  // TOP, which is what this function does — every step overlaps the last, so
+  // every window anchors. But the run's first act is `unprocessedRows()`, which
+  // feeds the roster too, BEFORE this settle, with the list wherever LinkedIn
+  // left it: scrolled to the applicant whose panel is open, i.e. the middle. Those
+  // middle rows became positions 0..n; this settle then scrolled to the top and
+  // added a window sharing no row with them, which anchored on nothing and was
+  // appended AFTER them. The page order became "the middle, then the top", so
+  // roster.next() handed back a middle row and the first name was reached last.
+  assert.match(sweep, /if \(typeof wanted !== "function"\) roster\.reset\(\);/,
+    "a settle DEFINES the page's order, so it may not inherit one guessed from an arbitrary scroll position");
+  assert.ok(
+    sweep.indexOf("roster.reset()") < sweep.indexOf("scrollPanelTo(0, chooseScrollTarget(list))"),
+    "and it clears before it walks, or the first window from the top lands after the middle again"
+  );
+  // Scoped to a settle on purpose: a sweep asked to find one owed row must keep
+  // the membership this page already established, which is what it searches
+  // within. And it clears ORDER, never PROGRESS — the run's own ledger of
+  // finished rows is a separate object, so nothing already collected is
+  // collected twice.
+  //
+  // Comments stripped first: the prose above explains the defect in the very
+  // words the check greps for, exactly as the row-label check has to.
+  assert.ok(!/processed/.test(withoutComments(sweep)),
+    "settling a page must not touch the run's own ledger of finished rows");
+
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
   assert.match(run, /if \(!pageSettled\) \{\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);\s*\n\s*pageSettled = true;/,
     "the page is settled before the walk opens anybody on it");
@@ -3147,6 +3192,63 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
 
   // Rule 9: this adds no control, on any path.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("a roster seeded before the page is settled walks it from the middle, not the top", () => {
+  // The defect DRIVEN rather than asserted about, because the roster is pure and
+  // this is the half of the report that can be PROVEN in Node: "it saves the list
+  // upside down — it collects the list top to down, the first name gets saved
+  // first, so while saving data it starts from the bottom."
+  //
+  // The address shape the live rows carry, so the keys are the `id:` form the run
+  // keys on rather than the `href:` fallback.
+  const row = (id) => ({
+    href: `https://www.linkedin.com/hiring/applicants/?applicationId=2555078792${id}&jobId=4277798308`,
+    name: `Applicant ${id}`
+  });
+  const key = (id) => Applicants.applicantRowKey(row(id));
+  const top = [row(1), row(2), row(3)];
+  const middle = [row(7), row(8), row(9)];
+
+  // What the run actually did, in order: `unprocessedRows()` feeds the roster on
+  // the first turn, with the list wherever LinkedIn left it — scrolled to the
+  // applicant whose panel is open — and only THEN did the settle scroll to the
+  // top and walk down.
+  const seeded = Applicants.createApplicantRoster();
+  seeded.add(middle);
+  seeded.add(top);
+
+  // The middle window anchored on nothing, so it took positions 0..n; the window
+  // from the top shared no row with it, anchored on nothing either, and was
+  // appended AFTER it. The page order became "the middle, then the top".
+  assert.equal(seeded.next(new Set()), key(7),
+    "seeded first, the walk starts from the middle of the page — exactly the report");
+  assert.deepEqual(seeded.keys().slice(0, 4), [key(7), key(8), key(9), key(1)],
+    "and the page's first row sorts after the last one the middle window held");
+
+  // The fix: a settle DEFINES the order, so it clears first and rebuilds walking
+  // down from the top. Every step of a real sweep overlaps the last, which is
+  // what gives `add` something to anchor on, so the order it builds is the page's.
+  const settled = Applicants.createApplicantRoster();
+  settled.add(middle);
+  settled.reset();
+  settled.add(top);
+  settled.add([row(3), row(4), row(5)]);
+  settled.add([row(5), row(6), row(7)]);
+  settled.add([row(7), row(8), row(9)]);
+
+  assert.equal(settled.next(new Set()), key(1),
+    "cleared first, the walk starts at the page's first row");
+  assert.deepEqual(settled.keys(), [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
+    "and the whole page is in the order the page renders it");
+
+  // Clearing ORDER must not clear PROGRESS: the run's own ledger of finished rows
+  // is a separate object, so a reset cannot make the run collect anybody twice.
+  // Driven here so the source-text check above has a behaviour behind it.
+  const done = new Set([key(1), key(2)]);
+  assert.equal(settled.next(done), key(3),
+    "a reset roster still walks past the rows the run had already finished with");
+  assert.equal(settled.remaining(done), 7, "and reports only what is genuinely left");
 });
 
 test("an applicant is opened, read and saved exactly once, and 'already open' is the panel's answer", async () => {
