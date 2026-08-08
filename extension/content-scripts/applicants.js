@@ -1540,24 +1540,15 @@
    * and `movedBy: 0` names that failure in one line.
    */
   function logReveal(diagnostics, name) {
-    const walks = [
-      ["reveal", diagnostics?.reveal],
-      ["after-regions", diagnostics?.revealAfterRegions],
-      // The extra attempt a walk that stopped short earns. Reported by name, so
-      // "it needed a retry and got there" and "it never got there" are one line
-      // apart rather than the same silence.
-      ["retry", diagnostics?.revealRetry]
-    ].filter(([, walk]) => walk);
+    const walks = [["reveal", diagnostics?.reveal], ["after-regions", diagnostics?.revealAfterRegions]]
+      .filter(([, walk]) => walk);
     if (!walks.length) return;
-    // Only the LAST walk decides whether this applicant's panel was fully read:
-    // an earlier one stopping short is precisely what the retry exists for, and
-    // warning about a walk that was then rescued would cry wolf on every retry.
-    const short = walks.slice(-1).filter(([, walk]) => !walk.reachedTail);
+    const short = walks.filter(([, walk]) => !walk.reachedTail);
     const label = `[Profile Vault ${BUILD_ID}] panel reveal — ${name || "applicant"}: `
       + walks.map(([which, walk]) =>
         `${which} ${walk.passes} pass(es), moved ${Math.round(walk.movedBy)}px, `
         + `${walk.reachedTail ? "reached the bottom" : "DID NOT reach the bottom"} (${walk.stoppedBy})`).join("; ");
-    if (short.length) console.warn(label, diagnostics.reveal, diagnostics.revealAfterRegions, diagnostics.revealRetry);
+    if (short.length) console.warn(label, diagnostics.reveal, diagnostics.revealAfterRegions);
     else console.info(label);
   }
 
@@ -3765,54 +3756,6 @@
       // Cheap when nothing moved: the quiet rule ends this in three passes.
       live = await revealPanelContent(live, accumulator, diagnostics, "revealAfterRegions") || live;
 
-      /**
-       * ⚠ THE PROFILE MUST REACH ITS BOTTOM, AND A WALK THAT DID NOT IS RETRIED.
-       *
-       * **Requested outright: "make sure profile scrolls every time to the bottom
-       * in any case — make any trigger or hook to do that."**
-       *
-       * Everything needed to *know* was already here and nothing acted on it.
-       * `reachedTail` is `nextRevealStep` answering "nothing begins below the
-       * fold any more" — this surface's honest equivalent of `atBottom`, and the
-       * one that needs no guess about which container scrolls — and `logReveal`
-       * has warned about a short walk since it was written. But a warning in the
-       * recruiter's console is not a retry: the walk stopped, the sections below
-       * where it stopped were never rendered, and the record was built without
-       * them. That is the difference between *diagnosing* "it stops partway down"
-       * and *fixing* it.
-       *
-       * One more attempt, and one only. It is a fresh `revealPanelContent`, so it
-       * gets a fresh `stuck` set — an anchor a previous walk proved immovable is
-       * retired for the life of that walk, and a panel that has since re-mounted
-       * or grown may well be movable by the very anchor that was retired, which
-       * is the most likely way a walk strands itself short of the bottom.
-       *
-       * **`time-budget` is deliberately excluded, and that is not a loophole.**
-       * It means the walk was working and ran out of clock — `REVEAL_BUDGET_MS`
-       * is 45 s — so a retry cannot reach the bottom any faster and would simply
-       * spend another 45 s per applicant, on a run that walks hundreds of them.
-       * Every other stop (`no-movement`, `nothing-to-reveal`, `scroll-refused`,
-       * `pass-budget`) is the mechanism failing rather than the clock, and is
-       * exactly what a second attempt can fix.
-       *
-       * And when even the retry cannot reach it, the record says so. A field
-       * missing because the panel would not scroll is otherwise indistinguishable
-       * from an applicant who does not have it (rule 1), which is the whole
-       * reason `logSectionScan` exists.
-       */
-      const walked = diagnostics.revealAfterRegions || diagnostics.reveal;
-      if (walked && !walked.reachedTail && walked.stoppedBy !== "time-budget") {
-        live = livePanel(live);
-        live = await revealPanelContent(live, accumulator, diagnostics, "revealRetry") || live;
-      }
-      const finalWalk = diagnostics.revealRetry || walked;
-      if (finalWalk && !finalWalk.reachedTail) {
-        accumulator.addWarning(
-          `the profile panel did not scroll to its bottom (${finalWalk.stoppedBy}); `
-          + "anything below that point was never rendered and so was not read"
-        );
-      }
-
       // Everything below the fold has now mounted, so anything it left collapsed
       // exists for the first time. The expander pass before the walk could only
       // ever see the first screenful's controls, which is how a "Show all N
@@ -4679,65 +4622,12 @@
      * sweep asked to find one owed row (`wanted`) must keep the membership this
      * page already established, which is the thing it is searching within.
      */
-    const seeking = typeof wanted === "function";
-    if (!seeking) roster.reset();
-
-    /**
-     * A SEARCH STARTS WHERE THE LIST IS. Only a settle starts at the top.
-     *
-     * **THE REPORT: "make it move to every profile just by moving to the next
-     * profile without needing to scroll — currently it is scrolling every time on
-     * the list side and it goes back to the top every time."** Both halves are
-     * this one line, which used to run for every caller.
-     *
-     * The two callers want opposite things. A **settle** genuinely needs the top:
-     * its whole job is the rows *above* wherever the list was left, and it runs
-     * once per page. A **search** — "the row this page owes me next is not
-     * mounted, go and find it" — wants the opposite. The walk goes **down** the
-     * page in order, so the row it is owed is almost always the next one down;
-     * dragging the list to the top to look for it moves the recruiter's list the
-     * whole height of the page, re-mounts the rows the run has already finished
-     * with, and then has to walk all the way back down to where it started.
-     *
-     * So a search sweeps from where the list is, and only falls back to a walk
-     * from the top when that finds nothing — which is the case it was written
-     * for, a row recycled out of the DOM *above* the current position, and which
-     * is now paid for only when it actually happens. Nothing about what the sweep
-     * concludes changes: the same passes, the same bound, the same roster merge,
-     * and the caller still re-checks for itself before retiring a row.
-     */
-    if (seeking) {
-      // Already there: no scroll of any kind, which is the common case this
-      // whole change exists to make free.
-      if (wanted()) return true;
-      if (await sweepPageFrom(false, roster, walk, wanted)) return true;
-    }
-    return sweepPageFrom(true, roster, walk, wanted);
-  }
-
-  /**
-   * One walk of the page, either from the top or onward from where the list is.
-   *
-   * The worst case for a search is this walk twice — down from here, then down
-   * from the top — and it is bounded by `LIST_PAGE_PASSES` each time, so it still
-   * terminates on exactly the same rule. It is only reached when a row genuinely
-   * is not below the current position.
-   */
-  async function sweepPageFrom(fromTop, roster, walk, wanted) {
-    const seeking = typeof wanted === "function";
-    if (fromTop) {
-      const list = await waitForApplicantList();
-      if (!list) {
-        walk.stoppedBy = "no-list";
-        return false;
-      }
-      // The top, because the rows a settle is here to find are the ones above
-      // wherever the list happens to be sitting. A run resumed on a half-scrolled
-      // list, or one LinkedIn scrolled to the open applicant, has them all behind
-      // it.
-      scrollPanelTo(0, chooseScrollTarget(list));
-      await waitForDomQuiet(320, 2000);
-    }
+    if (typeof wanted !== "function") roster.reset();
+    // The top, because the rows this is here to find are the ones above wherever
+    // the list happens to be sitting. A run resumed on a half-scrolled list, or
+    // one LinkedIn scrolled to the open applicant, has them all behind it.
+    scrollPanelTo(0, chooseScrollTarget(list));
+    await waitForDomQuiet(320, 2000);
 
     let quiet = 0;
     for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
@@ -4757,7 +4647,7 @@
       walk.passes += 1;
       // Found what the caller came for. The list is deliberately left where it
       // is, because where it is, is where that row is mounted.
-      if (seeking && wanted()) return true;
+      if (typeof wanted === "function" && wanted()) return true;
 
       const max = maxScrollPosition(target);
       const position = currentScrollTop(target);
@@ -4767,12 +4657,6 @@
       // the rest of the page over the network, and a slice still in flight looks
       // exactly like a page that has ended.
       if (atBottom && quiet >= LIST_QUIET_PASSES) {
-        // A SEARCH that reached the bottom without its row says so and moves
-        // nothing. The caller's fallback is a walk from the top, so hauling the
-        // list up here would be that same movement done twice — and if this was
-        // already the walk from the top, the row is genuinely not on the page and
-        // the caller retires it.
-        if (seeking) return false;
         // Settled — and handed back at the TOP, because the first applicant of
         // this page is the next one the run opens. Leaving it at the bottom
         // would start the page at its last row and then need a sweep back up

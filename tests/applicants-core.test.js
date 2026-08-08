@@ -2267,38 +2267,6 @@ test("the bottom of the panel is reached without knowing which container scrolls
   // It scrolls arbitrary ancestors, so the page's own position is restored too.
   assert.match(scan, /const originalWindowY = window\.scrollY/, "the page position must be remembered");
   assert.match(scan, /finally \{[\s\S]*?window\.scrollTo\(\{ top: originalWindowY/, "and handed back on every path");
-
-  // REQUESTED OUTRIGHT: "make sure profile scrolls every time to the bottom in
-  // any case — make any trigger or hook to do that."
-  //
-  // Everything needed to KNOW was already here and nothing acted on it.
-  // `reachedTail` is nextRevealStep answering "nothing begins below the fold any
-  // more", and logReveal has warned about a short walk since it was written —
-  // but a console warning is not a retry: the walk stopped, the sections below
-  // where it stopped were never rendered, and the record was built without them.
-  assert.match(scan, /if \(walked && !walked\.reachedTail && walked\.stoppedBy !== "time-budget"\)/,
-    "a walk that did not reach the bottom earns one more attempt");
-  assert.match(scan, /revealPanelContent\(live, accumulator, diagnostics, "revealRetry"\)/,
-    "and that attempt is a fresh walk, so it gets a fresh set of retired anchors");
-  // time-budget is excluded deliberately and it is not a loophole: it means the
-  // walk was WORKING and ran out of clock (REVEAL_BUDGET_MS is 45s), so a retry
-  // cannot reach the bottom any faster and would spend another 45s per applicant
-  // on a run that walks hundreds. Every other stop is the mechanism failing.
-  assert.match(source, /const REVEAL_BUDGET_MS = 45000/, "the clock that time-budget refers to");
-
-  // And when even the retry cannot reach it, the RECORD says so: a field missing
-  // because the panel would not scroll is otherwise indistinguishable from an
-  // applicant who does not have it (rule 1).
-  assert.match(scan, /if \(finalWalk && !finalWalk\.reachedTail\) \{\s*\n\s*accumulator\.addWarning\(/,
-    "a panel that never reached its bottom is stated on the record, not only in the console");
-
-  // The console line reports the retry by name, and judges only the LAST walk —
-  // an earlier one stopping short is exactly what the retry is for, so warning
-  // about a walk that was then rescued would cry wolf on every retry.
-  const log = source.slice(source.indexOf("function logReveal"), source.indexOf("function logSectionScan"));
-  assert.match(log, /\["retry", diagnostics\?\.revealRetry\]/, "the retry is reported by name");
-  assert.match(log, /const short = walks\.slice\(-1\)\.filter\(\(\[, walk\]\) => !walk\.reachedTail\);/,
-    "and only the last walk decides whether the panel was fully read");
 });
 
 test("the reveal walk scrolls the applicant's column and never the recruiter's list", async () => {
@@ -3238,7 +3206,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   // added a window sharing no row with them, which anchored on nothing and was
   // appended AFTER them. The page order became "the middle, then the top", so
   // roster.next() handed back a middle row and the first name was reached last.
-  assert.match(sweep, /const seeking = typeof wanted === "function";\s*\n\s*if \(!seeking\) roster\.reset\(\);/,
+  assert.match(sweep, /if \(typeof wanted !== "function"\) roster\.reset\(\);/,
     "a settle DEFINES the page's order, so it may not inherit one guessed from an arbitrary scroll position");
   assert.ok(
     sweep.indexOf("roster.reset()") < sweep.indexOf("scrollPanelTo(0, chooseScrollTarget(list))"),
@@ -3254,28 +3222,6 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   // words the check greps for, exactly as the row-label check has to.
   assert.ok(!/processed/.test(withoutComments(sweep)),
     "settling a page must not touch the run's own ledger of finished rows");
-
-  // THE REPORT: "make it move to every profile just by moving to the next profile
-  // without needing to scroll — currently it is scrolling every time on the list
-  // side and it goes back to the top every time."
-  //
-  // The two callers want opposite things and used to share one line. A SETTLE
-  // genuinely needs the top: its job is the rows ABOVE wherever the list was
-  // left, and it runs once per page. A SEARCH — "the row this page owes me next
-  // is not mounted, go and find it" — wants the opposite, because the walk goes
-  // DOWN the page in order, so the owed row is almost always the next one down.
-  // Hauling the list to the top to find it moves the recruiter's list the whole
-  // height of the page and then has to walk back down to where it started.
-  assert.match(sweep, /if \(seeking\) \{\s*\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(wanted\(\)\) return true;\s*\n\s*if \(await sweepPageFrom\(false, roster, walk, wanted\)\) return true;\s*\n\s*\}/,
-    "a search looks from where the list is, and a row already mounted costs no scroll at all");
-  assert.match(sweep, /return sweepPageFrom\(true, roster, walk, wanted\);/,
-    "and only falls back to a walk from the top, which is the case it was written for");
-  assert.match(sweep, /if \(seeking\) return false;/,
-    "a search that reached the bottom without its row moves nothing on the way out");
-  // The settle is unchanged: still from the top, still handed back at the top,
-  // still once per page.
-  assert.match(sweep, /if \(fromTop\) \{[\s\S]{0,600}?scrollPanelTo\(0, chooseScrollTarget\(list\)\)/,
-    "the walk from the top still starts at the top");
 
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
   assert.match(run, /if \(!pageSettled\) \{\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);\s*\n\s*pageSettled = true;/,

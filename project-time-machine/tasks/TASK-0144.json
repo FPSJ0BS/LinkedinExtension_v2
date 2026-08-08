@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "TASK-0144",
+  "name": "Restore project to TASK-0141 (Applicant collector: collect contact and resume before the profile walk, and end the walk at the bottom instead of returning to the top)",
+  "request": "Restore project to TASK-0141 (Applicant collector: collect contact and resume before the profile walk, and end the walk at the bottom instead of returning to the top)",
+  "type": "restore",
+  "status": "completed",
+  "startedAt": "2026-08-08T08:15:58.761Z",
+  "completedAt": "2026-08-08T08:16:00.706Z",
+  "startCommit": "43de19c12679e663f154a67bf4d425e290392787",
+  "commit": null,
+  "gitRef": "task/TASK-0144",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-08T08-15-58-170Z created and verified"
+  ],
+  "result": "Restored project to the state after TASK-0141 — Applicant collector: collect contact and resume before the profile walk, and end the walk at the bottom instead of returning to the top",
+  "target": {
+    "taskId": "TASK-0141",
+    "taskName": "Applicant collector: collect contact and resume before the profile walk, and end the walk at the bottom instead of returning to the top",
+    "commit": "bab769f582af7879825118324938df0d9615bf97"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-08T08-15-58-170Z",
+    "commit": "43de19c12679e663f154a67bf4d425e290392787"
+  }
+}
