@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0154",
+  "name": "Phase 1: pin the working applicant UI",
+  "request": "Phase 1: pin the working applicant UI",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:10:39.581Z",
+  "completedAt": "2026-08-08T11:15:07.505Z",
+  "startCommit": "903d3321dfb967a5030c17161cf7d0f638a1140f",
+  "gitRef": "task/TASK-0154",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 486 passed / 0 failed (was 475), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 1 of the multiple-LinkedIn-UI support guide: eleven tripwires that pin what already works, with ZERO production lines changed - applicants.js and applicants-core.js are untouched. The guide asks that the working layout be protected before any layout work begins, and prose cannot do that, so each tripwire is executable and each names the later phase it guards. They pin: the eight readers' fixed order and that qualifications still precede the header (the name is corroborated against their explanation sentences); the seven section keys, so a later phase may widen a WORDING but can never lose a KEY; the five name-candidate sources in trust order, because chooseApplicantName breaks ties by caller order and a fallback must go behind them; that readApplicantHeader resolves the name BEFORE slicing the twelve-line window and prefers the /in/ anchor that NAMES the applicant (profileUrl is hashed into applicantId, so one wrong link merges two people); that all five section readers stay blocks-first with a text fallback GATED on the markup having offered none; that trusted:true appears exactly once and is owned by openContactAndCollect, and that no reader allows a phone off the click path (rule 2); the column policy asked before the general chooser, the scroll restore in a finally, and that only sweepCurrentPage, growApplicantList and the run's own restore may move the left list; three identity checks in extractApplicant and no address-bar fallback in panelOwnApplicationId; the seventeen applicant fields, the eight job fields, the eight resume fields and the ten merge-protected scalars; and the nine CSV columns as bytes, BOM included. The one that earns its place hardest is the click OWNERSHIP test: the file already had eight assertions that .click() appears seven times, but a count cannot see a click that MOVES HOUSE - the same seven redistributed would pass every one of them while pressing something the allowlist never sanctioned. It resolves each call to its nearest enclosing function and deepEquals the set against the six gated opens plus the shared dismiss; verified against a mutated copy that relocating one call is detected. Files: tests/applicants-core.test.js (append only), docs/CHECKS.md (a 3.9.0 section with real output only)."
+}

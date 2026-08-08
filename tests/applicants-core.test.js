@@ -4558,3 +4558,309 @@ test("reading back where Chrome put the file is answered sooner, never given les
   assert.match(path, /if \(item && item\.state === "interrupted"\) \{\s*\n\s*return \{ path: "", interrupted: true/,
     "an interrupted download must still report itself as one");
 });
+
+// ------ Phase 1 of the multiple-LinkedIn-UI support guide: the tripwires
+//
+// `docs/multiple-linkedin-dom-ui-support-guide.md` asks, before any layout work
+// begins, that what already works be *protected* — "create focused fixtures or
+// tests for the current layout so future UI support cannot silently break it".
+//
+// These eleven do exactly that and nothing else: no production line changed in
+// this phase. They are deliberately source-level, because the readers they
+// guard live in the DOM adapter where there is no jsdom to run them (CLAUDE.md,
+// "Things that will bite you"). Each one names the later phase it guards, so a
+// failure says which change broke which promise rather than only that something
+// moved.
+//
+// The two that matter most are #7 and #10/#11. A `.click()` COUNT cannot see a
+// click that moves house — the same seven calls redistributed across different
+// functions would pass every existing budget assertion while pressing something
+// new — so #7 pins the OWNER of each one. #10 and #11 are the schema and rule-19
+// tripwires for all twelve phases: they are what makes "the applicant record and
+// the CSV did not change" a fact rather than a claim.
+
+/** Every top-level function in the adapter, with where it starts. */
+function adapterFunctions(source) {
+  return [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
+    .map((match) => ({ name: match[1], at: match.index }));
+}
+
+/** Which of them encloses this offset — the nearest declaration above it. */
+function ownerOf(declarations, offset) {
+  let owner = "";
+  for (const declaration of declarations) {
+    if (declaration.at < offset) owner = declaration.name;
+    else break;
+  }
+  return owner;
+}
+
+test("Phase 1 tripwire: the panel is read in one fixed order, and qualifications still precede the header", async () => {
+  // Guards phases 3 and 4. The order is not cosmetic: `readQualifications` puts
+  // the platform's own explanation sentences into the accumulator, and those
+  // sentences are the arbiter `findApplicantName` corroborates the name against
+  // (see the comment above the call). A layout phase that reorders the readers
+  // for any reason must not move this pair.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const snapshot = source.slice(source.indexOf("function snapshotPanel"), source.indexOf("function nextRevealStep"));
+  assert.ok(snapshot.length > 200, "the snapshot function must be found, not an empty slice");
+
+  const order = ["job", "qualifications", "applicant header", "screening responses", "experience", "education", "skills", "contacts"];
+  let previous = -1;
+  for (const label of order) {
+    const at = snapshot.indexOf('attempt("' + label + '"');
+    assert.ok(at > previous, '"' + label + '" must be read, and in this order');
+    previous = at;
+  }
+  assert.ok(
+    snapshot.indexOf('attempt("qualifications"') < snapshot.indexOf('attempt("applicant header"'),
+    "qualifications must stay ahead of the header — they are what the name is corroborated against"
+  );
+});
+
+test("Phase 1 tripwire: the section table is the seven keys the readers consume", async () => {
+  // Guards phases 3, 5 and 6. Widening a WORDING is the whole point of the
+  // later phases; adding or losing a KEY is not, because every key drives
+  // `buildSectionMap`'s pass scheduling and `ownSectionLines`' cut.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const table = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("function sectionKeyFor"));
+  assert.ok(table.length > 200, "the section table must be found, not an empty slice");
+
+  const keys = [...table.matchAll(/key:\s*"([a-zA-Z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(keys, ["qualifications", "screening", "experience", "education", "skills", "about", "resume"],
+    "the seven section keys, in order — a wording may be widened, a key may not be lost");
+
+  // The count trimming is what lets "Experience (5)" and "Experience · 3 roles"
+  // still resolve. It was a live defect for four releases and must not be lost.
+  const normalizer = source.slice(source.indexOf("function sectionKeyFor"), source.indexOf("const HEADING_SELECTOR"));
+  for (const title of ["Experience · 3 roles", "Experience (5)", "Skills (12+)", "Experience 5", "Education:"]) {
+    assert.ok(normalizer.length > 100 && /replace/.test(normalizer),
+      "the section title normaliser must survive, for " + title);
+  }
+  assert.equal((normalizer.match(/\.replace\(/g) || []).length, 4,
+    "four trimmings: a middot list, a bracketed count, a bare count, and a trailing colon");
+});
+
+test("Phase 1 tripwire: the name is chosen from five sources in one fixed trust order", async () => {
+  // Guards phases 3 and 5. The order IS the policy — `chooseApplicantName`
+  // breaks ties by caller order, so a fallback appended in a later phase must
+  // go after these, never in front of them.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const chooser = source.slice(source.indexOf("function findApplicantName"), source.indexOf("function readApplicantHeader"));
+  assert.ok(chooser.length > 200, "the name reader must be found, not an empty slice");
+
+  let previous = -1;
+  for (const label of ["list-row", "profile-link", "portrait-alt", "panel-heading", "first-line"]) {
+    const at = chooser.indexOf('"' + label + '"');
+    assert.ok(at > previous, '"' + label + '" must be a candidate source, in trust order');
+    previous = at;
+  }
+  assert.match(chooser, /Applicants\.chooseApplicantName\(candidates, Applicants\.nameFromExplanations\(/,
+    "and the arbiter stays the platform's own explanation sentences");
+});
+
+test("Phase 1 tripwire: the header window starts at the applicant's own name and the profile link names them", async () => {
+  // Guards phases 3 and 5. All four of these were live defects. The ordering
+  // (name first, THEN the line window) is what put the header on the right
+  // person; the named-anchor preference is what stops two applicants hashing to
+  // one record, because `profileUrl` is an input to `applicantId`.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const header = source.slice(source.indexOf("function readApplicantHeader"), source.indexOf("function readQualifications"));
+  assert.ok(header.length > 400, "the header reader must be found, not an empty slice");
+
+  assert.ok(
+    header.indexOf("const chosen = findApplicantName(panel, accumulator)") < header.indexOf("const all = toLines(panel.innerText"),
+    "the name must be resolved BEFORE the lines are sliced — that ordering is the fix"
+  );
+  assert.match(header, /if \(lines\.length >= 12\) break;/, "the window stays bounded at twelve lines");
+  assert.match(header, /Applicants\.parseApplicantHeader\(\{ text: lines\.join/,
+    "and the window is handed to the pure parser as one joined string");
+  assert.match(header, /const named = wanted[\s\S]{0,400}?profileLinks\.find\(/,
+    "the profile link that NAMES the applicant is preferred over the first visible one");
+  assert.match(header, /const profileAnchor = named \|\| profileLinks\[0\] \|\| null;/,
+    "with the first visible one still the fallback, so this is never worse than before");
+});
+
+test("Phase 1 tripwire: every section reader is blocks-first with a text fallback that only runs when the markup gave none", async () => {
+  // Guards phases 3 and 6. The gate is the load-bearing half: a text fallback
+  // that ran unconditionally would re-read the same cards linearly and hand the
+  // parsers lines the block reader had already separated.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  for (const [reader, next, gate] of [
+    ["function readQualifications", "function readScreeningResponses", "if (added || blocks.length) return added;"],
+    ["function readScreeningResponses", "function readExperience", "if (added || blocks.length) return added;"],
+    ["function readExperience", "function readEducation", "if (parsed) return added;"],
+    ["function readEducation", "function readSkills", "if (parsed) return added;"]
+  ]) {
+    const slice = source.slice(source.indexOf(reader), source.indexOf(next));
+    assert.ok(slice.length > 200, reader + " must be found, not an empty slice");
+    assert.ok(slice.includes("blocksIn(section)"), reader + " reads the markup's own blocks first");
+    assert.ok(slice.includes(gate), reader + " runs its text fallback only when the markup offered nothing");
+    assert.ok(slice.includes("ownSectionLines(section)"), reader + " keeps a text fallback for a section with no blocks");
+  }
+
+  // Skills is the one written as a ternary rather than an early return; same
+  // rule, different shape, and it is pinned in its own shape so a later phase
+  // cannot quietly turn it into an unconditional text read.
+  const skills = source.slice(source.indexOf("function readSkills"), source.indexOf("function readRenderedContacts"));
+  assert.match(skills, /const values = blocks\.length[\s\S]{0,400}?: ownSectionLines\(section\);/,
+    "skills reads pill headings when there are blocks, and the section's own lines when there are not");
+});
+
+test("Phase 1 tripwire: phone is never taken from the rendered panel, and only one read is trusted", async () => {
+  // Guards phase 11. Rule 2, in its exact current shape: the ONE place the
+  // labelled-provenance requirement is lifted is inside the disclosure this
+  // extension opened itself, because that element is that person's own card by
+  // construction. Widening a contact SURFACE in a later phase must not widen
+  // this.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  assert.equal((source.match(/trusted: true/g) || []).length, 1,
+    "exactly one read may lift the provenance rule, and it is the disclosure we opened");
+  const declarations = adapterFunctions(source);
+  assert.equal(ownerOf(declarations, source.indexOf("trusted: true")), "openContactAndCollect",
+    "and that one read is inside the contact disclosure this extension opened itself");
+
+  const rendered = source.slice(source.indexOf("function readRenderedContacts"), source.indexOf("function findControl"));
+  assert.match(rendered, /allow: \["email"\]/,
+    "a contact rendered on the panel with no click behind it yields an address and never a number");
+  assert.ok(!/allow: \[[^\]]*phone/.test(source), "no reader may allow a phone off the click path");
+});
+
+test("Phase 1 tripwire: seven clicks, and each one is owned by a named function", async () => {
+  // Guards phases 9 and 11, and it is the assertion the existing budget checks
+  // cannot make. `.click()` counted seven times says nothing about WHERE the
+  // seven are: the same total redistributed — a second press inside the contact
+  // path, say, paid for by dropping the dismiss — passes every count in this
+  // file while pressing something the allowlist never sanctioned.
+  //
+  // So the owners are named. Six gated opens plus one shared dismiss, one each.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const owners = [
+    "closeOpenedOverlay",      // the dismiss, shared by every overlay we opened
+    "openContactAndCollect",   // the contact disclosure
+    "expandCollapsedSections", // a collapsed section's own expander
+    "clickResumeDownload",     // the resume viewer's own Download
+    "collectResume",           // the resume control
+    "selectApplicantRow",      // a row of the applicant list
+    "clickApplicantPager"      // the list's next-page control
+  ];
+
+  assert.equal((source.match(/\.click\(\)/g) || []).length, owners.length,
+    "the click budget is seven: six gated opens and one shared dismiss");
+
+  const declarations = adapterFunctions(source);
+  const found = [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(declarations, match.index));
+
+  assert.deepEqual([...found].sort(), [...owners].sort(),
+    "every click is owned by exactly one of the seven sanctioned functions — none may move house");
+});
+
+test("Phase 1 tripwire: the panel's column scrolls, the position is always restored, and only three functions move the list", async () => {
+  // Guards phase 7. Three separate promises, each one a live defect if broken:
+  // the column policy is asked first (rule 8), the scroll position is restored
+  // on the failure path too (rule 6), and the recruiter's own list must not move
+  // while the applicant's profile is being read (the guide's Phase 7).
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  const chooser = source.slice(source.indexOf("function chooseScrollTarget"), source.indexOf("function currentScrollTop"));
+  assert.ok(
+    chooser.indexOf("Applicants.chooseColumnScrollTarget") < chooser.indexOf("Connections.chooseScrollTarget"),
+    "the column policy is asked before the general chooser"
+  );
+
+  const scan = source.slice(source.indexOf("function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
+  assert.ok(scan.length > 400, "the panel scan must be found, not an empty slice");
+  assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/,
+    "the panel's position is restored in a finally, so a thrown read still leaves the page where it was");
+  assert.match(scan, /window\.scrollTo\(\{ top: originalWindowY/, "and so is the window's");
+
+  // Every place the LEFT list is scrolled. Two functions settle or grow the
+  // page's roster, plus the run's own restore. A profile read is not among them.
+  const declarations = adapterFunctions(source);
+  const listMovers = new Set();
+  const listScroll = /scrollPanelTo\([^;]*(?:chooseScrollTarget\((?:list|applicantList\(\)|paged|\(await waitForApplicantList)|listStartY)/g;
+  for (const match of source.matchAll(listScroll)) listMovers.add(ownerOf(declarations, match.index));
+  assert.deepEqual([...listMovers].sort(), ["extractAllApplicants", "growApplicantList", "sweepCurrentPage"],
+    "only the roster builders and the run's own restore may move the applicant list");
+});
+
+test("Phase 1 tripwire: a record may only be built from the applicant that was asked for, checked three times", async () => {
+  // Guards every phase. Before the scan, after it, and immediately before the
+  // record is built — the three moments LinkedIn can remount the panel under a
+  // read. Any later phase needing its own identity check must make it
+  // NON-THROWING rather than adding a fourth call, because the count is what
+  // proves no path was added that saves without checking.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("const VISIBLE_ONLY_OPTIONS"));
+  assert.ok(extract.length > 400, "the extraction must be found, not an empty slice");
+
+  assert.equal((extract.match(/assertExpectedApplicant\(expected\)/g) || []).length, 3,
+    "three checks: before the scan, after it, and before the record is built");
+  assert.match(extract, /assertExpectedApplicant\(expected\);\s*const record = Applicants\.buildApplicantRecord\(\{/,
+    "and the last one is the line before the record exists");
+
+  // Identity is read from LINKS, never from the address bar, which on this
+  // surface moves ahead of the render.
+  const identity = source.slice(source.indexOf("function panelOwnApplicationId"), source.indexOf("function panelMemberUrl"));
+  assert.ok(!/location\.href/.test(identity), "the address bar is never a fallback for who the panel is showing");
+});
+
+test("Phase 1 tripwire: the applicant record is exactly seventeen fields, and every layout must produce them", () => {
+  // Guards phases 2, 3 and 5, and it is the guide's "all layouts produce the
+  // same applicant schema" made mechanical. `normalizeApplicantRecord` DROPS any
+  // key not in its literal, so a reader that invents a field fails here rather
+  // than silently vanishing — and a reader that loses one fails here too.
+  const record = Applicants.normalizeApplicantRecord({});
+
+  assert.deepEqual(Object.keys(record.applicant), [
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt",
+    "contact", "resume", "experience", "education", "skills",
+    "screeningResponses", "qualifications", "applicationStatus"
+  ], "the applicant's own seventeen fields, in order");
+
+  assert.deepEqual(Object.keys(record), ["id", "applicationId", "job", "applicant", "extraction", "collectedAt", "updatedAt", "schemaVersion"]);
+  assert.deepEqual(Object.keys(record.job), [
+    "id", "title", "company", "location", "description", "applicantCount", "url",
+    "mustHaveQualifications", "preferredQualifications", "screeningQuestions"
+  ]);
+  assert.deepEqual(Object.keys(record.applicant.contact).sort(), ["email", "other", "phone", "website"]);
+  assert.deepEqual(Object.keys(record.applicant.resume), [
+    "available", "filename", "fileType", "pages", "url", "viewerUrl", "localReference", "downloadStatus"
+  ]);
+
+  // The scalar list is maintained by hand and is what `mergeApplicantRecord`
+  // walks — a new scalar missing from it is erased by the next thin re-read.
+  assert.deepEqual(Applicants.APPLICANT_SCALAR_FIELDS, [
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt", "applicationStatus"
+  ], "every scalar the merge must protect");
+});
+
+test("Phase 1 tripwire: the CSV is the same nine columns in the same order, whatever the layout", async () => {
+  // Guards every phase, and rule 19 outright: append columns, never reorder.
+  // Diagnostics, capture payloads, layout labels and confidence scores are all
+  // arriving in later phases and NONE of them may become a column.
+  const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } =
+    await import("../src/applicant-csv.js");
+
+  assert.deepEqual([...APPLICANT_TABLE_COLUMNS], [
+    "applicant_name", "email", "mobile", "resume_file",
+    "current_role", "current_company", "total_experience", "education"
+  ], "the eight table columns, in order");
+  assert.deepEqual(APPLICANT_CSV_COLUMNS.map((column) => column[0]), ["#", ...APPLICANT_TABLE_COLUMNS],
+    "and the CSV is those eight behind the row number");
+
+  // The header row as bytes, so a reorder cannot pass by renaming.
+  const csv = applicantsToCsv([]);
+  assert.equal(
+    csv.replace(/^﻿/, "").split("\r\n")[0],
+    '"#","applicant_name","email","mobile","resume_file","current_role","current_company","total_experience","education"',
+    "the exported header, verbatim"
+  );
+  assert.ok(csv.startsWith("﻿"), "and the BOM stays, so a spreadsheet reads it as UTF-8");
+});
