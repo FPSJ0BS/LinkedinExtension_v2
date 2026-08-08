@@ -921,23 +921,10 @@ test("the applicants adapter clicks only its gated controls", async () => {
   assert.match(source, /inContainer: container\.contains\(element\)/, "a control must be proven inside its container");
 });
 
-test("the applicants adapter stays framework-free and restores the page position", async () => {
+test("the applicants adapter stays framework-free and restores the scroll position", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.ok(!/\bReact\b/.test(withoutComments(source)), "no React in a content script");
-  // The PAGE is handed back on every path, including the failure one: that is
-  // "scrolling moves a column, never the recruiter's page".
-  //
-  // The COLUMN deliberately is not, and this assertion was the opposite until it
-  // was asked for outright: "scroll to bottom and without scrolling to top you
-  // can move to next profile." On a whole-job walk there is nowhere to hand the
-  // column back to — the next row is clicked immediately and LinkedIn rebuilds
-  // the column from scratch — so the restore's only visible effect was the
-  // profile jumping back to the top before moving on.
-  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("// ---------------------------------------------------------- extraction"));
-  assert.match(scan, /finally \{[\s\S]*?window\.scrollTo\(\{ top: originalWindowY/,
-    "the page must be handed back where it was, on every path");
-  assert.ok(!/scrollPanelTo\(originalY/.test(scan), "the column is left where the walk ended");
-  assert.ok(!/originalY = currentScrollTop/.test(scan), "so there is nothing left remembering where it started");
+  assert.match(source, /finally \{[\s\S]*?scrollPanelTo\(originalY, target\)/, "the panel must be handed back where it was");
   assert.match(source, /Applicants\.chooseColumnScrollTarget\?\.\(candidates\)/, "the column policy must pick the container");
   assert.match(source, /Connections\.chooseScrollTarget\(candidates\)/, "with the tested general chooser as the fallback");
   assert.match(source, /document\.scrollingElement/, "the document must always be offered as a candidate");
@@ -1030,66 +1017,17 @@ test("a scroll box inside the panel is offered as well as every ancestor", async
     "a descendant holds no ancestor, so it has to be told that it carries the content");
 });
 
-test("contact and resume are collected before the walk, and the walk ends at the bottom", async () => {
+test("the panel is walked to the bottom before any overlay is opened", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const extract = source.slice(source.indexOf("async function extractApplicant"));
-  const firstReadAt = extract.indexOf("snapshotPanel(panel, accumulator, diagnostics);");
+  const scanAt = extract.indexOf("await scanApplicantPanel(");
   const contactAt = extract.indexOf("await openContactAndCollect(");
   const resumeAt = extract.indexOf("await collectResume(");
-  const scanAt = extract.indexOf("await scanApplicantPanel(");
   const buildAt = extract.indexOf("const record = Applicants.buildApplicantRecord(");
-
-  // REQUESTED OUTRIGHT: "before scrolling profile save contact and resume and
-  // then scroll to bottom, and without scrolling to top you can move to next
-  // profile." This test asserted the opposite until that request, and is changed
-  // deliberately rather than worked around.
-  assert.ok(scanAt > 0, "the panel must still be scanned");
-  assert.ok(firstReadAt > 0 && firstReadAt < contactAt,
-    "the panel is READ where it arrived before anything is opened: that read is what settles the name");
-  assert.ok(contactAt > 0 && contactAt < scanAt, "the contact disclosure is collected before the walk");
-  assert.ok(resumeAt > contactAt && resumeAt < scanAt, "and so is the resume, so the walk is never re-run for it");
-  assert.ok(buildAt > scanAt, "the record is assembled only after everything has been read");
-
-  // The rule the old order existed for is KEPT, not dropped: a modal opened
-  // MID-scan stops the lazy walk dead. Both disclosures close before the walk
-  // begins, so none is.
-  const contactBody = source.slice(source.indexOf("async function openContactAndCollect"), source.indexOf("const MAX_EXPANSIONS"));
-  assert.match(contactBody, /diagnostics\.contact\.closed = await closeOpenedOverlay\(live\);/,
-    "the contact disclosure closes itself before the walk that follows it");
-  assert.match(source, /await dismissResumeViewer\(overlay, accumulator, diagnostics\);/,
-    "and so does the resume viewer, on every exit from the resume step");
-
-  // The name is the file name, and it is arbitrated against the qualification
-  // explanations — which render at the top of the panel, which is where the
-  // panel is sitting when the arrival read is taken. Collecting the resume with
-  // no read at all would save the file under the panel's first line, or nothing.
-  assert.ok(
-    extract.indexOf("const header = accumulator.snapshot().header;") > firstReadAt,
-    "the header is taken FROM that read, not from an unread panel"
-  );
-  assert.ok(
-    extract.indexOf("const header = accumulator.snapshot().header;") < resumeAt,
-    "and it is settled before the file is saved under it"
-  );
-
-  // THE ONE THING THE NEW ORDER CAN COST: a control that has not mounted yet
-  // reports as a control that does not exist — no email, no phone, no resume —
-  // and that is a field silently lost. A step that never found its control is
-  // asked once more where the old order asked.
-  assert.match(extract, /diagnostics\.contact\?\.reason === "no-contact-control"/,
-    "a contact control that had not mounted in time is asked for again after the walk");
-  assert.match(extract, /diagnostics\.resume\?\.reason === "no-resume-control"/,
-    "and so is a resume control");
-  const retryAt = extract.indexOf('diagnostics.contact?.reason === "no-contact-control"');
-  assert.ok(retryAt > scanAt, "the second ask happens after the walk, which is where the old order asked");
-  // It is not a general retry. `no-*-control` is precisely the outcome that
-  // reports NOTHING WAS CLICKED, so this cannot press either control twice.
-  const contactNotFound = source.slice(source.indexOf("async function openContactAndCollect"));
-  assert.match(contactNotFound, /if \(!control\) \{\s*\n\s*diagnostics\.contact\.reason = "no-contact-control";\s*\n\s*return 0;/,
-    "no-contact-control is reported before any click, so asking again cannot open it twice");
-  const resumeNotFound = source.slice(source.indexOf("async function collectResume"));
-  assert.match(resumeNotFound, /diagnostics\.resume\.reason = "no-resume-control";/,
-    "and no-resume-control likewise");
+  assert.ok(scanAt > 0, "the panel must be scanned");
+  assert.ok(contactAt > scanAt, "a modal opened mid-scan would stop the lazy walk dead");
+  assert.ok(resumeAt > contactAt, "and the resume comes after the contact disclosure");
+  assert.ok(buildAt > resumeAt, "the record is assembled only after everything has been read");
 
   // A failing section is a warning, not the end of the extraction.
   assert.match(source, /function attempt\(/, "each reader must be individually recoverable");

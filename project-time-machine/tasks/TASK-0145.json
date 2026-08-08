@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "TASK-0145",
+  "name": "Restore project to TASK-0140 (Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted)",
+  "request": "Restore project to TASK-0140 (Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted)",
+  "type": "restore",
+  "status": "completed",
+  "startedAt": "2026-08-08T08:49:29.074Z",
+  "completedAt": "2026-08-08T08:49:30.508Z",
+  "startCommit": "6af3d482cb86ad2f50cfaee9523f62985245dcd8",
+  "commit": null,
+  "gitRef": "task/TASK-0145",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-08T08-49-28-670Z created and verified"
+  ],
+  "result": "Restored project to the state after TASK-0140 — Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted",
+  "target": {
+    "taskId": "TASK-0140",
+    "taskName": "Applicant collector: the reveal guard may never stop the profile scroll, and a page's order is settled from the top before it is trusted",
+    "commit": "3e8bd80e7dcd922616ffdbe8ab17ccb78453d144"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-08T08-49-28-670Z",
+    "commit": "6af3d482cb86ad2f50cfaee9523f62985245dcd8"
+  }
+}
