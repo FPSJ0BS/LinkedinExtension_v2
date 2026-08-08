@@ -739,33 +739,20 @@
    * colon was enough to make the whole section invisible, silently: no heading
    * matched, no section existed, and every reader returned 0 without a warning.
    */
-  const SECTION_PATTERNS = [
-    // 3.7.7: the same widening, for the section the recruiter screen leads with.
-    // `Qualifications` is what LinkedIn labels the must-have / preferred verdict
-    // card, but plenty of accounts render only its two subheadings and never the
-    // word itself — see `QUALIFICATION_SUBHEADINGS` below, which is what stops
-    // that being an empty column rather than an absent section.
-    { key: "qualifications", pattern: /^(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?$/i },
-    { key: "screening", pattern: /^screening question(?: response)?s?$/i },
-    { key: "experience", pattern: /^(?:work |professional |employment |career )?experiences?$/i },
-    { key: "education", pattern: /^education(?:al background)?$/i },
-    { key: "skills", pattern: /^(?:top )?skills?(?: (?:&|and) endorsements)?$/i },
-    { key: "about", pattern: /^(?:about|summary)$/i },
-    { key: "resume", pattern: /^(?:resume|cv|curriculum vitae|attachments?)$/i }
-  ];
-
-  /** What a section title may carry after its name without ceasing to be one. */
-  function sectionKeyFor(text) {
-    const value = cleanText(text)
-      // "Experience · 3 roles" — a middot list of metadata after the name.
-      .replace(/\s*[·•|].*$/, "")
-      // "Experience (5)" and "Skills (12+)" — the count LinkedIn renders inline.
-      .replace(/\s*\(\s*\d+\+?\s*\)\s*$/, "")
-      // "Experience 5" — the same count with the brackets not rendered.
-      .replace(/\s+\d+\+?$/, "")
-      .replace(/\s*[:：]\s*$/, "");
-    return SECTION_PATTERNS.find((entry) => entry.pattern.test(value))?.key || "";
-  }
+  // The table itself lives in the pure core as of 3.9.0 — it is string → key
+  // policy with no DOM in it, and it was the most consequential untestable thing
+  // in the extension: a wording it does not recognise makes a whole section
+  // invisible and empties three columns without a warning. Aliased here under
+  // the same two names, so every pass below is unchanged: none of them spells a
+  // wording, they all ask this.
+  //
+  // `REQUIRED_SECTION_KEYS` is what schedules the passes — the keys a reader
+  // actually consumes — so a key added for diagnostics or for marking a boundary
+  // can never make the adapter run extra page-wide searches for a section
+  // nothing will read.
+  const SECTION_PATTERNS = Applicants.SECTION_PATTERNS;
+  const REQUIRED_SECTION_KEYS = Applicants.REQUIRED_SECTION_KEYS;
+  const sectionKeyFor = Applicants.sectionKeyFor;
 
   /** The elements a section title is allowed to be, stated once so it can be logged. */
   const HEADING_SELECTOR = "h1,h2,h3,h4,h5,h6,[role='heading'],[aria-level]";
@@ -1425,13 +1412,13 @@
   function buildSectionMap(panel, diagnostics = null) {
     const page = document.querySelector("main") || document.body;
     const map = collectSections(panel, {}, { source: "panel" });
-    if (Object.keys(map).length < SECTION_PATTERNS.length) {
+    if (REQUIRED_SECTION_KEYS.some((key) => !map[key])) {
       collectSections(page, map, { excludeList: true, source: "page" });
     }
     // Only now, for whatever neither pass produced: a section LinkedIn titled
     // with something that is not a heading element. Asked in the same order —
     // the panel, then the page — and held to the same refusals.
-    const missing = () => new Set(SECTION_PATTERNS.map((entry) => entry.key).filter((key) => !map[key]));
+    const missing = () => new Set(REQUIRED_SECTION_KEYS.filter((key) => !map[key]));
     let wanted = missing();
     if (wanted.size) {
       collectSections(panel, map, { source: "panel-label", headings: sectionLabelsIn(panel, wanted) });
@@ -2215,6 +2202,144 @@
     }
     const panelText = cleanText(panel.innerText || "").slice(0, 20000);
     return accumulator.addContactPanel(Core.parseContactPanel({ text: panelText, links, allow: ["email"] }));
+  }
+
+  /** Enough of the panel to find a label beside its value, and no more. */
+  const LABEL_SWEEP_LIMIT = 200;
+  /** A label is short. Anything longer is a sentence that happens to start like one. */
+  const LABEL_MAX_LENGTH = 40;
+
+  /**
+   * Values the page states under a label of its own.
+   *
+   * Three shapes, none of which is a class name and none of which is a position
+   * (rule 7):
+   *
+   *   `<dt>Current company</dt><dd>Acme</dd>`      — the markup says which is which
+   *   `<x aria-label="Current company">Acme</x>`   — the accessible name says it
+   *   `Current company: Acme` on one line          — the text itself says it
+   *   `Current company` then `Acme` as siblings    — the commonest rendering
+   *
+   * Bounded twice over: only elements whose own text is short enough to BE a
+   * label are measured, and the sweep stops after `LABEL_SWEEP_LIMIT` of them.
+   * `textContent` is read before `isVisible`, so a long node is rejected without
+   * ever being laid out — the same discipline `sectionLabelsIn` uses, and for
+   * the same reason: this runs inside a per-snapshot reader.
+   */
+  function labelledValuesIn(root) {
+    const found = new Map();
+    if (!root) return found;
+    const take = (label, value) => {
+      const field = Applicants.applicantFieldForLabel(label);
+      if (!field || found.has(field)) return;
+      const text = cleanText(value);
+      if (!text || text.length > 200) return;
+      found.set(field, text);
+    };
+
+    let measured = 0;
+    for (const element of root.querySelectorAll("dt,[aria-label],span,div,p,strong,b,label,th")) {
+      if (measured >= LABEL_SWEEP_LIMIT) break;
+      const raw = element.textContent || "";
+      const aria = element.getAttribute("aria-label") || "";
+      // A label is short. Everything else is refused before it costs a layout.
+      if ((!raw || raw.length > LABEL_MAX_LENGTH) && !aria) continue;
+      if (aria && aria.length > LABEL_MAX_LENGTH) continue;
+
+      // The accessible name naming the field, with the element's own text as
+      // the value. This is the one shape that needs no neighbour.
+      if (aria && Applicants.applicantFieldForLabel(aria)) {
+        if (!isVisible(element)) continue;
+        measured += 1;
+        take(aria, element.innerText || raw);
+        continue;
+      }
+
+      const own = cleanText(raw);
+      if (!own) continue;
+
+      // "Current company: Acme" — one line carrying both halves.
+      const inline = /^([^:：]{2,40})[:：]\s*(.+)$/.exec(own);
+      if (inline && Applicants.applicantFieldForLabel(inline[1])) {
+        if (!isVisible(element)) continue;
+        measured += 1;
+        take(inline[1], inline[2]);
+        continue;
+      }
+
+      if (!Applicants.applicantFieldForLabel(own)) continue;
+      if (!isVisible(element)) continue;
+      measured += 1;
+
+      // `<dt>` names its `<dd>`; anything else names whatever is rendered next
+      // to it. The value is the following sibling, or the parent's other half
+      // when the label is wrapped in its own box.
+      const sibling = element.nextElementSibling;
+      const uncle = element.parentElement?.nextElementSibling;
+      for (const candidate of [sibling, uncle]) {
+        if (!candidate || !isVisible(candidate)) continue;
+        const value = cleanText(candidate.innerText || candidate.textContent || "");
+        // A second label is not a value.
+        if (!value || Applicants.applicantFieldForLabel(value)) continue;
+        take(own, value);
+        break;
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The fields a page states outright instead of leaving to be derived.
+   *
+   * Runs LAST, after every other reader, and that ordering is the whole safety
+   * argument: `accumulator.addHeader` is first-wins per field, so this can fill
+   * a gap and can never overwrite anything an earlier reader found. On the
+   * layout that works today it finds nothing at all — that layout labels none of
+   * these — and costs one bounded sweep.
+   *
+   * What it is FOR: `currentRole`, `currentCompany` and `totalExperience` have
+   * no DOM reader anywhere in this file. They are derived from the Experience
+   * entries and from nothing else, which is why all three were empty for four
+   * consecutive releases whenever a heading wording changed. This is the
+   * guide's first link — "explicit current-role field" — and the derivation
+   * remains the last one, untouched.
+   */
+  function readLabelledFields(panel, accumulator, diagnostics = {}) {
+    const header = accumulator.snapshot().header;
+    const wanted = Applicants.APPLICANT_LABELLED_FIELDS.filter((field) => !cleanText(header[field]));
+    // Nothing to fill: skip the sweep entirely. This reader is called once per
+    // snapshot and there are dozens of snapshots per applicant.
+    if (!wanted.length) return 0;
+
+    const labelled = labelledValuesIn(panel);
+    if (!labelled.size) return 0;
+
+    const filled = {};
+    for (const field of wanted) {
+      const value = labelled.get(field);
+      if (!value) continue;
+      // The one field where a wrong value is silently plausible: it lands in a
+      // column of durations beside numbers this extension computed itself, and
+      // an explicit value OUTRANKS the computed one. So it has to look like a
+      // length of service, not merely sit under the right label.
+      if (field === "totalExperience" && !Applicants.looksLikeTotalExperience(value)) continue;
+      if (field === "location" && !Applicants.looksLikeApplicantLocation(value)) continue;
+      filled[field] = Applicants.resolveField(
+        [{ value, source: "panel-label", evidence: Applicants.FIELD_EVIDENCE.LABELLED }],
+        { accept: (text) => Boolean(text) }
+      );
+    }
+
+    const fields = Object.keys(filled);
+    if (!fields.length) return 0;
+    accumulator.addHeader(filled);
+    // Provenance is a diagnostic, never a column: `normalizeApplicantRecord`
+    // drops any key it does not name, and `addHeader` unwraps to the value.
+    diagnostics.readers = diagnostics.readers || {};
+    for (const field of fields) {
+      diagnostics.readers[field] = { source: filled[field].source, evidence: filled[field].evidence, confidence: filled[field].confidence };
+    }
+    return fields.length;
   }
 
   // ------------------------------------------------------------ gated clicks
@@ -3330,6 +3455,10 @@
     attempt("education", accumulator, () => readEducation(sections, accumulator));
     attempt("skills", accumulator, () => readSkills(sections, accumulator));
     attempt("contacts", accumulator, () => readRenderedContacts(panel, accumulator));
+    // Last, and last on purpose: `addHeader` is first-wins per field, so a
+    // reader that runs after every other one can fill a gap and can never
+    // overwrite anything. It is inert on the layout that works today.
+    attempt("labelled fields", accumulator, () => readLabelledFields(panel, accumulator, diagnostics));
     const after = accumulator.counts();
     diagnostics.totals = after;
     // Which sections this read could see at all. The cheap half of the section

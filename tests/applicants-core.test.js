@@ -2511,7 +2511,13 @@ test("a section outside the resolved panel is still the open applicant's", async
   // report.
   assert.match(map, /collectSections\(page, map, \{ excludeList: true, source: "page" \}\)/,
     "a section the panel did not hold must still be searched for");
-  assert.match(map, /Object\.keys\(map\)\.length < SECTION_PATTERNS\.length/, "and only when one is actually missing");
+  // ...and only when one is actually missing. 3.9.0 asks that of
+  // `REQUIRED_SECTION_KEYS` — the keys a READER consumes — rather than of the
+  // whole table, so a key added for diagnostics or for marking a boundary can
+  // never schedule an extra page-wide search for a section nothing will read.
+  assert.match(map, /if \(REQUIRED_SECTION_KEYS\.some\(\(key\) => !map\[key\]\)\)/, "and only when one is actually missing");
+  assert.match(map, /const missing = \(\) => new Set\(REQUIRED_SECTION_KEYS\.filter/,
+    "and the label passes are scheduled off the same list");
   assert.match(source, /const page = document\.querySelector\("main"\) \|\| document\.body/,
     "and the page-wide root is the page, never the applicant list");
 
@@ -2687,15 +2693,22 @@ test("a section title is still a section title with a count, a qualifier or a co
   // every row. All three are derived from the Experience section and nothing
   // else, so an empty column means no experience card was ever read — and
   // `^experiences?$` matched only when the account rendered that exact word.
-  const patterns = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("/** What a section title may carry"));
-  assert.match(patterns, /experiences\?\$/, "Experience is still matched");
-  assert.match(patterns, /work \|professional \|employment \|career/, "and so is the qualified wording");
-  assert.match(patterns, /\^education\(\?:al background\)\?\$/, "Education likewise");
+  //
+  // 3.9.0 moved the table into the pure core, so this is now asserted by CALLING
+  // it rather than by reading its source. That is strictly stronger: the old
+  // form proved a regex was present in a file, this proves the wordings resolve.
+  assert.equal(Applicants.sectionKeyFor("Experience"), "experience", "Experience is still matched");
+  for (const wording of ["Work experience", "Professional experience", "Employment experience", "Career experience"]) {
+    assert.equal(Applicants.sectionKeyFor(wording), "experience", `"${wording}" is the Experience section`);
+  }
+  assert.equal(Applicants.sectionKeyFor("Education"), "education", "Education likewise");
+  assert.equal(Applicants.sectionKeyFor("Educational background"), "education");
 
-  const keyFor = source.slice(source.indexOf("function sectionKeyFor"), source.indexOf("const HEADING_SELECTOR"));
-  assert.match(keyFor, /\\\(\\s\*\\d\+\\\+\?\\s\*\\\)/, "\"Experience (5)\" is the Experience section");
-  assert.match(keyFor, /\\s\+\\d\+\\\+\?\$/, "and so is \"Experience 5\"");
-  assert.match(keyFor, /\[:：\]/, "and \"Experience:\"");
+  assert.equal(Applicants.sectionKeyFor("Experience (5)"), "experience", '"Experience (5)" is the Experience section');
+  assert.equal(Applicants.sectionKeyFor("Skills (12+)"), "skills");
+  assert.equal(Applicants.sectionKeyFor("Experience 5"), "experience", 'and so is "Experience 5"');
+  assert.equal(Applicants.sectionKeyFor("Experience:"), "experience", 'and "Experience:"');
+  assert.equal(Applicants.sectionKeyFor("Experience · 3 roles"), "experience", "and a middot list of metadata after it");
 
   // A section LinkedIn did not mark up as a heading at all is the last resort,
   // asked only for what nothing else found — never a class name (rule 11).
@@ -2721,9 +2734,13 @@ test("the qualifications card is found even when only its subheadings name it", 
 
   // `Qualifications` is what LinkedIn labels the must-have / preferred verdict
   // card, and the pattern gets the same widening Experience got in 3.7.6.
-  const patterns = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("/** What a section title may carry"));
-  assert.match(patterns, /screening \|job \|candidate \|applicant/, "the qualified wordings must be matched");
-  assert.match(patterns, /qualifications\?\(\?: summary\| overview\| match\)\?\$/, "and a summary or a match suffix");
+  // Asserted by calling the table since 3.9.0 moved it into the core.
+  for (const wording of ["Screening qualifications", "Job qualifications", "Candidate qualifications", "Applicant qualifications"]) {
+    assert.equal(Applicants.sectionKeyFor(wording), "qualifications", `"${wording}" is the qualifications card`);
+  }
+  for (const wording of ["Qualifications summary", "Qualifications overview", "Qualifications match"]) {
+    assert.equal(Applicants.sectionKeyFor(wording), "qualifications", `"${wording}" too`);
+  }
 
   // The real gap: plenty of accounts render only `Must-have qualifications` and
   // `Preferred qualifications` and never the plain word, so no section key
@@ -4622,23 +4639,30 @@ test("Phase 1 tripwire: the section table is the seven keys the readers consume"
   // Guards phases 3, 5 and 6. Widening a WORDING is the whole point of the
   // later phases; adding or losing a KEY is not, because every key drives
   // `buildSectionMap`'s pass scheduling and `ownSectionLines`' cut.
-  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
-  const table = source.slice(source.indexOf("const SECTION_PATTERNS"), source.indexOf("function sectionKeyFor"));
-  assert.ok(table.length > 200, "the section table must be found, not an empty slice");
-
-  const keys = [...table.matchAll(/key:\s*"([a-zA-Z]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(keys, ["qualifications", "screening", "experience", "education", "skills", "about", "resume"],
+  //
+  // Phase 3 moved the table out of the adapter and into the core, so this
+  // follows it there and asserts the exported list rather than a source slice.
+  assert.deepEqual([...Applicants.SECTION_KEYS],
+    ["qualifications", "screening", "experience", "education", "skills", "about", "resume"],
     "the seven section keys, in order — a wording may be widened, a key may not be lost");
+  assert.deepEqual([...Applicants.REQUIRED_SECTION_KEYS], [...Applicants.SECTION_KEYS],
+    "and today every recognised key is one a reader consumes");
 
   // The count trimming is what lets "Experience (5)" and "Experience · 3 roles"
   // still resolve. It was a live defect for four releases and must not be lost.
-  const normalizer = source.slice(source.indexOf("function sectionKeyFor"), source.indexOf("const HEADING_SELECTOR"));
-  for (const title of ["Experience · 3 roles", "Experience (5)", "Skills (12+)", "Experience 5", "Education:"]) {
-    assert.ok(normalizer.length > 100 && /replace/.test(normalizer),
-      "the section title normaliser must survive, for " + title);
+  for (const [title, key] of [
+    ["Experience · 3 roles", "experience"], ["Experience (5)", "experience"],
+    ["Skills (12+)", "skills"], ["Experience 5", "experience"], ["Education:", "education"]
+  ]) {
+    assert.equal(Applicants.sectionKeyFor(title), key, `"${title}" still names its section`);
   }
-  assert.equal((normalizer.match(/\.replace\(/g) || []).length, 4,
-    "four trimmings: a middot list, a bracketed count, a bare count, and a trailing colon");
+
+  // And the adapter no longer carries a second copy — one table, one place to
+  // widen it, one place to test it.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  assert.ok(!/const SECTION_PATTERNS = \[/.test(source), "the adapter must not redeclare the table");
+  assert.match(source, /const SECTION_PATTERNS = Applicants\.SECTION_PATTERNS;/, "it aliases the core's");
+  assert.match(source, /const sectionKeyFor = Applicants\.sectionKeyFor;/, "and the core's lookup");
 });
 
 test("Phase 1 tripwire: the name is chosen from five sources in one fixed trust order", async () => {
@@ -5064,4 +5088,275 @@ test("Phase 2: the order the readers run in cannot change the record they produc
   assert.equal(record.applicant.contact.email, "nihal@example.com");
   assert.equal(record.applicant.education.length, 1);
   assert.equal(record.applicant.skills.length, 1);
+});
+
+// ------ Phase 3 of the multiple-LinkedIn-UI support guide: the seams
+//
+// "Keep the current selectors and add semantic fallbacks after them", with each
+// reader returning a value, its source and its confidence. Three additions, and
+// the important property of all three is that they are inert on the layout that
+// works today.
+
+test("Phase 3: the section table is now testable, which is the whole reason it moved", () => {
+  // It was the most consequential untestable thing in the extension: a heading
+  // wording the table does not recognise makes a section invisible, and
+  // `current_role`, `current_company` and `total_experience` are derived from
+  // one section and nothing else — so a wording nobody thought of emptied three
+  // columns at once, silently, for four consecutive releases.
+  //
+  // Every wording each of the seven patterns accepts, stated once.
+  const accepts = {
+    qualifications: ["Qualifications", "Qualification", "Screening qualifications", "Job qualifications",
+      "Candidate qualifications", "Applicant qualifications", "Qualifications summary", "Qualifications overview", "Qualifications match"],
+    screening: ["Screening questions", "Screening question", "Screening question responses", "Screening question response"],
+    experience: ["Experience", "Experiences", "Work experience", "Professional experience", "Employment experience", "Career experience"],
+    education: ["Education", "Educational background"],
+    skills: ["Skills", "Skill", "Top skills", "Skills & endorsements", "Skills and endorsements"],
+    about: ["About", "Summary"],
+    resume: ["Resume", "CV", "Curriculum vitae", "Attachments", "Attachment"]
+  };
+  for (const [key, wordings] of Object.entries(accepts)) {
+    for (const wording of wordings) {
+      assert.equal(Applicants.sectionKeyFor(wording), key, `"${wording}" names the ${key} section`);
+      // ...and so does every rendering of it LinkedIn adds metadata to.
+      assert.equal(Applicants.sectionKeyFor(`${wording} (5)`), key, `"${wording} (5)" too`);
+      assert.equal(Applicants.sectionKeyFor(`${wording}:`), key, `"${wording}:" too`);
+      assert.equal(Applicants.sectionKeyFor(`${wording} · 3 items`), key, `"${wording} · 3 items" too`);
+    }
+  }
+
+  // And what it must NOT match. A section key is what hands a reader a set of
+  // cards, so a wrong key hands one section's cards to another reader — the
+  // failure `narrowSharedSections` exists to prevent.
+  for (const line of [
+    "Legal Assistant", "Bhatia and Khatri Law Office • 2024-Present", "CHANDIGARH UNIVERSITY",
+    "Bachelor of Laws - LLB", "Experience Cloud Consultant", "Education First",
+    "Filter and sort", "Shortlist", "Move to", "Noida, Uttar Pradesh, India", "Applied 13mo ago"
+  ]) {
+    assert.equal(Applicants.sectionKeyFor(line), "", `"${line}" is content, not a section title`);
+  }
+  assert.equal(Applicants.sectionKeyFor(""), "");
+  assert.equal(Applicants.sectionKeyFor(null), "");
+
+  // The trimming is shared with `isSectionTitleLine`, which had its own
+  // identical copy and a comment saying it was "the same trimming sectionKeyFor
+  // applies on the page". Now it literally is.
+  assert.equal(Applicants.normalizeSectionTitle("Experience · 3 roles"), "Experience");
+  assert.equal(Applicants.normalizeSectionTitle("Skills (12+)"), "Skills");
+  assert.equal(Applicants.normalizeSectionTitle("Education:"), "Education");
+  assert.ok(Applicants.isSectionTitleLine("Experience (5)"), "and both sides of it agree");
+  assert.ok(!Applicants.isSectionTitleLine("Legal Assistant"));
+});
+
+test("Phase 3: a field is chosen by what kind of evidence it is, never by where it sat", () => {
+  const E = Applicants.FIELD_EVIDENCE;
+
+  // The tie-break is the CALLER'S order, which is what puts a fallback behind
+  // the working reader by construction.
+  const first = Applicants.resolveField([
+    { value: "Human Resource", source: "header-window", evidence: E.TEXT },
+    { value: "Talent Partner", source: "list-row", evidence: E.TEXT }
+  ]);
+  assert.equal(first.value, "Human Resource", "equal evidence is broken by the caller's preference order");
+  assert.equal(first.source, "header-window");
+
+  // Stronger evidence wins wherever it sits in that order — that is the point
+  // of the ladder. A label the page rendered outranks a line we found by
+  // position, and rule 7 is why: the position is what a redesign moves.
+  const stronger = Applicants.resolveField([
+    { value: "Human Resource", source: "header-window", evidence: E.TEXT },
+    { value: "Talent Partner", source: "panel-label", evidence: E.LABELLED }
+  ]);
+  assert.equal(stronger.value, "Talent Partner");
+  assert.equal(stronger.evidence, E.LABELLED);
+  assert.ok(stronger.confidence > first.confidence, "and it says so");
+
+  // Two different sources agreeing is corroboration in miniature.
+  const agreed = Applicants.resolveField([
+    { value: "Nihal Sharma", source: "list-row", evidence: E.TEXT },
+    { value: "Nihal Sharma", source: "portrait-alt", evidence: E.TEXT }
+  ]);
+  assert.equal(agreed.agreed, 1, "the second reading is counted");
+  assert.ok(agreed.confidence > first.confidence, "and the answer is held more firmly");
+
+  // A refusal is recorded rather than thrown away: "the panel showed it and we
+  // discarded it" is the one thing a diagnostics report cannot reconstruct.
+  const refused = Applicants.resolveField(
+    [{ value: "Filter and sort", source: "header-window" }, { value: "Noida, Delhi, India", source: "panel-label" }],
+    { accept: Applicants.looksLikeApplicantLocation }
+  );
+  assert.equal(refused.value, "Noida, Delhi, India");
+  assert.equal(refused.rejected.length, 1);
+  assert.equal(refused.rejected[0].value, "Filter and sort");
+
+  // Nothing acceptable is "", never the least-bad candidate (rule 1).
+  const nothing = Applicants.resolveField(
+    [{ value: "Filter and sort", source: "header-window" }],
+    { accept: Applicants.looksLikeApplicantLocation }
+  );
+  assert.equal(nothing.value, "", "a blank beats a wrong value");
+  assert.equal(nothing.confidence, 0);
+  assert.deepEqual(Applicants.resolveField([]).value, "");
+  assert.deepEqual(Applicants.resolveField(null).value, "");
+  assert.deepEqual(Applicants.resolveField(undefined).value, "");
+
+  // A confidence floor means the same thing: below it, the field stays empty.
+  const floored = Applicants.resolveField(
+    [{ value: "Human Resource", source: "header-window", evidence: E.TEXT }],
+    { minConfidence: 0.7 }
+  );
+  assert.equal(floored.value, "", "a value we do not hold firmly enough is not reported at all");
+});
+
+test("Phase 3: the name reader goes through the shared primitive and behaves exactly as it did", () => {
+  // `chooseApplicantName` is now `resolveField` with a normalizer and an accept
+  // rule. Name candidates carry no evidence, so every one lands on the same
+  // rung, the strongest-evidence step is a no-op, and the tie-break is caller
+  // order — which is first-wins, which is what it has always been.
+  const candidates = [
+    { value: "Applicants", source: "list-row" },
+    { value: "Nihal Sharma", source: "profile-link" },
+    { value: "Nihal Sharma", source: "portrait-alt" }
+  ];
+
+  const guessed = Applicants.chooseApplicantName(candidates, "");
+  assert.equal(guessed.name, "Nihal Sharma", "page chrome is refused and the first survivor wins");
+  assert.equal(guessed.source, "profile-link");
+  assert.equal(guessed.corroborated, false,
+    "two sources agreeing is not the platform agreeing — only the explanations set this");
+
+  // The platform's own prose still wins outright.
+  const corroborated = Applicants.chooseApplicantName(candidates, "Nihal Sharma");
+  assert.equal(corroborated.name, "Nihal Sharma");
+  assert.equal(corroborated.corroborated, true);
+  assert.equal(corroborated.source, "profile-link", "and it names the candidate it agreed with");
+
+  // A name the markup never offered is still taken from the prose.
+  const unmatched = Applicants.chooseApplicantName([{ value: "Applicants", source: "list-row" }], "Komal Sharma");
+  assert.equal(unmatched.name, "Komal Sharma");
+  assert.equal(unmatched.source, "explanations");
+  assert.equal(unmatched.corroborated, true);
+
+  // Nothing at all is "", not a guess.
+  const none = Applicants.chooseApplicantName([{ value: "Filter and sort", source: "list-row" }], "");
+  assert.deepEqual(none, { name: "", source: "", corroborated: false });
+
+  // The return shape is exactly three keys — no `evidence`, no `confidence`, no
+  // `rejected`. Nothing downstream has to learn a new shape.
+  assert.deepEqual(Object.keys(guessed).sort(), ["corroborated", "name", "source"]);
+});
+
+test("Phase 3: a reader result is unwrapped at the accumulator's door, so provenance cannot reach the record", () => {
+  // `cleanText` is `String(value ?? "")`, so a `{ value }` wrapper that leaked
+  // through would be stored as "[object Object]" — a garbage record rather than
+  // an empty one. `fieldValue` is why that cannot happen, and it is wired into
+  // `addHeader` and `addName` rather than left as a convention a reader can
+  // forget.
+  assert.equal(Applicants.fieldValue("Human Resource"), "Human Resource");
+  assert.equal(Applicants.fieldValue({ value: "Human Resource", source: "panel-label", confidence: 0.8 }), "Human Resource");
+  assert.equal(Applicants.fieldValue({ value: "" }), "");
+  assert.equal(Applicants.fieldValue(null), "");
+  assert.equal(Applicants.fieldValue(undefined), "");
+
+  const accumulator = Applicants.createApplicantAccumulator();
+  accumulator.addName({ value: "Nihal Sharma", source: "list-row" }, true);
+  accumulator.addHeader({
+    headline: { value: "Human Resource", source: "panel-label", evidence: "labelled", confidence: 0.8 },
+    location: "Noida, Uttar Pradesh, India"
+  });
+
+  const header = accumulator.snapshot().header;
+  assert.equal(header.name, "Nihal Sharma");
+  assert.equal(header.headline, "Human Resource", "a wrapper is unwrapped, never stringified");
+  assert.equal(header.location, "Noida, Uttar Pradesh, India", "and a plain string still works");
+
+  const record = Applicants.buildApplicantRecord({
+    snapshot: accumulator.snapshot(),
+    context: { jobId: "1", applicationId: "2" }
+  });
+  assert.equal(record.applicant.headline, "Human Resource");
+  assert.ok(!JSON.stringify(record).includes("panel-label"), "the source never reaches the record");
+  assert.ok(!JSON.stringify(record).includes("confidence"), "and neither does the confidence");
+  assert.ok(!JSON.stringify(record).includes("[object Object]"), "and nothing is stringified");
+});
+
+test("Phase 3: the three columns that have no reader can now be read from a label the page renders", () => {
+  // `currentRole`, `currentCompany` and `totalExperience` are derived from the
+  // Experience entries and from nothing else. The guide's chain starts with an
+  // "explicit current-role field", and this is the vocabulary for it.
+  for (const [label, field] of [
+    ["Current role", "currentRole"], ["Current title", "currentRole"], ["Current position", "currentRole"],
+    ["Current job title", "currentRole"], ["Current designation", "currentRole"],
+    ["Current company", "currentCompany"], ["Current employer", "currentCompany"], ["Current organisation", "currentCompany"],
+    ["Total experience", "totalExperience"], ["Years of experience", "totalExperience"], ["Total work experience", "totalExperience"],
+    ["Headline", "headline"], ["Location", "location"], ["Based in", "location"], ["Status", "applicationStatus"]
+  ]) {
+    assert.equal(Applicants.applicantFieldForLabel(label), field, `"${label}" names ${field}`);
+    assert.equal(Applicants.applicantFieldForLabel(`${label}:`), field, "and the rendering with a colon after it");
+  }
+
+  // Deliberately narrow. A loose list is how the Experience section HEADING
+  // becomes the experience FIELD, and a wrong value is worse than a blank one.
+  for (const line of [
+    "Experience", "Education", "Skills", "Company", "Role", "Applied", "Qualifications",
+    "Nihal Sharma", "Legal Assistant", "Noida, Uttar Pradesh, India", "Message", "Shortlist"
+  ]) {
+    assert.equal(Applicants.applicantFieldForLabel(line), "", `"${line}" is not a field label`);
+  }
+
+  // `totalExperience` is the one where a wrong value is silently plausible: it
+  // lands in a column of durations beside numbers this extension computed
+  // itself, and an explicit value OUTRANKS the computed one. So it is gated on
+  // looking like a length of service, not merely on sitting under the label.
+  for (const stated of ["6 years", "6 yrs", "6.5 years", "10+ years", "6 years 3 months", "1 year"]) {
+    assert.ok(Applicants.looksLikeTotalExperience(stated), `"${stated}" is a length of service`);
+  }
+  for (const other of [
+    "Senior Legal Counsel", "2019 - 2024", "Present", "Noida, Uttar Pradesh, India",
+    "", "yes", "several years", "3 roles", "a very long sentence that goes on and on about experience"
+  ]) {
+    assert.ok(!Applicants.looksLikeTotalExperience(other), `"${other}" is not`);
+  }
+});
+
+test("Phase 3: the labelled reader runs last, writes only through the accumulator, and is inert on today's layout", async () => {
+  // The safety argument for every fallback in this series, checked mechanically
+  // for the first one: it runs AFTER every reader it backs up, and it writes
+  // only through `addHeader`, which is first-wins per field. Those two facts
+  // together make it incapable of regressing the working layout whether or not
+  // its selectors are right.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const snapshot = source.slice(source.indexOf("function snapshotPanel"), source.indexOf("function nextRevealStep"));
+  assert.ok(snapshot.length > 200, "the snapshot function must be found, not an empty slice");
+
+  assert.ok(
+    snapshot.indexOf('attempt("labelled fields"') > snapshot.indexOf('attempt("contacts"'),
+    "the labelled reader runs after every other one"
+  );
+
+  // Ended on a declaration rather than on a banner comment: `withoutComments`
+  // has already removed every banner, and an `indexOf` of -1 silently slices to
+  // the end of the file, which would make every "must not contain" below vacuous.
+  const reader = source.slice(source.indexOf("function readLabelledFields"), source.indexOf("const OVERLAY = Core.CONTACT_OVERLAY"));
+  assert.ok(reader.length > 400 && reader.length < 8000, "the labelled reader must be found, and only it");
+  assert.match(reader, /accumulator\.addHeader\(filled\)/, "it writes through the merge-only header");
+  for (const forbidden of ["addExperience", "addEducation", "setResume", "addContactPanel", "addSkill"]) {
+    assert.ok(!reader.includes(forbidden), `it must not write through ${forbidden}`);
+  }
+  assert.match(reader, /if \(!wanted\.length\) return 0;/,
+    "and it skips the sweep entirely once the fields are filled — it runs once per snapshot, and there are dozens");
+
+  // Rule 7: resolved by rendered text and structure, never by a class name and
+  // never by an index into unknown markup.
+  const sweep = source.slice(source.indexOf("function labelledValuesIn"), source.indexOf("function readLabelledFields"));
+  assert.ok(sweep.length > 400, "the label sweep must be found, not an empty slice");
+  assert.ok(!/class\*?=/.test(sweep), "a label may never be identified by a generated class name");
+  assert.match(sweep, /if \(measured >= LABEL_SWEEP_LIMIT\) break;/, "the sweep is bounded");
+  assert.match(sweep, /raw\.length > LABEL_MAX_LENGTH/, "and text is measured before layout is");
+  assert.match(sweep, /if \(!value \|\| Applicants\.applicantFieldForLabel\(value\)\) continue;/,
+    "a second label is never taken as a value");
+
+  // Provenance goes to diagnostics and nowhere else.
+  assert.match(reader, /diagnostics\.readers/, "the source and confidence are reported");
+  assert.ok(!/record\.|buildApplicantRecord/.test(reader), "and never written into the record");
 });

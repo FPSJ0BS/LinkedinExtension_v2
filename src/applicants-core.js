@@ -601,6 +601,90 @@
 
   const PRESENT_PATTERN = /\b(?:present|current|now|till date|to date)\b/i;
   const VERIFIED_PATTERN = /\b(?:experience verified|verified)\b/i;
+
+  // ------------------------------------------------------- the section table
+  //
+  // Moved here from the DOM adapter in 3.9.0, byte for byte. It is pure
+  // string → key policy and it was the single most consequential untestable
+  // thing in the extension: `current_role`, `current_company` and
+  // `total_experience` came back empty on FOUR consecutive releases, every time
+  // because a heading the table did not recognise made the whole Experience
+  // section invisible — no heading matched, no section existed, every reader
+  // returned 0, and nothing warned. All three fields are derived from that one
+  // section and from nothing else.
+  //
+  // `diagnostics.sectionScan.headings[].key === ""` already names every wording
+  // that failed, on every live run. With the table here, acting on one of those
+  // reports is a three-line unit test instead of a live-only gamble — which is
+  // the whole of the guide's "add safe fallback readers for the new UI".
+  //
+  // The adapter keeps using it under the same two names, so `buildSectionMap`'s
+  // six passes are unchanged: they never spell a wording, they ask this.
+
+  /**
+   * The section names, and the wordings LinkedIn actually renders them in.
+   *
+   * Widened in 3.7.6 after `current_role`, `current_company` and
+   * `total_experience` came back empty on every row of a live run. The previous
+   * `^experiences?$` matched the section's title only when the account rendered
+   * it as that exact word, with nothing after it. A count (`Experience (5)`), a
+   * qualifier (`Work experience`) or a trailing colon was enough to make the
+   * whole section invisible, silently.
+   */
+  const SECTION_PATTERNS = Object.freeze([
+    // 3.7.7: the same widening, for the section the recruiter screen leads with.
+    // `Qualifications` is what LinkedIn labels the must-have / preferred verdict
+    // card, but plenty of accounts render only its two subheadings and never the
+    // word itself — which is what `collectQualificationSubsections` is for.
+    { key: "qualifications", pattern: /^(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?$/i },
+    { key: "screening", pattern: /^screening question(?: response)?s?$/i },
+    { key: "experience", pattern: /^(?:work |professional |employment |career )?experiences?$/i },
+    { key: "education", pattern: /^education(?:al background)?$/i },
+    { key: "skills", pattern: /^(?:top )?skills?(?: (?:&|and) endorsements)?$/i },
+    { key: "about", pattern: /^(?:about|summary)$/i },
+    { key: "resume", pattern: /^(?:resume|cv|curriculum vitae|attachments?)$/i }
+  ]);
+
+  /** Every key the table can produce. */
+  const SECTION_KEYS = Object.freeze(SECTION_PATTERNS.map((entry) => entry.key));
+
+  /**
+   * The keys a READER actually consumes.
+   *
+   * Identical to `SECTION_KEYS` today and deliberately a separate list. Every
+   * pass in `buildSectionMap` is scheduled off "which keys are still missing",
+   * so a key added for diagnostics or for boundary-marking alone — a top card, a
+   * contact block — would otherwise make the adapter run extra page-wide
+   * searches for a section no reader will ever read. This is the list that
+   * drives scheduling; `SECTION_KEYS` is the list that drives recognition.
+   */
+  const REQUIRED_SECTION_KEYS = Object.freeze([...SECTION_KEYS]);
+
+  /**
+   * What a section title may carry after its name without ceasing to be one.
+   *
+   * One copy, shared by the page-side key lookup and the line-side title test.
+   * It existed twice, identically, with a comment on the second saying it was
+   * "the same trimming `sectionKeyFor` applies on the page" — which is now true
+   * rather than aspirational.
+   */
+  function normalizeSectionTitle(text) {
+    return cleanText(text)
+      // "Experience · 3 roles" — a middot list of metadata after the name.
+      .replace(/\s*[·•|].*$/, "")
+      // "Experience (5)" and "Skills (12+)" — the count LinkedIn renders inline.
+      .replace(/\s*\(\s*\d+\+?\s*\)\s*$/, "")
+      // "Experience 5" — the same count with the brackets not rendered.
+      .replace(/\s+\d+\+?$/, "")
+      .replace(/\s*[:：]\s*$/, "");
+  }
+
+  /** Which section, if any, this heading names. */
+  function sectionKeyFor(text) {
+    const value = normalizeSectionTitle(text);
+    return SECTION_PATTERNS.find((entry) => entry.pattern.test(value))?.key || "";
+  }
+
   /**
    * Lines that are chrome rather than any field of a card.
    *
@@ -711,13 +795,10 @@
 
   /** Is this whole line the title of a section rather than content of one? */
   function isSectionTitleLine(text) {
-    const value = cleanText(text)
-      // The same trimming `sectionKeyFor` applies on the page: a title is still
-      // a title with a count, a middot list of metadata or a colon after it.
-      .replace(/\s*[·•|].*$/, "")
-      .replace(/\s*\(\s*\d+\+?\s*\)\s*$/, "")
-      .replace(/\s+\d+\+?$/, "")
-      .replace(/\s*[:：]\s*$/, "");
+    // The same trimming `sectionKeyFor` applies on the page, and now literally
+    // the same function: a title is still a title with a count, a middot list of
+    // metadata or a colon after it.
+    const value = normalizeSectionTitle(text);
     return Boolean(value) && SECTION_TITLE_NOISE_PATTERN.test(value);
   }
 
@@ -1125,6 +1206,145 @@
     return name.length >= 2 && isApplicantNameCandidate(text) ? text : "";
   }
 
+  // ------------------------------------------------ choosing between readers
+  //
+  // The guide's Phase 3 asks that each reader "return a value, its source and
+  // confidence". `chooseApplicantName` was already that shape for exactly one
+  // field, and generalising it is what lets a second layout add a *source*
+  // rather than a second copy of a reader.
+
+  /**
+   * How a value was learned.
+   *
+   * Every kind here is answerable from the ACT of reading — never from a class
+   * name and never from an index, which is what makes it survive a redesign
+   * (rule 7). It is a statement about the evidence, not about the markup.
+   */
+  const FIELD_EVIDENCE = Object.freeze({
+    /** Two independent readings agree, or the platform's own prose agrees. */
+    CORROBORATED: "corroborated",
+    /** An href — `mailto:`, `tel:`, `/in/`. The address IS the datum. */
+    LINK: "link",
+    /** An explicit Label → value pairing the page itself rendered. */
+    LABELLED: "labelled",
+    /** Read inside a container whose heading resolved to a section key. */
+    SECTION: "section",
+    /** The element was marked up as a heading. */
+    HEADING: "heading",
+    /** Computed from another accepted field. */
+    DERIVED: "derived",
+    /** A line of rendered text, in a position we expected it. */
+    TEXT: "text"
+  });
+
+  const EVIDENCE_CONFIDENCE = Object.freeze({
+    corroborated: 1, link: 0.9, labelled: 0.8, section: 0.65, heading: 0.5, derived: 0.4, text: 0.25
+  });
+
+  const EVIDENCE_ORDER = Object.freeze(["text", "derived", "heading", "section", "labelled", "link", "corroborated"]);
+
+  /** One step up the evidence ladder, never past corroborated. */
+  function strongerEvidence(evidence) {
+    const at = EVIDENCE_ORDER.indexOf(evidence);
+    return at < 0 ? FIELD_EVIDENCE.TEXT : EVIDENCE_ORDER[Math.min(at + 1, EVIDENCE_ORDER.length - 1)];
+  }
+
+  /**
+   * Choose one value for a field from everything that claims to be it.
+   *
+   * `candidates` are `{ value, source, evidence }` **in the caller's preference
+   * order**, and that order is the tie-break — so a fallback appended for a
+   * second layout sits behind the working reader by construction and can only
+   * win where the working reader found nothing or found something weaker.
+   *
+   * The arbitration, in order:
+   *   1. `normalize` and `accept` filter; every refusal is recorded, because
+   *      "the panel showed it and we threw it away" is the one thing a
+   *      diagnostics report cannot reconstruct afterwards.
+   *   2. A `corroboration` a survivor matches wins outright.
+   *   3. A `corroboration` nothing matches is used on its own — trust the
+   *      platform's own prose over something we guessed at.
+   *   4. Otherwise the strongest surviving evidence, ties broken by caller order.
+   *   5. Two survivors from DIFFERENT sources that normalize equal are
+   *      corroboration in miniature, and move one step up the ladder.
+   *   6. Below `minConfidence`, the answer is "" — rule 1, a blank beats a guess.
+   */
+  function resolveField(candidates = [], policy = {}) {
+    const normalize = typeof policy.normalize === "function" ? policy.normalize : cleanText;
+    const accept = typeof policy.accept === "function" ? policy.accept : (value) => Boolean(value);
+    const minConfidence = Number(policy.minConfidence) || 0;
+    const none = { value: "", source: "", evidence: "", confidence: 0, corroborated: false, agreed: 0, considered: 0, rejected: [] };
+
+    const list = Array.isArray(candidates) ? candidates : [];
+    const rejected = [];
+    const usable = [];
+    for (const entry of list) {
+      const value = normalize(entry?.value);
+      const evidence = EVIDENCE_ORDER.includes(entry?.evidence) ? entry.evidence : FIELD_EVIDENCE.TEXT;
+      if (!value) continue;
+      if (!accept(value, entry)) {
+        if (rejected.length < 8) rejected.push({ value, source: entry?.source || "", reason: "refused" });
+        continue;
+      }
+      usable.push({ value, source: entry?.source || "", evidence, order: usable.length + rejected.length });
+    }
+
+    const base = { considered: list.length, rejected };
+    const agreed = normalize(policy.corroboration || "");
+    if (agreed) {
+      const match = usable.find((entry) => entry.value.toLowerCase() === agreed.toLowerCase());
+      if (match) {
+        return { ...base, value: match.value, source: match.source, evidence: FIELD_EVIDENCE.CORROBORATED, confidence: 1, corroborated: true, agreed: 1 };
+      }
+      return {
+        ...base,
+        value: agreed,
+        source: policy.corroborationSource || "corroboration",
+        evidence: FIELD_EVIDENCE.CORROBORATED,
+        confidence: 1,
+        corroborated: true,
+        agreed: 0
+      };
+    }
+    if (!usable.length) return { ...none, ...base };
+
+    let best = usable[0];
+    for (const entry of usable) {
+      if (EVIDENCE_CONFIDENCE[entry.evidence] > EVIDENCE_CONFIDENCE[best.evidence]) best = entry;
+    }
+    const seconding = usable.filter(
+      (entry) => entry !== best && entry.source !== best.source && entry.value.toLowerCase() === best.value.toLowerCase()
+    );
+    const evidence = seconding.length ? strongerEvidence(best.evidence) : best.evidence;
+    const confidence = EVIDENCE_CONFIDENCE[evidence] || 0;
+    if (confidence < minConfidence) return { ...none, ...base };
+    return {
+      ...base,
+      value: best.value,
+      source: best.source,
+      evidence,
+      confidence,
+      corroborated: evidence === FIELD_EVIDENCE.CORROBORATED,
+      agreed: seconding.length
+    };
+  }
+
+  /**
+   * The plain string out of a reader result.
+   *
+   * Wired into `addHeader` and `addName` rather than left as a convention,
+   * because `cleanText({ value: "x" })` is `String(value ?? "")` and returns
+   * `"[object Object]"` — a leaked wrapper would produce a garbage record rather
+   * than an empty one. One unwrap, at the accumulator door. It is also why
+   * `source` and `confidence` can never reach the schema: nothing but the value
+   * gets past this line.
+   */
+  function fieldValue(result) {
+    if (result === null || result === undefined) return "";
+    if (typeof result === "object") return cleanText(result.value);
+    return cleanText(result);
+  }
+
   /**
    * Choose the applicant's name from everything that claims to be it.
    *
@@ -1134,22 +1354,20 @@
    * that survives `isApplicantNameCandidate` does. If nothing survives, the
    * corroborated name is used on its own — and if there is none of that either,
    * the answer is "" rather than a guess.
+   *
+   * Expressed through `resolveField` since 3.9.0 and unchanged by it: name
+   * candidates carry no `evidence`, so every one defaults to the same kind, the
+   * strongest-evidence step is a no-op, and the tie-break is caller order —
+   * which is exactly first-wins, which is what this has always been.
    */
   function chooseApplicantName(candidates = [], corroboration = "") {
-    const agreed = cleanApplicantName(corroboration);
-    const usable = (candidates || [])
-      .map((entry) => ({ ...entry, value: cleanApplicantName(entry?.value) }))
-      .filter((entry) => isApplicantNameCandidate(entry.value));
-
-    if (agreed) {
-      const match = usable.find((entry) => entry.value.toLowerCase() === agreed.toLowerCase());
-      if (match) return { name: match.value, source: match.source, corroborated: true };
-      // The explanations name somebody the markup did not offer. Trust the
-      // platform's own prose over a heading we guessed at.
-      return { name: agreed, source: "explanations", corroborated: true };
-    }
-    if (usable.length) return { name: usable[0].value, source: usable[0].source, corroborated: false };
-    return { name: "", source: "", corroborated: false };
+    const chosen = resolveField(candidates, {
+      normalize: cleanApplicantName,
+      accept: isApplicantNameCandidate,
+      corroboration,
+      corroborationSource: "explanations"
+    });
+    return { name: chosen.value, source: chosen.source, corroborated: chosen.corroborated };
   }
 
   /**
@@ -1191,6 +1409,67 @@
     if (NAME_CHROME_PATTERN.test(text) || NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
     if (APPLIED_PATTERN.test(text) || CONTACTED_PATTERN.test(text)) return false;
     return APPLICANT_LOCATION_PATTERN.test(text);
+  }
+
+  // -------------------------------------------- fields the page itself labels
+  //
+  // The guide's chain for the current role is "explicit current-role field →
+  // top-card headline → applicant summary → latest valid Experience title", and
+  // only the last link has ever existed. `currentRole`, `currentCompany` and
+  // `totalExperience` have no DOM reader at all: all three are derived from the
+  // Experience entries, so a layout that words the Experience heading
+  // differently empties three columns at once.
+  //
+  // A reader keyed on a rendered LABEL is the fallback that costs nothing and
+  // assumes nothing: it fires on any layout that renders the label and is
+  // completely inert on any layout that does not — including the one that works
+  // today, which labels none of these. That is the difference between a
+  // fallback and a rewrite.
+  //
+  // Deliberately narrow. A loose label list is how "Experience" the section
+  // heading becomes "experience" the labelled field, and a wrong value is worse
+  // than a blank one (rule 1).
+
+  const APPLICANT_FIELD_LABEL_PATTERNS = Object.freeze([
+    { field: "currentRole", pattern: /^current\s+(?:role|title|position|job\s*title|designation)$/i },
+    { field: "currentCompany", pattern: /^current\s+(?:company|employer|organisation|organization)$/i },
+    { field: "totalExperience", pattern: /^(?:total\s+(?:work\s+)?experience|years?\s+of\s+experience|work\s+experience\s*\(years\))$/i },
+    { field: "headline", pattern: /^(?:headline|professional\s+headline)$/i },
+    { field: "location", pattern: /^(?:location|based\s+in|city)$/i },
+    { field: "applicationStatus", pattern: /^(?:application\s+)?status$/i }
+  ]);
+
+  /** Every label the labelled reader answers to, for a caller that sweeps by name. */
+  const APPLICANT_LABELLED_FIELDS = Object.freeze(
+    APPLICANT_FIELD_LABEL_PATTERNS.map((entry) => entry.field).filter((field, index, all) => all.indexOf(field) === index)
+  );
+
+  /**
+   * Which record field, if any, this rendered label names.
+   *
+   * The label is normalised the way a section title is — a trailing colon is how
+   * a label is usually rendered — and anything else is "". Never a guess.
+   */
+  function applicantFieldForLabel(text) {
+    const value = normalizeSectionTitle(text);
+    if (!value) return "";
+    return APPLICANT_FIELD_LABEL_PATTERNS.find((entry) => entry.pattern.test(value))?.field || "";
+  }
+
+  /**
+   * A stated length of service, as a page that states one writes it.
+   *
+   * `totalExperience` is the one labelled field where a wrong value is silently
+   * plausible — it lands in a column of years beside numbers the extension
+   * computed itself — so it is gated on actually looking like a duration rather
+   * than merely sitting under the right label. `orNull(explicit) || derived`
+   * means a value accepted here OUTRANKS the computed one, so the gate is tight.
+   */
+  function looksLikeTotalExperience(value) {
+    const text = cleanText(value);
+    if (!text || text.length > 40) return false;
+    return /^\d{1,2}(?:\.\d)?\+?\s*(?:years?|yrs?)(?:\s+\d{1,2}\s*(?:months?|mos?))?$/i.test(text) ||
+      /^\d{1,2}\s*(?:years?|yrs?)\s+(?:and\s+)?\d{1,2}\s*(?:months?|mos?)$/i.test(text);
   }
 
   function parseApplicantHeader({ text = "" } = {}) {
@@ -1754,11 +2033,21 @@
       addJob(job) {
         state.job = mergeJob(state.job, job || {});
       },
+      /**
+       * The header, first-wins per field.
+       *
+       * A value may arrive either as a plain string or as a `resolveField`
+       * result, and `fieldValue` is what flattens the two — at this door rather
+       * than at each of the growing number of call sites, so a reader that
+       * forgets to unwrap produces a blank rather than `"[object Object]"`, and
+       * so `source`/`confidence` have no route into the record at all.
+       */
       addHeader(header) {
         for (const [key, value] of Object.entries(header || {})) {
           // `name` has its own rule — see `addName`.
           if (key === "name") continue;
-          if (cleanText(value) && !cleanText(state.header[key])) state.header[key] = cleanText(value);
+          const text = fieldValue(value);
+          if (text && !cleanText(state.header[key])) state.header[key] = text;
         }
       },
       /**
@@ -1773,7 +2062,7 @@
        * uncorroborated one, once, and nothing replaces a corroborated one.
        */
       addName(name, corroborated = false) {
-        const text = cleanText(name);
+        const text = fieldValue(name);
         if (!text) return "skipped";
         const existing = cleanText(state.header.name);
         if (existing && (state.header.nameCorroborated || !corroborated)) return "unchanged";
@@ -2602,10 +2891,16 @@
     // history
     splitCompanyAndDates, parseExperienceBlock, experienceKey, deriveCurrentPosition,
     normalizeDateRange, totalExperienceFrom, parseEducationBlock, educationKey,
+    // which section a heading names — the adapter's table, here so it is testable
+    SECTION_PATTERNS, SECTION_KEYS, REQUIRED_SECTION_KEYS, normalizeSectionTitle, sectionKeyFor,
     // telling the two apart when the markup does not
     SECTION_TITLE_NOISE_PATTERN, isSectionTitleLine,
     SPELLED_DEGREE_PATTERN, DEGREE_PATTERN, INSTITUTION_PATTERN,
     looksLikeEducationBlock, looksLikeEducationCandidate, looksLikeQuestionBlock,
+    // choosing between two readers that both claim to have found a field
+    FIELD_EVIDENCE, EVIDENCE_CONFIDENCE, resolveField, fieldValue,
+    // fields a page may state outright instead of leaving to be derived
+    APPLICANT_FIELD_LABEL_PATTERNS, APPLICANT_LABELLED_FIELDS, applicantFieldForLabel, looksLikeTotalExperience,
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,

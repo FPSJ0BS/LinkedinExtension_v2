@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0156",
+  "name": "Phase 3: semantic reader seams",
+  "request": "Phase 3: semantic reader seams",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:27:41.578Z",
+  "completedAt": "2026-08-08T11:28:26.064Z",
+  "startCommit": "bc41200093245fa14aa843bc6b222a0499636f45",
+  "gitRef": "task/TASK-0156",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 496 passed / 0 failed (was 490), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 3 of the multiple-LinkedIn-UI support guide: the three seams every later phase hangs off, all of them inert on the layout that works today. (A) SECTION_PATTERNS and sectionKeyFor moved into the pure core, byte for byte. They are string-to-key policy with no DOM in them and they were the most consequential untestable thing in the extension: a heading wording the table does not recognise makes a section invisible, and current_role, current_company and total_experience are derived from ONE section and nothing else - so an unrecognised wording emptied three columns at once, silently, for four consecutive releases. diagnostics.sectionScan.headings[].key === '' already names every wording that failed on every live run; with the table in the core, acting on such a report is a three-line unit test instead of a live-only gamble. The adapter aliases it under the same two names so buildSectionMap's six passes are unchanged - none of them ever spelled a wording, they all ask this. Three tests that read the table's SOURCE now CALL it instead, which is strictly stronger. Also introduced REQUIRED_SECTION_KEYS, the keys a READER consumes, and switched buildSectionMap's two pass gates to it: identical behaviour today, and a guarantee that a key added later for diagnostics or for marking a boundary can never schedule an extra page-wide search for a section nothing will read. normalizeSectionTitle is now shared with isSectionTitleLine, which carried an identical copy of the same four trimmings and a comment saying it was 'the same trimming sectionKeyFor applies on the page' - now literally true. (B) resolveField, the generalisation of chooseApplicantName: candidates are value/source/evidence in the caller's preference order, arbitrated by FIELD_EVIDENCE - corroborated, link, labelled, section, heading, derived, text - which is a statement about what kind of evidence a string IS, answerable from the act of reading and never from a class name or an index (rule 7). Caller order is the tie-break, so a fallback appended for another layout sits behind the working reader by construction. Two different sources agreeing moves one rung up the ladder; a refusal is recorded rather than discarded; below minConfidence the answer is empty (rule 1). chooseApplicantName is now expressed through it and is unchanged by it - name candidates carry no evidence, so the strongest-evidence step is a no-op and the tie-break is first-wins, which is what it has always been; the return shape is still exactly name/source/corroborated. fieldValue is wired into addHeader and addName rather than left as a convention, because cleanText is String(value ?? '') and a leaked wrapper would be stored as '[object Object]' - a garbage record rather than an empty one. That single unwrap is also why source and confidence have no route into the schema at all. (C) readLabelledFields, appended LAST in snapshotPanel. currentRole, currentCompany and totalExperience have no DOM reader anywhere in the file; this is the guide's first link, an explicit field, with the derivation still the last one and untouched. labelledValuesIn resolves four renderings - dt/dd, aria-label, 'Label: value' on one line, and a label beside its value as siblings - by text and structure only, bounded to 200 measured nodes, with textContent read before isVisible so a long node costs no layout. It writes only through addHeader, which is first-wins per field, so it can fill a gap and can never overwrite anything; it skips its sweep entirely once the fields are filled, because it runs once per snapshot and there are dozens per applicant. totalExperience is gated on looksLikeTotalExperience and location on looksLikeApplicantLocation, because an explicit value OUTRANKS the computed one. Provenance goes to diagnostics.readers and nowhere else. Process note: this phase's edits were begun before start-task.js was run, so they were checkpointed, stashed, and re-applied onto the task rather than being absorbed by the next one. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}
