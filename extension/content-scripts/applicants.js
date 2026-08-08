@@ -107,6 +107,15 @@
      * column could not say which one it was.
      */
     downloadedResumes: new Map(),
+    /**
+     * The hiring view's header bar, resolved once per run.
+     *
+     * It sits above both columns and does not change as the list is walked, so
+     * finding it per snapshot was a page-wide query for one unchanging answer —
+     * the same reason `applicantRows()` made its name a lazy getter. Dropped by
+     * `beginRun` and whenever the element leaves the document.
+     */
+    jobHeader: null,
     handler: null,
     urlTimer: null,
     visibilityHandler: null,
@@ -316,6 +325,10 @@
 
   function beginRun() {
     state.aborted = false;
+    // Resolved again for this run: the recruiter may have moved to another job
+    // since the last one, and a stale bar would title everybody with the job
+    // they are not applying to — worse than no title at all (rule 1).
+    state.jobHeader = null;
     clearHiddenLatchIfVisible();
     // A page-condition verdict is never carried across runs, for exactly the
     // reason `wentHidden` is re-derived above: the last run's evidence describes
@@ -1718,16 +1731,83 @@
     }
   }
 
+  /**
+   * The hiring view's own header bar, found by the tabs it renders.
+   *
+   * THE DEFECT (3.7.23), reported against a screenshot with the title circled:
+   * the job title was not being saved. `readJob` swept
+   * `header,[class*='topcard'],[class*='job-title'],h1`, dropped anything inside
+   * a `nav`, sorted what was left by text length and joined the four **shortest**
+   * — and the bar carrying the job title is a **tab bar**, so on markup that
+   * renders it as a `nav` (or inside one) `isExcludedContext` removed the one
+   * element that had the answer. The title then fell back to `document.title`
+   * minus "| LinkedIn", which on this view is the tab name rather than the job.
+   * Where the bar was not excluded, "the four shortest matching elements, joined"
+   * still let LinkedIn's own global header sort ahead of it and put a chrome
+   * word first. Neither failure says anything: `job.title` is simply wrong or
+   * null on every applicant of the run.
+   *
+   * So the bar is identified by what it renders instead of by where it sits: at
+   * least two of the view tabs, **and** a line that is not a tab, because the
+   * smallest element carrying the tabs is usually the tab list alone and holds
+   * no title at all. A `nav` is allowed here precisely because it was proven by
+   * its own content rather than guessed at — the same discipline rule 5 applies
+   * to a control, and rule 7's "resolve by visible text and structure".
+   *
+   * Walking **up from the tab controls** rather than scanning the document keeps
+   * this cheap: `textContent` on candidate controls forces no layout, and only
+   * the handful of ancestors above one of them are measured.
+   */
+  function findJobViewHeader() {
+    const tabs = [...document.querySelectorAll("a,button,[role='tab']")]
+      .filter((element) => Applicants.isJobViewTabLabel(cleanText(element.textContent)) && isVisible(element));
+    if (tabs.length < 2) return null;
+    const list = applicantList();
+    for (let node = tabs[0].parentElement; node && node !== document.body; node = node.parentElement) {
+      // A container that swallows the applicant list is the page, not the bar.
+      if (list && node.contains(list)) return null;
+      const text = cleanText(node.innerText || "");
+      if (text.length > 400) return null;
+      if (Applicants.countJobViewTabs(text) < 2) continue;
+      if (Applicants.jobTitleFromHeader(text)) return node;
+    }
+    return null;
+  }
+
+  /**
+   * The header bar, resolved once and reused.
+   *
+   * It sits above both columns and does not change as the list is walked, which
+   * is the same reason the run already reads the job once rather than per row —
+   * but `readJob` is also called from `snapshotPanel`, which runs on **every
+   * pass** of every applicant's scan, so resolving it there was a page-wide
+   * query plus an `innerText` per match, per pass. Cached on `state`, re-resolved
+   * only when the element has left the document, so a re-mount or a pager press
+   * is picked up without paying for it hundreds of times.
+   */
+  function jobViewHeader() {
+    const cached = state.jobHeader;
+    if (cached && cached.isConnected && isVisible(cached)) return cached;
+    state.jobHeader = findJobViewHeader();
+    return state.jobHeader;
+  }
+
   function readJob(accumulator) {
     // The job header sits above both columns, so it is read from the document
     // rather than from the applicant panel.
-    const header = [...document.querySelectorAll("header,[class*='topcard'],[class*='job-title'],h1")]
-      .filter((element) => isVisible(element) && !isExcludedContext(element))
-      .map((element) => cleanText(element.innerText || ""))
-      .filter(Boolean)
-      .sort((a, b) => a.length - b.length)
-      .slice(0, 4)
-      .join("\n");
+    const bar = jobViewHeader();
+    const header = bar
+      ? cleanText(bar.innerText || "")
+      // Only when the tabs are not on screen at all — a job view that renders no
+      // tab bar, or one whose labels this build does not know yet. The original
+      // sweep, unchanged, so a page that worked before still works.
+      : [...document.querySelectorAll("header,[class*='topcard'],[class*='job-title'],h1")]
+        .filter((element) => isVisible(element) && !isExcludedContext(element))
+        .map((element) => cleanText(element.innerText || ""))
+        .filter(Boolean)
+        .sort((a, b) => a.length - b.length)
+        .slice(0, 4)
+        .join("\n");
     const job = Applicants.parseJobHeader({ text: header, title: document.title, url: location.href });
 
     // The description lives on the job-details view rather than the applicants
@@ -5043,7 +5123,7 @@
     // a single extraction uses, so there is one rule for what a job header is,
     // and left null if it says nothing rather than assembled (rule 6).
     const jobAccumulator = Applicants.createApplicantAccumulator();
-    const listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
+    let listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
 
     state.run = Applicants.createRunState({
       state: Applicants.RUN_STATE.RUNNING,
@@ -5450,6 +5530,15 @@
       // below is what fills the other columns, but a panel that resolves no
       // name would otherwise leave the column the whole export is read by
       // empty while the row plainly rendered it.
+      // Read once and written to every applicant — but "once" has to mean "once
+      // it answered". The bar is above both columns and hydrates on its own
+      // schedule, so a run that starts before it has rendered would otherwise
+      // title the entire job `null`, which is the same missing column the
+      // screenshot was reporting. Retried only while there is no title, so the
+      // common case is one read for the whole run and this costs nothing.
+      if (!listJob?.title) {
+        listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator)) || listJob;
+      }
       const fromRow = Applicants.buildApplicantListRecord({
         name: row.name,
         href: row.href,

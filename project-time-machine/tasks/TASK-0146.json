@@ -1,0 +1,33 @@
+{
+  "schema": 2,
+  "id": "TASK-0146",
+  "name": "Job title is read from the hiring view header and reused for every applicant",
+  "request": "Job title is read from the hiring view header and reused for every applicant",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T08:55:20.707Z",
+  "completedAt": "2026-08-08T09:00:13.151Z",
+  "startCommit": "0ed9678733c143e91246e7f3f3b7eddd8970a367",
+  "gitRef": "task/TASK-0146",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed (31 files)",
+    "npm test passed (458 tests)",
+    "node scripts/validate-build.mjs passed"
+  ],
+  "result": "The job title on the hiring view is read from the header bar itself and reused for every applicant. Cause: the bar carrying the title is a TAB bar, and readJob's sweep dropped anything inside a nav via isExcludedContext, so the one element holding the answer was excluded and the title fell back to document.title minus '| LinkedIn' (the tab name, not the job); where it was not excluded, 'the four shortest matching elements, sorted and joined' let LinkedIn's own global header sort ahead of it. findJobViewHeader() now identifies the bar by what it renders - at least two distinct view tabs AND a line that is not a tab, since the smallest tab-bearing element is usually the tab list alone and carries no title - walking up from the tab controls so no page-wide query is needed. A nav is allowed there because the element is proven by its own content rather than guessed at (rules 5 and 7). JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs and jobTitleFromHeader move into the core so one rule both finds the bar and reads the title; parseJobHeader uses jobTitleFromHeader. The bar is cached on state.jobHeader and re-resolved only when it leaves the document, which also removes a page-wide query that ran on every pass of every applicant's scan via snapshotPanel; beginRun clears it so another job never inherits this one's title. The run-level read is retried only while it has no title, so a bar that had not hydrated when the run started no longer titles the whole job null. The original sweep is kept as the fallback. No control, click, permission, message or CSV column changed."
+}

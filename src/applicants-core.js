@@ -908,14 +908,55 @@
 
   const APPLICANT_COUNT_PATTERN = /applicants?\s*\((\d[\d,]*)\)/i;
 
+  /**
+   * The view tabs the hiring header renders beside the job title.
+   *
+   * Exported since 3.7.23 because the same list answers two questions that were
+   * being answered separately: which lines of the header are NOT the title, and
+   * — the new one — which element on the page even IS the header. The bar in the
+   * screenshot reads "Human resource recruiters · Hiring plan · Candidate search
+   * · Applicants (1,005) · Manage coworkers", so the tabs are what identify it,
+   * and identifying it by its own rendered text rather than by a class name or a
+   * position is what rule 7 asks for.
+   */
+  const JOB_VIEW_TAB_PATTERN =
+    /^(?:hiring plan|candidate search|applicants?|manage coworkers|job details?|settings|top fit|all applicants|rejected|shortlisted)\b/i;
+
+  function isJobViewTabLabel(text) {
+    const value = cleanText(text);
+    return Boolean(value) && value.length <= 60 && JOB_VIEW_TAB_PATTERN.test(value);
+  }
+
+  /** How many DISTINCT view tabs this block of text renders. */
+  function countJobViewTabs(text) {
+    const seen = new Set();
+    for (const line of toLines(text)) {
+      if (!isJobViewTabLabel(line)) continue;
+      // "Applicants (1,005)" and "Applicants (665)" are one tab, not two.
+      seen.add(cleanText(line).toLowerCase().replace(/\s*\(.*$/, ""));
+    }
+    return seen.size;
+  }
+
+  /**
+   * The job's own title, out of the header bar's text.
+   *
+   * One definition, used by `parseJobHeader` to read the title and by the
+   * content script to decide whether a candidate container even holds one —
+   * because the smallest element carrying the tabs is often the tab list alone,
+   * which renders every tab and no title at all.
+   */
+  function jobTitleFromHeader(text) {
+    return toLines(text).find((line) => line && !isJobViewTabLabel(line) && line.length <= 160) || "";
+  }
+
   function parseJobHeader({ text = "", title = "", url = "" } = {}) {
     const lines = toLines(text);
     const context = parseHiringContext(url);
     const countLine = lines.find((line) => APPLICANT_COUNT_PATTERN.test(line)) || cleanText(text);
     const countMatch = APPLICANT_COUNT_PATTERN.exec(countLine);
     // The heading is the first line that is not one of the view tabs.
-    const tab = /^(?:hiring plan|candidate search|applicants?|manage coworkers|job details?|settings)\b/i;
-    const heading = lines.find((line) => line && !tab.test(line) && line.length <= 160) || "";
+    const heading = jobTitleFromHeader(text);
 
     return {
       id: context.jobId,
@@ -2474,6 +2515,7 @@
     looksLikeEducationBlock, looksLikeEducationCandidate, looksLikeQuestionBlock,
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
+    JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,
     nameFromExplanations, chooseApplicantName,
     // the record

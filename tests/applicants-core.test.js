@@ -381,6 +381,69 @@ test("the job header reads the title and the applicant count off the screen", ()
   assert.equal(job.description, null);
 });
 
+test("the job title is the header bar's one line that is not a view tab", () => {
+  // The live bar, as it renders above both columns:
+  // "Human resource recruiters · Hiring plan · Candidate search ·
+  //  Applicants (1,005) · Manage coworkers".
+  const bar = ["Human resource recruiters", "Hiring plan", "Candidate search", "Applicants (1,005)", "Manage coworkers"];
+  assert.equal(Applicants.jobTitleFromHeader(bar.join("\n")), "Human resource recruiters");
+
+  // Two distinct tabs is what identifies the bar at all, and a count never
+  // makes one tab into two.
+  assert.equal(Applicants.countJobViewTabs(bar.join("\n")), 4);
+  assert.equal(Applicants.countJobViewTabs(["Applicants (1,005)", "Applicants (25)"].join("\n")), 1);
+  assert.ok(Applicants.countJobViewTabs("Human resource recruiters") < 2, "the title alone does not identify a bar");
+
+  // The tab LIST on its own renders every tab and no title, which is why
+  // "holds the tabs" is not enough to be the header.
+  const tabsOnly = ["Hiring plan", "Candidate search", "Applicants (1,005)", "Manage coworkers"].join("\n");
+  assert.ok(Applicants.countJobViewTabs(tabsOnly) >= 2);
+  assert.equal(Applicants.jobTitleFromHeader(tabsOnly), "", "and it carries no title to read");
+
+  // Individual labels, so the container walk can be built on the same rule.
+  assert.ok(Applicants.isJobViewTabLabel("Applicants (1,005)"));
+  assert.ok(Applicants.isJobViewTabLabel("Manage coworkers"));
+  assert.ok(!Applicants.isJobViewTabLabel("Human resource recruiters"));
+
+  // And the whole point: the title reaches the record.
+  const job = Applicants.parseJobHeader({ text: bar.join("\n"), title: "Top fit | LinkedIn", url: APPLICANTS_URL });
+  assert.equal(job.title, "Human resource recruiters");
+  assert.equal(job.applicantCount, 1005);
+});
+
+test("the job header is found by its own tabs, resolved once, and written to every applicant", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+
+  // THE DEFECT (3.7.23). The bar carrying the job title is a TAB bar, and the
+  // sweep dropped anything inside a `nav` — so on markup that renders it as one
+  // the single element holding the answer was excluded, and the title fell back
+  // to `document.title` minus "| LinkedIn", which on this view names the tab
+  // rather than the job. Where it was not excluded, "the four shortest matching
+  // elements, joined" still let LinkedIn's own global header sort ahead of it.
+  const find = source.slice(source.indexOf("function findJobViewHeader"), source.indexOf("function jobViewHeader"));
+  assert.match(find, /Applicants\.isJobViewTabLabel\(cleanText\(element\.textContent\)\)/,
+    "the bar is identified by the tabs it renders, never by a class name or a position (rule 7)");
+  assert.match(find, /if \(Applicants\.countJobViewTabs\(text\) < 2\) continue;/, "two tabs, so one stray label is not a bar");
+  assert.match(find, /if \(Applicants\.jobTitleFromHeader\(text\)\) return node;/,
+    "and it has to hold a line that is NOT a tab — the tab list alone holds no title");
+  assert.match(find, /if \(list && node\.contains\(list\)\) return null;/, "a container holding the applicant list is the page");
+  assert.ok(!/isExcludedContext/.test(find),
+    "a nav is allowed here because the element was proven by its own content rather than guessed at");
+
+  // Resolved ONCE. `readJob` is called from `snapshotPanel`, which runs on every
+  // pass of every applicant's scan, so a page-wide query there is paid hundreds
+  // of times for an answer that cannot change while the list is walked.
+  const cache = source.slice(source.indexOf("function jobViewHeader"), source.indexOf("function readJob"));
+  assert.match(cache, /if \(cached && cached\.isConnected && isVisible\(cached\)\) return cached;/,
+    "re-resolved only when the element has left the document");
+  assert.match(source, /state\.jobHeader = null;/, "and dropped by beginRun, so another job never inherits this one's title");
+
+  // Written to every applicant, and "once" means "once it answered".
+  assert.match(source, /if \(!listJob\?\.title\) \{\s*\n\s*listJob = attempt\("read job"/,
+    "a bar that had not hydrated when the run started must not title the whole job null");
+  assert.match(source, /job: listJob,/, "and the one job read is what every row carries");
+});
+
 test("the applicant header strips the badges and never reads the timeline as a status", () => {
   const header = Applicants.parseApplicantHeader({
     text: [
@@ -1553,11 +1616,25 @@ test("the list pass opens every applicant across every page and takes what the p
   assert.equal((source.match(/async function extractApplicant/g) || []).length, 1,
     "and there must be exactly one of it");
 
-  // The job header is read ONCE. It sits above both columns and does not change
-  // as the list is walked, so reading it per row would be hundreds of forced
-  // layouts for one unchanging answer.
-  assert.match(run, /const listJob = attempt\("read job", jobAccumulator/, "the job is read once per run");
-  assert.equal((run.match(/readJob\(jobAccumulator\)/g) || []).length, 1, "exactly once");
+  // The job header is read ONCE and reused. It sits above both columns and does
+  // not change as the list is walked, so reading it per row would be hundreds of
+  // forced layouts for one unchanging answer.
+  //
+  // 3.7.23 made "once" mean "once it ANSWERED": the bar hydrates on its own
+  // schedule, and a run that started before it rendered used to title the whole
+  // job `null`. The retry is gated on there being no title, so a run whose first
+  // read succeeded still reads exactly once — and `readJob` now works off a
+  // cached element, so even the retry is not a page-wide query.
+  assert.match(run, /let listJob = attempt\("read job", jobAccumulator/, "the job is read once per run");
+  assert.match(run, /if \(!listJob\?\.title\) \{/, "and re-read only while it has no answer to reuse");
+  assert.equal((run.match(/readJob\(jobAccumulator\)/g) || []).length, 2,
+    "the initial read and that one guarded retry — never a read per row");
+  // The only read inside the loop is the guarded one: every occurrence is
+  // preceded either by the `let` that opens the run or by the no-title gate.
+  for (const before of run.split(/readJob\(jobAccumulator\)/).slice(0, -1)) {
+    assert.match(before.slice(-160), /let listJob = attempt\("read job", jobAccumulator, \(\) => $|if \(!listJob\?\.title\) \{[\s\S]*$/,
+      "a read of the job header must be the opening one or the no-title retry");
+  }
 
   // Its own button, exactly as the connections surface has always had "Find All
   // Connections" beside "Start Profile Extraction".
