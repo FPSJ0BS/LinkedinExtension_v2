@@ -282,6 +282,88 @@ test("education keeps the degree, which the connections record deliberately drop
   assert.equal(record.degree, "Bachelor of Arts");
   assert.equal(record.field, "Psychology");
   assert.equal(record.dateRange, "2018-2021");
+
+  // 3.7.22: the degree and the years share ONE line at least as often as they
+  // get two — "Bachelor of Laws - LLB • 2021-2024" is what the live card
+  // renders. There was no line left over for the degree, so it came back
+  // `null` and the whole line was stored as the date range.
+  const welded = Applicants.parseEducationBlock(["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB • 2021-2024"]);
+  assert.equal(welded.institution, "CHANDIGARH UNIVERSITY");
+  assert.equal(welded.degree, "Bachelor of Laws - LLB");
+  assert.equal(welded.dateRange, "2021-2024");
+});
+
+test("an education card is never a job, a job is never a school, and a question is neither", () => {
+  // THE DEFECT, from one live run and reported with both halves of the record:
+  // Experience held the applicant's two jobs AND their two degrees, and
+  // Education held the same four, plus the screening question as a third job.
+  //
+  // Two causes, one on each side. Structurally, a resolved root spanned both
+  // sections and `blocksIn` handed the two readers the same cards. And neither
+  // parser refused anything: both are shape-only — first line, then the line
+  // with the dates — so two lines are two lines whatever they say.
+  const degree = ["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB • 2021-2024", "Education verified"];
+  const job = ["Legal Assistant", "Bhatia and Khatri Law Office • 2024-Present"];
+  const intern = ["Legal Intern", "Adv Sanjay Garg Law Office • 2022-2022"];
+  const question = ["We must fill this position urgently. Can you start immediately?", "Ideal answer: Yes", "Yes"];
+
+  assert.equal(Applicants.parseExperienceBlock(degree), null, "a degree at a university is not a job");
+  assert.equal(Applicants.parseEducationBlock(job), null, "a law office is not a school");
+  assert.equal(Applicants.parseEducationBlock(intern), null, "and neither is an internship with no education signal at all");
+  assert.equal(Applicants.parseExperienceBlock(question), null, "no role is phrased as a question");
+  assert.equal(Applicants.parseEducationBlock(question), null, "and no school is either");
+
+  // Neither refusal may cost a section its own cards.
+  const school = Applicants.parseEducationBlock(degree);
+  assert.equal(school.institution, "CHANDIGARH UNIVERSITY");
+  assert.equal(school.degree, "Bachelor of Laws - LLB");
+  // "Education verified" is a line LinkedIn renders under a verified school.
+  // EDUCATION_NOISE_PATTERN had four entries and did not know it, so it was
+  // stored as an institution of its own, while "Experience verified" — on the
+  // list the experience reader has used since 3.7.6 — was correctly discarded.
+  assert.ok(!/verified/i.test(school.institution), "a verification badge is not a second school");
+  assert.equal(Applicants.parseEducationBlock(["Education verified"]), null);
+
+  const role = Applicants.parseExperienceBlock(job);
+  assert.equal(role.title, "Legal Assistant");
+  assert.equal(role.company, "Bhatia and Khatri Law Office");
+  assert.equal(role.current, true);
+
+  // THE ASYMMETRY, and why the experience refusal is the stricter of the two.
+  // `deriveCurrentPosition` and `totalExperienceFrom` read the experience list
+  // and nothing else, so a job dropped here empties three exported columns —
+  // which makes a lost job as wrong as an invented one (rule 6). It therefore
+  // takes a spelled-out qualification, which no employer is named, or an
+  // institution corroborated by one. Working AT a university is still a job,
+  // and an abbreviation that is also a company name still cannot refuse it.
+  const professor = Applicants.parseExperienceBlock(["Assistant Professor", "Chandigarh University • 2020-Present"]);
+  assert.equal(professor.company, "Chandigarh University");
+  const aviation = Applicants.parseExperienceBlock(["Ground Engineer", "BBA Aviation • 2019-2023"]);
+  assert.equal(aviation.company, "BBA Aviation");
+});
+
+test("one list of section titles, so both readers know where a section ends", () => {
+  // The list lived on the experience reader and the education reader had four
+  // entries of its own, which is the whole of why the two behaved differently
+  // on identical input. It now names every section on the surface, because a
+  // root that spans one boundary routinely spans the next as well.
+  for (const title of [
+    "Experience", "Work experience", "Education", "Educational background", "Skills", "Top skills",
+    "Screening question responses", "Supplementary", "Qualifications", "Must-have qualifications",
+    "Preferred qualifications", "Resume", "Contact info", "About", "Experience verified",
+    "Education verified", "View full profile", "Show more",
+    // A title is still a title with a count, a middot list or a colon after it.
+    "Experience (5)", "Education:", "Skills · 12"
+  ]) {
+    assert.ok(Applicants.isSectionTitleLine(title), `"${title}" is a section title`);
+  }
+  // ...and content is not.
+  for (const line of [
+    "Legal Assistant", "Bhatia and Khatri Law Office • 2024-Present", "CHANDIGARH UNIVERSITY",
+    "Bachelor of Laws - LLB", "Experience Cloud Consultant", "Education First"
+  ]) {
+    assert.ok(!Applicants.isSectionTitleLine(line), `"${line}" is content, not a title`);
+  }
 });
 
 test("the job header reads the title and the applicant count off the screen", () => {
@@ -2182,8 +2264,10 @@ test("a section root has to carry the section, and a useless one never blocks a 
 
   // The sibling range holds the LIVE nodes; the wrapper is detached and must
   // never move them out of the page.
-  const siblings = source.slice(source.indexOf("function siblingSectionFor"), source.indexOf("function sectionRootFor"));
-  assert.match(siblings, /wrapper\.__pvSectionNodes = taken;/, "the real nodes are referenced, not copied");
+  // The construction moved into `rangeWrapper` in 3.7.22 so the shared-root
+  // narrowing could reuse it; the rule it encodes is unchanged.
+  const siblings = source.slice(source.indexOf("function rangeWrapper"), source.indexOf("function sectionBoundaries"));
+  assert.match(siblings, /wrapper\.__pvSectionNodes = nodes;/, "the real nodes are referenced, not copied");
   assert.ok(!/appendChild|append\(/.test(siblings), "appending would move the live nodes out of the page");
   assert.match(source, /const range = section\.element\.__pvSectionNodes;/, "and the block reader has to know about them");
 
@@ -2198,6 +2282,60 @@ test("a section root has to carry the section, and a useless one never blocks a 
     "and a useless candidate never replaces a useful one");
   assert.ok(!/if \(!heading\.key \|\| map\[heading\.key\]\) continue;/.test(map),
     "presence alone must not count as an answer");
+});
+
+test("no two sections are handed the same cards", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+
+  // THE DEFECT (3.7.22): one live applicant came back with their two jobs AND
+  // their two degrees under Experience, the same four under Education, and the
+  // screening question as a third job.
+  //
+  // `sectionRootFor` and `siblingSectionFor` are each bounded by the headings
+  // THEIR OWN PASS was given, which is not the same set as "the section titles
+  // on this page". A label pass never sees the real headings and a heading pass
+  // never sees the labels; worse, the label passes are asked only for the keys
+  // nothing else produced, so a pass looking for one missing section is handed
+  // one candidate, `others` is empty, the upward walk never breaks — and the
+  // root it returns is the whole detail column.
+  const boundaries = source.slice(source.indexOf("function sectionBoundaries"), source.indexOf("function ownSectionNodes"));
+  assert.match(boundaries, /const wanted = new Set\(SECTION_PATTERNS\.map\(\(entry\) => entry\.key\)\)/,
+    "the boundary set is every section, never only the ones a pass still wants");
+  assert.match(boundaries, /\[\.\.\.headingsIn\(root\), \.\.\.sectionLabelsIn\(root, wanted\)\]/,
+    "headings AND labels — a title found either way ends a section either way");
+
+  // The partition is a descent, because the two titles are routinely at
+  // different depths — which is precisely what a sibling walk cannot answer.
+  const own = source.slice(source.indexOf("function ownSectionNodes"), source.indexOf("function narrowSharedSections"));
+  assert.match(own, /const mixed = children\.find\(\(child\) => holdsOwn\(child\) && holdsForeign\(child\)\)/,
+    "a child holding both titles is descended into, not chosen");
+  assert.match(own, /if \(holdsForeign\(child\)\) break;/, "and the section ends at the next section's title");
+
+  // It may only ever take another section's cards away, never this section's
+  // own: a narrowed range that carries nothing is discarded, and the section is
+  // left exactly as the passes above resolved it.
+  const narrow = source.slice(source.indexOf("function narrowSharedSections"), source.indexOf("function sectionRootFor"));
+  assert.match(narrow, /if \(!foreign\.length\) continue;/, "a root holding no foreign title is untouched");
+  assert.match(narrow, /if \(!carriesSectionContent\(narrowed, \{ text: section\.heading, element: title \}\)\) continue;/,
+    "and a narrowed range that carries nothing is never taken");
+  assert.match(source, /narrowSharedSections\(map, sectionBoundaries\(\[panel, page\]\)\);/,
+    "run once the whole map exists, because only then is every boundary known");
+
+  // The other half: every reader falls back to reading the section's text
+  // LINEARLY when the markup offered no blocks, and a flat string has none of
+  // the structure the narrowing works on. That is where the screening question
+  // became a job title with the ideal answer beneath it as the employer.
+  const lines = source.slice(source.indexOf("function ownSectionLines"), source.indexOf("function categoryBefore"));
+  assert.match(lines, /return Boolean\(key\) && key !== section\.key;/,
+    "the cut is at a DIFFERENT section's title");
+  assert.ok(!/isSectionTitleLine/.test(lines),
+    "and at nothing else — cutting on any noise line would end the section at its first verified card");
+  for (const reader of ["readQualifications", "readScreeningResponses", "readExperience", "readEducation", "readSkills"]) {
+    const body = source.slice(source.indexOf(`function ${reader}(`), source.indexOf(`function ${reader}(`) + 2600);
+    assert.match(body, /ownSectionLines\(section\)/, `${reader}'s text fallback has to stop at the next section`);
+  }
+  assert.ok(!/for \(const line of toLines\(section\.element\.innerText \|\| ""\)\)/.test(source.slice(source.indexOf("function readQualifications"))),
+    "no reader may still walk the whole root's text");
 });
 
 test("every nested scroller is revealed, not only the one the walk chose", async () => {

@@ -1076,6 +1076,56 @@ pass refuses exactly that (a root swallowing a second section), so the widened s
 for the one section most often outside the panel. A tighter root is also more honest: the blocks read
 out of it can only be that section's.
 
+**But a root is only as bounded as the set it was bounded against, and no two sections may be handed
+the same cards** (3.7.22). Reported against one live applicant, with both halves pasted: Experience
+held their two jobs *and* their two degrees *and* the screening question, and Education held the same
+four plus a school called "Education verified". `sectionRootFor` and `siblingSectionFor` are each
+bounded by the headings **their own pass was given**, which is not the same set as "the section titles
+on this page" — a label pass never sees the real headings, a heading pass never sees the labels, and
+the label passes are asked only for the keys nothing else produced, so a pass looking for one missing
+section is handed **one** candidate: `others` is empty, the upward walk never breaks, and the root it
+returns is the whole detail column.
+
+- **`sectionBoundaries()` is the union** — panel and page, headings and labels, **every** key — taken
+  once, and used only to *bound* a root, never to collect one.
+- **`narrowSharedSections()` runs at the end of `buildSectionMap`**, because only then is every
+  boundary known: a section resolved by the panel pass can only be checked against a title the
+  page-label pass found afterwards. `ownSectionNodes()` is a **descent**, not a sibling walk, because
+  the two titles are routinely at different depths — a child holding both is descended into; otherwise
+  the section is the run of children from its own title to the first holding somebody else's. It
+  reuses `__pvSectionNodes`, which `blocksIn` and `carriesSectionContent` already understand.
+- **It may only ever take another section's cards away, never this section's own.** A root holding no
+  foreign title is untouched, and a narrowed range carrying nothing is discarded rather than kept, so
+  this can never be the reason a column comes back empty.
+- **`ownSectionLines()` is the other half**, because every reader falls back to walking the section's
+  text **linearly** when the markup offered no blocks, and a flat string has none of the structure the
+  narrowing operates on — that is where "Screening question responses" became a job title with the
+  question beneath it as the employer. It cuts at the first line naming a **different** section and at
+  nothing else: treating any noise line as a boundary would end Experience at its first
+  "Experience verified" card. All five text fallbacks use it.
+- `diagnostics.sectionScan.resolved[].narrowedFrom` names the root a section was cut back from.
+
+**And a card that is unmistakably the other section's is refused, asymmetrically** (3.7.22). Both
+parsers are **shape-only** — first line, then the line carrying the dates — so two lines are two lines
+whatever they say, which is how "CHANDIGARH UNIVERSITY / Bachelor of Laws - LLB · 2021-2024" became a
+job and "Legal Assistant / Bhatia and Khatri Law Office · 2024-Present" became a school. The two
+refusals are deliberately not symmetric: `deriveCurrentPosition` and `totalExperienceFrom` read the
+experience list and **nothing else**, so a job dropped there empties three exported columns, which
+makes a *lost* job as wrong as an invented one (rule 6 cuts both ways). So `looksLikeEducationBlock`
+takes either a **spelled-out** qualification, which no employer is named, or an institution on the
+first line *corroborated* by a qualification anywhere in the card — `Assistant Professor / Chandigarh
+University` is still a job, and so is `Ground Engineer / BBA Aviation`, because an abbreviation that
+is also a company name may never refuse one on its own. `looksLikeEducationCandidate` is looser
+because education is a list rather than the source of a derived column. `looksLikeQuestionBlock`
+refuses both: no role and no school is phrased as a question. **One list of section titles**
+(`SECTION_TITLE_NOISE_PATTERN`, `isSectionTitleLine`) replaces the experience reader's list and the
+education reader's four entries — the whole of why the two behaved differently on identical input.
+
+**A degree and its years share one line as often as they get two** (3.7.22). `Bachelor of Laws - LLB •
+2021-2024` left no line over for the degree, so it was stored as `null` and the whole line became the
+`dateRange`. The same collapsed-metadata problem the experience card has, answered by the same tested
+`splitCompanyAndDates`, and only when nothing else offered a degree.
+
 **A section whose blocks parsed to nothing must still be read.** `readExperience` and `readEducation`
 returned 0 whenever the markup offered list items that yielded no record, never reaching the text
 fallback; they now fall through on `added === 0`. The accumulator is keyed, so a card reached both

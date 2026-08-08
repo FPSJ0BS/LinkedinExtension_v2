@@ -610,8 +610,116 @@
    * job title with the school beneath it as the employer. A wrong entry is worse
    * than an empty one (rule 6).
    */
-  const EXPERIENCE_NOISE_PATTERN =
-    /^(?:experiences?|work experience|education(?:al background)?|skills?|top skills|about|summary|licenses? (?:&|and) certifications?|projects?|languages?|recommendations?|interests?|view full profile|see full profile|show (?:more|less|all)|see (?:more|less)|experience verified|verified)$/i;
+  /**
+   * A line that names a SECTION rather than any field of a card.
+   *
+   * One list for both readers since 3.7.22, because the failure it answers is
+   * symmetrical and it was only ever half-answered. `EXPERIENCE_NOISE_PATTERN`
+   * carried this list; `EDUCATION_NOISE_PATTERN` carried four entries. So a root
+   * spanning both sections discarded "Experience verified" on the way into the
+   * experience list and stored "Education verified" as an **institution** — which
+   * is verbatim what a live record showed. It also never knew the titles of the
+   * sections that follow, so "Screening question responses" and "Supplementary"
+   * became job titles with the question beneath them as the employer.
+   *
+   * Deliberately the section titles of *every* section on this surface, not only
+   * the two: a root that spans one boundary routinely spans the next as well.
+   */
+  const SECTION_TITLE_NOISE_PATTERN =
+    /^(?:(?:work |professional |employment |career )?experiences?|education(?:al background)?|(?:top )?skills?(?: (?:&|and) endorsements)?|about|summary|licenses? (?:&|and) certifications?|projects?|languages?|recommendations?|interests?|(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?|must[-\s]?haves?(?: qualifications?)?|preferred(?: qualifications?)?|nice[-\s]to[-\s]haves?|screening question(?: response)?s?|supplementary|required|resume|résumé|cv|curriculum vitae|attachments?|contact info(?:rmation)?|view full profile|see full profile|show (?:more|less|all)|see (?:more|less)|(?:experience|education|skill) verified|verified)$/i;
+
+  const EXPERIENCE_NOISE_PATTERN = SECTION_TITLE_NOISE_PATTERN;
+
+  /**
+   * A qualification, spelled out — the half of the education signal that can
+   * never be an employer.
+   *
+   * Anchored on the words rather than on three-letter forms on purpose: no
+   * company is called "Bachelor of Laws", while `BBA Aviation` and `MBA Group`
+   * are real employers, so an abbreviation alone may never refuse an experience
+   * card (rule 6 cuts both ways — a *lost* job is as wrong as an invented one).
+   */
+  const SPELLED_DEGREE_PATTERN =
+    /(?:^|[\s(,\-–—•·|/])(?:bachelor|master)(?:'|’)?s?(?:\s+(?:of|degree|in)\b|\s*$)|(?:^|[\s(,\-–—•·|/])doctor(?:ate|al)\b|^(?:diploma|certificate|associate(?:'|’)?s? degree|higher secondary|secondary school|high school|intermediate|post ?graduate|under ?graduate)\b/i;
+
+  /** Any qualification, abbreviations included — corroboration, never proof. */
+  const DEGREE_PATTERN = new RegExp(
+    `${SPELLED_DEGREE_PATTERN.source}|(?:^|[\\s(,\\-–—•·|/])(?:b\\.?tech|m\\.?tech|b\\.?sc|m\\.?sc|b\\.?com|m\\.?com|b\\.?ed|m\\.?ed|b\\.?arch|b\\.?pharm|m\\.?pharm|bba|mba|bca|mca|llb|llm|mbbs|bds|ph\\.?d|m\\.?phil)(?:$|[\\s).,\\-–—•·|/])`,
+    "i"
+  );
+
+  /** A place people study at. */
+  const INSTITUTION_PATTERN =
+    /\b(?:university|universit(?:e|é|y|à|ä)t|universidad|université|college|institute|institution|school|academy|polytechnic|vidyalaya|vidyapeeth|vishwavidyalaya|mahavidyalaya|gurukul|seminary|conservatory|iit|iim|iiit|nit|bits|aiims|campus|faculty)\b/i;
+
+  /**
+   * Does this card carry an education signal at all?
+   *
+   * The two readers are handed the same blocks whenever a resolved root spans
+   * both sections, and neither parser refused anything before 3.7.22 — both are
+   * shape-only, so `parseExperienceBlock` turned "CHANDIGARH UNIVERSITY /
+   * Bachelor of Laws - LLB · 2021-2024" into a job at a degree, and
+   * `parseEducationBlock` turned "Legal Assistant / Bhatia and Khatri Law
+   * Office · 2024-Present" into a school called Legal Assistant. Both were
+   * saved, on the same applicant, from one live run.
+   */
+  function educationSignalIn(lines = []) {
+    const list = (Array.isArray(lines) ? lines : toLines(lines)).map((line) => cleanText(line)).filter(Boolean);
+    if (!list.length) return { institution: false, degree: false, spelledDegree: false };
+    return {
+      institution: INSTITUTION_PATTERN.test(list[0]),
+      degree: list.some((line) => DEGREE_PATTERN.test(line)),
+      spelledDegree: list.some((line) => SPELLED_DEGREE_PATTERN.test(line))
+    };
+  }
+
+  /**
+   * Is this unmistakably an education card, and therefore never a job?
+   *
+   * Asymmetric on purpose. Refusing a real job is worse here than letting an
+   * odd school through, because `deriveCurrentPosition` and
+   * `totalExperienceFrom` read nothing but this list — so it takes either a
+   * spelled-out qualification, which no employer is named, or an institution on
+   * the first line *corroborated* by a qualification anywhere in the card.
+   */
+  function looksLikeEducationBlock(lines = []) {
+    const signal = educationSignalIn(lines);
+    return signal.spelledDegree || (signal.institution && signal.degree);
+  }
+
+  /**
+   * A screening question is not a card of anybody's history.
+   *
+   * The screening section sits between Experience and Education on this
+   * surface, so a root spanning one boundary routinely spans the other, and
+   * "We must fill this position urgently. Can you start immediately?" was
+   * stored as a job title with the ideal answer beneath it. No role and no
+   * school is phrased as a question, so the mark is enough on its own — and it
+   * is checked here as well as at the section boundary because the boundary is
+   * markup and this is not.
+   */
+  function looksLikeQuestionBlock(lines = []) {
+    const list = (Array.isArray(lines) ? lines : toLines(lines)).map((line) => cleanText(line)).filter(Boolean);
+    return Boolean(list.length) && /\?$/.test(list[0]);
+  }
+
+  /** Is this a card an education section could plausibly have rendered? */
+  function looksLikeEducationCandidate(lines = []) {
+    const signal = educationSignalIn(lines);
+    return signal.institution || signal.degree;
+  }
+
+  /** Is this whole line the title of a section rather than content of one? */
+  function isSectionTitleLine(text) {
+    const value = cleanText(text)
+      // The same trimming `sectionKeyFor` applies on the page: a title is still
+      // a title with a count, a middot list of metadata or a colon after it.
+      .replace(/\s*[·•|].*$/, "")
+      .replace(/\s*\(\s*\d+\+?\s*\)\s*$/, "")
+      .replace(/\s+\d+\+?$/, "")
+      .replace(/\s*[:：]\s*$/, "");
+    return Boolean(value) && SECTION_TITLE_NOISE_PATTERN.test(value);
+  }
 
   /** Split "Naad Wellness • 2026-Present" into its two halves. */
   function splitCompanyAndDates(line) {
@@ -646,6 +754,10 @@
       .filter(Boolean);
     const meaningful = cleaned.filter((line) => !EXPERIENCE_NOISE_PATTERN.test(line));
     if (!meaningful.length) return null;
+    // An education card is not a job, however job-shaped its two lines are.
+    // The structural fix keeps the sections apart; this is what holds when the
+    // markup offers no boundary to keep them apart *by*.
+    if (looksLikeEducationBlock(meaningful) || looksLikeQuestionBlock(meaningful)) return null;
 
     const core = CORE();
     const title = core?.sanitizeRoleTitle ? core.sanitizeRoleTitle(meaningful[0]) || meaningful[0] : meaningful[0];
@@ -731,26 +843,51 @@
   // Stored in full here, unlike the connections record: a recruiter comparing
   // applicants needs the degree, not only the school.
 
-  const EDUCATION_NOISE_PATTERN =
-    /^(?:education|show more|show less|see more|see less|view full profile)$/i;
+  // The same list the experience reader uses, and for the same reason. It had
+  // four entries, which is why "Education verified" — a line LinkedIn renders
+  // under a verified school — was stored as an institution of its own while the
+  // experience side correctly discarded "Experience verified".
+  const EDUCATION_NOISE_PATTERN = SECTION_TITLE_NOISE_PATTERN;
 
   function parseEducationBlock(lines = []) {
     const cleaned = (Array.isArray(lines) ? lines : toLines(lines))
       .map((line) => cleanText(line))
       .filter((line) => line && !EDUCATION_NOISE_PATTERN.test(line));
     if (!cleaned.length) return null;
+    // A card naming neither a place of study nor a qualification is not one.
+    // Looser than the experience refusal above because it is the safer side:
+    // education is a list, not the source of a derived column, so an entry
+    // missed here costs one line and an entry invented here is a job title
+    // filed as a school — which is exactly what a live record showed.
+    if (!looksLikeEducationCandidate(cleaned) || looksLikeQuestionBlock(cleaned)) return null;
 
     const institution = cleaned[0];
     const rest = cleaned.slice(1);
     const dateLine = rest.find((line) => DATE_RANGE_PATTERN.test(line)) || "";
-    const degreeLine = rest.find((line) => line !== dateLine) || "";
+    let degreeLine = rest.find((line) => line !== dateLine) || "";
+    let dateRange = dateLine ? cleanText(dateLine.replace(/^[^0-9a-z]*/i, "")) : "";
+
+    // The degree and the years arrive on ONE line at least as often as on two —
+    // "Bachelor of Laws - LLB • 2021-2024" is what the live card renders — and
+    // there was no line left over for the degree, so it was stored as `null`
+    // and the whole line became the date range. The same collapsed-metadata
+    // problem the experience card has, answered by the same tested split, and
+    // only when nothing else offered a degree: a card that spells the years out
+    // on their own line is untouched.
+    if (!degreeLine && dateLine) {
+      const split = splitCompanyAndDates(dateLine);
+      if (split.company && split.dateRange) {
+        degreeLine = split.company;
+        dateRange = split.dateRange;
+      }
+    }
     const [degree, field] = degreeLine.split(/\s*[,·•]\s*/).map((part) => cleanText(part));
 
     return {
       institution,
       degree: degree || null,
       field: field || null,
-      dateRange: dateLine ? cleanText(dateLine.replace(/^[^0-9a-z]*/i, "")) : null,
+      dateRange: dateRange || null,
       raw: cleaned.join("\n")
     };
   }
@@ -2331,6 +2468,10 @@
     // history
     splitCompanyAndDates, parseExperienceBlock, experienceKey, deriveCurrentPosition,
     normalizeDateRange, totalExperienceFrom, parseEducationBlock, educationKey,
+    // telling the two apart when the markup does not
+    SECTION_TITLE_NOISE_PATTERN, isSectionTitleLine,
+    SPELLED_DEGREE_PATTERN, DEGREE_PATTERN, INSTITUTION_PATTERN,
+    looksLikeEducationBlock, looksLikeEducationCandidate, looksLikeQuestionBlock,
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,

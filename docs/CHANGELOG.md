@@ -1,5 +1,78 @@
 # CHANGELOG.md
 
+## 3.7.22 — a section ends where the next one begins
+
+Reported against one live applicant, with both halves of the record pasted: **Experience** held their
+two jobs *and* their two degrees *and* the screening question; **Education** held the same four
+entries, the jobs among them, plus a school called "Education verified". Requested outright: *"both
+experience and education is getting saved in both education and experience — make extension
+differentiate them and save them correctly, and the screening question should save separately, not
+with the experience block."*
+
+**Two causes, one on each side of the read.** Structurally, a resolved section root spanned more than
+one section, so `blocksIn` handed both readers the same cards. And neither parser refused anything:
+`parseExperienceBlock` and `parseEducationBlock` are **shape-only** — first line, then the line
+carrying the dates — so two lines are two lines whatever they say. `parseExperienceBlock` turned
+"CHANDIGARH UNIVERSITY / Bachelor of Laws - LLB · 2021-2024" into a job at a degree, and
+`parseEducationBlock` turned "Legal Assistant / Bhatia and Khatri Law Office · 2024-Present" into a
+school called Legal Assistant. Both were saved, on the same applicant, from one run.
+
+**The structural half — one boundary set instead of five.** `sectionRootFor` and `siblingSectionFor`
+are each bounded by the headings **their own pass was given**, which is not the same set as "the
+section titles on this page". A label pass never sees the real headings and a heading pass never sees
+the labels; worse, the label passes are asked only for the keys nothing else produced, so a pass
+looking for one missing section is handed **one** candidate — `others` is empty, the upward walk never
+breaks, and the root it returns is the whole detail column. `sectionBoundaries()` is the union, taken
+once over the panel and the page, headings and labels alike, for **every** key; it is used only to
+*bound* a root, never to collect one. `narrowSharedSections()` then runs at the end of
+`buildSectionMap`, because only then is every boundary known — a section resolved by the panel pass
+can only be checked against a title the page-label pass found afterwards. `ownSectionNodes()` is a
+**descent**, not a sibling walk, because the two titles are routinely at different depths: at each
+level, a child holding both titles is descended into, and otherwise the section is the run of children
+from its own title up to the first one holding somebody else's. It may only ever take another
+section's cards away and never this section's own — a root holding no foreign title is untouched, and
+a narrowed range that carries nothing is discarded rather than kept. It reuses `__pvSectionNodes`, so
+`blocksIn` and `carriesSectionContent` already understood it.
+
+**And the text fallbacks, which have no structure to work on.** Every reader falls back to walking the
+section's text **linearly** when the markup offered no blocks, and a flat string has none of the
+structure the narrowing operates on. That is where "Screening question responses" became a job title
+with the question beneath it as the employer. `ownSectionLines()` cuts at the first line naming a
+**different** section — and at nothing else, deliberately: treating any noise line as a boundary would
+end Experience at its first "Experience verified" card. All five readers use it.
+
+**The parser half — a card that is unmistakably the other section's is refused, and the two refusals
+are deliberately asymmetric.** `deriveCurrentPosition` and `totalExperienceFrom` read the experience
+list and nothing else, so a job dropped there empties three exported columns — which makes a *lost*
+job as wrong as an invented one (rule 6 cuts both ways). So the experience refusal takes either a
+**spelled-out** qualification, which no employer is named, or an institution on the first line
+*corroborated* by a qualification anywhere in the card: `Assistant Professor / Chandigarh University`
+is still a job, and `Ground Engineer / BBA Aviation` still is too, because an abbreviation that is also
+a company name may never refuse one on its own. The education refusal is looser — a card naming
+neither a place of study nor a qualification is not one — because education is a list rather than the
+source of a derived column. A screening question is refused by both: no role and no school is phrased
+as a question.
+
+**One list of section titles instead of two.** `EXPERIENCE_NOISE_PATTERN` carried the list;
+`EDUCATION_NOISE_PATTERN` carried four entries. That is the whole of why the two readers behaved
+differently on identical input, and why "Education verified" was stored as an institution while
+"Experience verified" was correctly discarded. `SECTION_TITLE_NOISE_PATTERN` now names every section
+on the surface — a root that spans one boundary routinely spans the next as well — and
+`isSectionTitleLine()` applies the same count/middot/colon trimming `sectionKeyFor` applies on the page.
+
+**One fix that was not asked for and is the same defect.** The degree and the years share **one** line
+at least as often as they get two — `Bachelor of Laws - LLB • 2021-2024` is what the live card renders
+— and there was no line left over for the degree, so it was stored as `null` and the whole line became
+the `dateRange`. The same collapsed-metadata problem the experience card has, answered by the same
+tested `splitCompanyAndDates`, and only when nothing else offered a degree, so a card that spells the
+years out on their own line is untouched.
+
+`diagnostics.sectionScan.resolved[].narrowedFrom` names the root a section was cut back from, which is
+the one line that identifies this cause on a live page. Three new tests: *"an education card is never a
+job, a job is never a school, and a question is neither"*, *"one list of section titles, so both
+readers know where a section ends"* and *"no two sections are handed the same cards"*. No control, no
+click, no permission and no message changed.
+
 ## 3.7.21 — a resume costs the applicant it belongs to, and nobody else
 
 Requested outright: *"i want to make the extension faster where we can improve without compromising

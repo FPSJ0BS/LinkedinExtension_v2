@@ -1149,6 +1149,20 @@
    * when it qualifies, and otherwise a detached wrapper holding **references**
    * to the live nodes, so `innerText` reads what is on screen.
    */
+  /**
+   * A detached stand-in for a run of live nodes.
+   *
+   * Appending would MOVE the nodes out of the page. They are only ever read, so
+   * the wrapper mirrors their text and keeps references to the real ones, which
+   * is what `blocksIn` and `carriesSectionContent` both look for.
+   */
+  function rangeWrapper(nodes) {
+    const wrapper = document.createElement("div");
+    wrapper.textContent = nodes.map((node) => node.innerText || node.textContent || "").join("\n");
+    wrapper.__pvSectionNodes = nodes;
+    return wrapper;
+  }
+
   function siblingSectionFor(heading, allHeadings) {
     const start = heading.element;
     const parent = start.parentElement;
@@ -1160,12 +1174,107 @@
       if (cleanText(node.innerText || "")) taken.push(node);
     }
     if (!taken.length) return null;
-    const wrapper = document.createElement("div");
-    // Appending would MOVE the live nodes out of the page. They are only ever
-    // read, so the wrapper mirrors their text and keeps the real nodes intact.
-    wrapper.textContent = taken.map((node) => node.innerText || "").join("\n");
-    wrapper.__pvSectionNodes = taken;
-    return wrapper;
+    return rangeWrapper(taken);
+  }
+
+  /**
+   * Every element on this page that names a section, whichever pass would find it.
+   *
+   * `sectionRootFor` and `siblingSectionFor` are each bounded by the headings
+   * **their own pass was given**, and that is not the same set as "the section
+   * titles on this page". A pass looking for one missing key is handed one
+   * candidate, so `others` is empty and the upward walk never breaks — it
+   * returns the whole detail column. Label passes never see the real headings
+   * at all, and heading passes never see the labels. So the two sections
+   * resolved to overlapping roots, `blocksIn` handed both readers the same
+   * cards, and neither parser refused the other's: a live record held the
+   * applicant's two jobs **and** their two degrees under Experience, and the
+   * same four under Education, plus the screening question as a third job.
+   *
+   * This is the union, computed once, and used only to BOUND a root — never to
+   * collect one, so a title found here can still be resolved by the pass that
+   * owns it.
+   */
+  function sectionBoundaries(roots) {
+    const wanted = new Set(SECTION_PATTERNS.map((entry) => entry.key));
+    const found = [];
+    const seen = new Set();
+    for (const root of roots) {
+      if (!root) continue;
+      for (const entry of [...headingsIn(root), ...sectionLabelsIn(root, wanted)]) {
+        if (!entry.key || seen.has(entry.element)) continue;
+        seen.add(entry.element);
+        found.push(entry);
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The part of `root` that belongs to THIS section: from its own title up to
+   * the next title naming a different one.
+   *
+   * A descent rather than a sibling walk, because the two titles are routinely
+   * at different depths — which is precisely the case `siblingSectionFor`
+   * cannot answer. At each level: if one child holds both titles the answer is
+   * inside it, so descend; otherwise take from the child holding our own title
+   * up to the first holding somebody else's.
+   */
+  function ownSectionNodes(root, title, foreign) {
+    if (!(root instanceof Element) || !(title instanceof Element)) return null;
+    let node = root;
+    for (let depth = 0; depth < 40; depth += 1) {
+      const children = [...node.children].filter((child) => child instanceof Element);
+      if (!children.length) return null;
+      const holdsOwn = (child) => child === title || child.contains(title);
+      const holdsForeign = (child) => foreign.some((other) => child === other || child.contains(other));
+      const mixed = children.find((child) => holdsOwn(child) && holdsForeign(child));
+      if (mixed) {
+        node = mixed;
+        continue;
+      }
+      const start = children.findIndex(holdsOwn);
+      if (start < 0) return null;
+      const taken = [];
+      for (const child of children.slice(start)) {
+        if (holdsForeign(child)) break;
+        taken.push(child);
+      }
+      return taken.length ? taken : null;
+    }
+    return null;
+  }
+
+  /**
+   * No two sections may be handed the same blocks.
+   *
+   * Run once the whole map exists, because that is the first moment every
+   * boundary is known — a section resolved by the panel pass can only be
+   * checked against a title the page-label pass found afterwards. A section
+   * whose root holds no foreign title is left exactly as it was, and a narrowed
+   * range that turns out to carry nothing is discarded rather than kept: this
+   * may only ever take another section's cards away, never this section's own.
+   */
+  function narrowSharedSections(map, boundaries) {
+    for (const section of Object.values(map)) {
+      const element = section?.element;
+      const title = section?.title;
+      if (!(element instanceof Element) || !(title instanceof Element)) continue;
+      // A range already stops at the next section by construction.
+      if (Array.isArray(element.__pvSectionNodes)) continue;
+      const foreign = boundaries
+        .filter((entry) => entry.key && entry.key !== section.key && entry.element !== title)
+        .map((entry) => entry.element)
+        .filter((other) => element.contains(other));
+      if (!foreign.length) continue;
+      const taken = ownSectionNodes(element, title, foreign);
+      if (!taken) continue;
+      const narrowed = taken.length === 1 ? taken[0] : rangeWrapper(taken);
+      if (!carriesSectionContent(narrowed, { text: section.heading, element: title })) continue;
+      section.narrowedFrom = describeElement(element);
+      section.element = narrowed;
+    }
+    return map;
   }
 
   function sectionRootFor(heading, root, allHeadings) {
@@ -1223,7 +1332,9 @@
       // another section: the blocks read out of it would belong to the wrong
       // one, and a wrong Experience entry is worse than an empty one (rule 6).
       if (excludeList && all.some((other) => other.key && other.key !== heading.key && element.contains(other.element))) continue;
-      const candidate = { key: heading.key, heading: heading.text, element, source };
+      // `title` is kept so the map can be reconciled once every boundary is
+      // known: narrowing a shared root needs to know where this section starts.
+      const candidate = { key: heading.key, heading: heading.text, element, source, title: heading.element };
       // Only replace an unusable one with a usable one — never the other way.
       if (stored && !sectionIsUseful(candidate)) continue;
       map[heading.key] = candidate;
@@ -1292,7 +1403,8 @@
       key: "qualifications",
       heading: subs.map((heading) => heading.text).join(" / "),
       element: container,
-      source
+      source,
+      title: subs[0].element
     };
     return map;
   }
@@ -1319,6 +1431,10 @@
     // subheadings.
     collectQualificationSubsections(panel, map, { source: "panel-subheadings" });
     collectQualificationSubsections(page, map, { excludeList: true, source: "page-subheadings" });
+    // Only now is every boundary known, so only now can a root that swallowed a
+    // neighbouring section be cut back to its own. Nothing above this line
+    // changed: a section that already owns its range is left untouched.
+    narrowSharedSections(map, sectionBoundaries([panel, page]));
     if (diagnostics) recordSectionScan(map, panel, page, diagnostics);
     return map;
   }
@@ -1370,6 +1486,10 @@
         heading: section.heading,
         foundIn: section.source || "panel",
         root: describeElement(section.element),
+        // Present only when this root had swallowed a neighbouring section and
+        // was cut back to its own — the one line that names the cause when two
+        // sections come back holding each other's cards.
+        narrowedFrom: section.narrowedFrom || "",
         blocks: blocksIn(section).length,
         sample: cleanText(section.element?.innerText || "").slice(0, 200),
         // The real markup, so an empty column is diagnosable from the record as
@@ -1538,6 +1658,32 @@
       (child) => child instanceof Element && isVisible(child) && cleanText(child.innerText || "")
     );
     return children.length > 1 ? children : [];
+  }
+
+  /**
+   * The lines of a section that are its own.
+   *
+   * Every reader falls back to reading the section's text linearly when the
+   * markup offered no blocks, and a flat string has none of the structure
+   * `narrowSharedSections` works on — so a root that still spans a neighbour
+   * hands the fallback the next section whole. That is where "Screening
+   * question responses" became a job title and the question under it the
+   * employer. Cut at the first line naming a **different** section, and at
+   * nothing else: "Experience verified" and "Show more" are lines the parsers'
+   * own noise filter drops one at a time, and treating either as a boundary
+   * would truncate the section at its first verified card.
+   */
+  function ownSectionLines(section) {
+    const lines = toLines(section?.element?.innerText || "");
+    if (!section?.key || !lines.length) return lines;
+    const own = lines.findIndex((line) => sectionKeyFor(line) === section.key);
+    const rest = own > 0 ? lines.slice(own) : lines;
+    const cut = rest.findIndex((line, index) => {
+      if (index === 0) return false;
+      const key = sectionKeyFor(line);
+      return Boolean(key) && key !== section.key;
+    });
+    return cut < 0 ? rest : rest.slice(0, cut);
   }
 
   /** The category heading in force at this element, for the qualifications card. */
@@ -1733,7 +1879,7 @@
       current = [];
     };
     const continuation = /^based on\b|information cannot be|cannot be (?:provided|evaluated)/i;
-    for (const line of toLines(section.element.innerText || "")) {
+    for (const line of ownSectionLines(section)) {
       const heading = Applicants.qualificationCategoryOf(line);
       if (heading) {
         flush();
@@ -1777,7 +1923,7 @@
       if (record && accumulator.addScreening(record) === "added") added += 1;
       current = [];
     };
-    for (const line of toLines(section.element.innerText || "")) {
+    for (const line of ownSectionLines(section)) {
       if (/\?\s*$/.test(line)) {
         flush();
         current.push(line);
@@ -1823,7 +1969,7 @@
       current = [];
     };
     const continuation = /[•·|]|\d{4}|\bpresent\b|\bverified\b/i;
-    for (const line of toLines(section.element.innerText || "")) {
+    for (const line of ownSectionLines(section)) {
       if (current.length && continuation.test(line)) current.push(line);
       else {
         flush();
@@ -1861,7 +2007,7 @@
       current = [];
     };
     const continuation = /[•·|,]|\d{4}/;
-    for (const line of toLines(section.element.innerText || "")) {
+    for (const line of ownSectionLines(section)) {
       if (current.length && continuation.test(line)) current.push(line);
       else {
         flush();
@@ -1892,7 +2038,7 @@
           const heading = block.querySelector("h3,h4,[role='heading'],strong,a");
           return cleanText((heading || block).innerText || "");
         })
-      : toLines(section.element.innerText || "");
+      : ownSectionLines(section);
 
     for (const value of values) {
       const collapsed = Core.collapseRepeatedText ? Core.collapseRepeatedText(value) : value;

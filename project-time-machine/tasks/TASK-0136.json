@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0136",
+  "name": "Separate applicant experience, education and screening sections",
+  "request": "Separate applicant experience, education and screening sections",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T06:24:09.100Z",
+  "completedAt": "2026-08-08T06:34:01.509Z",
+  "startCommit": "fe5f351588539c70ff5dfb6c9f4ff41aaf44a0a6",
+  "gitRef": "task/TASK-0136",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build 31 files, 453 tests, doc links, validate)"
+  ],
+  "result": "Applicant experience, education and screening are read as separate sections. Structural half: sectionBoundaries() takes the union of every section title (panel and page, headings and labels, all keys) instead of each pass being bounded only by the headings it was handed, which returned the whole detail column whenever a pass was asked for one missing key; narrowSharedSections() then cuts any root that swallowed a neighbour back to its own, by descent rather than sibling walk, discarding a narrowed range that carries nothing so it can only ever remove another section's cards; ownSectionLines() cuts the five linear text fallbacks at the first line naming a different section. Parser half: looksLikeEducationBlock (spelled-out degree, or institution corroborated by one) refuses an education card as experience, looksLikeEducationCandidate refuses a card naming neither school nor qualification as education, looksLikeQuestionBlock refuses a screening question as either, and one SECTION_TITLE_NOISE_PATTERN replaces the experience reader's list and the education reader's four entries. Also: a degree sharing a line with its years ('Bachelor of Laws - LLB - 2021-2024') now splits instead of storing the degree as the date range. Adds diagnostics.sectionScan.resolved[].narrowedFrom. No control, click, permission or message changed."
+}
