@@ -4864,3 +4864,204 @@ test("Phase 1 tripwire: the CSV is the same nine columns in the same order, what
   );
   assert.ok(csv.startsWith("﻿"), "and the BOM stays, so a spreadsheet reads it as UTF-8");
 });
+
+// ------ Phase 2 of the multiple-LinkedIn-UI support guide: one shared schema
+//
+// The guide's Phase 2 is "all UIs must write into the same existing applicant
+// record", with field-by-field merging and "never replace valid data with empty
+// data". Auditing the current code against that sentence found the rule already
+// true everywhere except two places, and both are load-bearing for every phase
+// after this one:
+//
+//   1. `setResume` was a spread, so the LAST writer won — blanks included.
+//   2. `buildApplicantRecord` had no route for `currentRole`, `currentCompany`
+//      or `totalExperience`, even though `normalizeApplicantRecord` reads them
+//      as `orNull(explicit) || derived`.
+//
+// These tests pin both, and the last one is the proof Phase 4 is built on.
+
+test("Phase 2: a second resume write fills what the first one missed and erases nothing", () => {
+  // THE HOLE: `collectResume` writes TWICE by design — the link is saved before
+  // the download is attempted, so a failed download still leaves a usable
+  // address, and the second write carries whatever the attempt produced. Under
+  // a spread, a second write that did not carry `filename` set it to `null`
+  // over the first one's, and `resume_file` was then empty for a file that was
+  // sitting on disk.
+  const accumulator = Applicants.createApplicantAccumulator();
+
+  accumulator.setResume({
+    available: true,
+    url: "https://media.licdn.com/dms/document/abc/resume.pdf",
+    filename: "Nihal Sharma.pdf",
+    fileType: "pdf",
+    pages: 2,
+    viewerUrl: "https://www.linkedin.com/hiring/applicants/?applicationId=1",
+    downloadStatus: Applicants.RESUME_STATUS.LINK_ONLY
+  });
+
+  // The download reports back. It knows the status and where the file landed,
+  // and it knows nothing about the page count or the viewer.
+  accumulator.setResume({
+    available: true,
+    localReference: "downloads/Nihal Sharma.pdf",
+    downloadStatus: Applicants.RESUME_STATUS.DOWNLOADED
+  });
+
+  const resume = accumulator.snapshot().resume;
+  assert.equal(resume.filename, "Nihal Sharma.pdf", "the name the first write found survives the second");
+  assert.equal(resume.pages, 2, "and so does the page count");
+  assert.equal(resume.viewerUrl, "https://www.linkedin.com/hiring/applicants/?applicationId=1");
+  assert.equal(resume.url, "https://media.licdn.com/dms/document/abc/resume.pdf");
+  assert.equal(resume.localReference, "downloads/Nihal Sharma.pdf", "what the second write knew is added");
+  assert.equal(resume.downloadStatus, Applicants.RESUME_STATUS.DOWNLOADED,
+    "and the VERDICT is the one field a later write must be able to move — that is the point of writing twice");
+
+  // An explicit blank is "I did not find it", never "there is nothing".
+  accumulator.setResume({ filename: null, pages: null, url: "" });
+  const after = accumulator.snapshot().resume;
+  assert.equal(after.filename, "Nihal Sharma.pdf", "null does not erase");
+  assert.equal(after.pages, 2);
+  assert.equal(after.url, "https://media.licdn.com/dms/document/abc/resume.pdf", '"" does not erase either');
+
+  // `available` is OR-ed for the reason it has always been OR-ed one layer up:
+  // a resume seen once exists, whatever a later pass managed to see.
+  accumulator.setResume({ available: false });
+  assert.equal(accumulator.snapshot().resume.available, true, "a resume seen once exists");
+});
+
+test("Phase 2: a page that states the current role outright is believed, and one that does not still derives it", () => {
+  // The guide's chain is "explicit current-role field → top-card headline →
+  // applicant summary → latest valid Experience title". Only the last link
+  // existed, and the first had no route into the record at all: anything an
+  // adapter wrote to `header.currentRole` was dropped by
+  // `buildApplicantRecord`, which never mentioned it.
+  const experience = [{ title: "Legal Assistant", company: "Bhatia and Khatri", dateRange: "2024 - Present", current: true, verified: false, details: [], raw: "" }];
+
+  // With no explicit value the derivation is untouched — this is the proof the
+  // change is a no-op for the layout that works today.
+  const derived = Applicants.buildApplicantRecord({
+    snapshot: { ...Applicants.createApplicantAccumulator().snapshot(), header: { name: "Nihal Sharma" }, experience },
+    context: { jobId: "1", applicationId: "2" }
+  });
+  assert.equal(derived.applicant.currentRole, "Legal Assistant", "still derived from the newest current role");
+  assert.equal(derived.applicant.currentCompany, "Bhatia and Khatri");
+
+  // With one, the page's own statement wins — it is evidence, and the
+  // derivation is an inference.
+  const stated = Applicants.buildApplicantRecord({
+    snapshot: {
+      ...Applicants.createApplicantAccumulator().snapshot(),
+      header: { name: "Nihal Sharma", currentRole: "Senior Legal Counsel", currentCompany: "Khatri LLP", totalExperience: "6 years" },
+      experience
+    },
+    context: { jobId: "1", applicationId: "2" }
+  });
+  assert.equal(stated.applicant.currentRole, "Senior Legal Counsel", "an explicit field outranks the derivation");
+  assert.equal(stated.applicant.currentCompany, "Khatri LLP");
+  assert.equal(stated.applicant.totalExperience, "6 years");
+
+  // And the schema did not move: `normalizeApplicantRecord` drops any key it
+  // does not name, so this is a route into an existing field, not a new one.
+  assert.equal(Object.keys(stated.applicant).length, 17, "seventeen fields, exactly as before");
+});
+
+test("Phase 2: every scalar the merge protects survives a thinner second read", () => {
+  // The merge matrix, stated once for all ten. Rule 17: merging never
+  // overwrites a filled field with a blank — and every UI added in a later
+  // phase re-collects applicants that are already stored.
+  const full = Applicants.normalizeApplicantRecord({
+    job: { id: "4277798308" },
+    applicationId: "25550787924",
+    applicant: {
+      name: "Nihal Sharma", profileUrl: "https://www.linkedin.com/in/nihal", headline: "Human Resource",
+      location: "Noida, Uttar Pradesh, India", currentRole: "HR Lead", currentCompany: "Acme",
+      totalExperience: "6 years", appliedAt: "13mo ago", contactedAt: "10mo ago", applicationStatus: "Shortlisted"
+    }
+  });
+
+  // A re-collection that saw a mounting panel: the name only.
+  const thin = Applicants.normalizeApplicantRecord({
+    job: { id: "4277798308" },
+    applicationId: "25550787924",
+    applicant: { name: "Nihal Sharma" }
+  });
+
+  const merged = Applicants.mergeApplicantRecord(full, thin);
+  for (const field of Applicants.APPLICANT_SCALAR_FIELDS) {
+    assert.equal(merged.applicant[field], full.applicant[field], `${field} survives a thinner later read`);
+  }
+
+  // And the other direction: a blank stored value takes the newer one.
+  const filled = Applicants.mergeApplicantRecord(thin, full);
+  for (const field of Applicants.APPLICANT_SCALAR_FIELDS) {
+    assert.equal(filled.applicant[field], full.applicant[field], `${field} is filled by a fuller later read`);
+  }
+});
+
+test("Phase 2: the order the readers run in cannot change the record they produce", () => {
+  // THE PROOF PHASE 4 IS BUILT ON. The guide's Phase 4 permits layout detection
+  // to "decide which reader runs first" and forbids it from changing the
+  // schema, the workflow or the record. That is only safe if reader order is
+  // genuinely immaterial — so this asserts it directly, over every order the
+  // independent readers can run in.
+  //
+  // The first three are NOT permuted and never will be: `job` seeds the record,
+  // and `qualifications` must precede the header because their explanation
+  // sentences are what the name is corroborated against. The five that follow
+  // write to five disjoint maps, and those are permuted exhaustively — 120
+  // orders, each asserted byte-identical.
+  const work = {
+    screening: () => Applicants.parseScreeningBlock(["Do you have 3 years of experience?", "Ideal answer: Yes", "Yes"]),
+    experience: () => Applicants.parseExperienceBlock(["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present", "Drafted contracts"]),
+    education: () => Applicants.parseEducationBlock(["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB", "2019 - 2024"]),
+    skills: () => "Contract Drafting",
+    contacts: () => ({ emails: ["nihal@example.com"], phones: ["+91 90000 00000"], websites: [] })
+  };
+
+  const build = (order) => {
+    const accumulator = Applicants.createApplicantAccumulator();
+    accumulator.addJob({ id: "4277798308", title: "Legal Associate" });
+    accumulator.addQualification(Applicants.parseQualificationBlock({
+      category: Applicants.QUALIFICATION_CATEGORY.MUST_HAVE,
+      lines: ["3+ years of legal experience", "Nihal Sharma has 6 years of experience"]
+    }));
+    accumulator.addName("Nihal Sharma", true);
+    accumulator.addHeader({ headline: "Human Resource", location: "Noida, Uttar Pradesh, India" });
+    for (const reader of order) {
+      if (reader === "screening") accumulator.addScreening(work.screening());
+      if (reader === "experience") accumulator.addExperience(work.experience());
+      if (reader === "education") accumulator.addEducation(work.education());
+      if (reader === "skills") accumulator.addSkill(work.skills());
+      if (reader === "contacts") accumulator.addContactPanel(work.contacts());
+    }
+    const record = Applicants.buildApplicantRecord({
+      snapshot: accumulator.snapshot(),
+      context: { jobId: "4277798308", applicationId: "25550787924" },
+      sourceUrl: APPLICANTS_URL,
+      buildId: "test"
+    });
+    // Two fields are wall-clock and are not what this is about.
+    return JSON.stringify({ ...record, collectedAt: "", updatedAt: "", extraction: { ...record.extraction, timestamp: "" } });
+  };
+
+  const permutations = (list) => list.length <= 1 ? [list] : list.flatMap(
+    (item, index) => permutations([...list.slice(0, index), ...list.slice(index + 1)]).map((rest) => [item, ...rest])
+  );
+
+  const orders = permutations(["screening", "experience", "education", "skills", "contacts"]);
+  assert.equal(orders.length, 120, "every order of the five independent readers");
+
+  const expected = build(orders[0]);
+  for (const order of orders) {
+    assert.equal(build(order), expected, `reading in the order ${order.join(" → ")} must produce the same record`);
+  }
+
+  // And the record it produces is a real one, so this is not 120 comparisons of
+  // an empty object.
+  const record = JSON.parse(expected);
+  assert.equal(record.applicant.name, "Nihal Sharma");
+  assert.equal(record.applicant.currentRole, "Legal Assistant");
+  assert.equal(record.applicant.contact.email, "nihal@example.com");
+  assert.equal(record.applicant.education.length, 1);
+  assert.equal(record.applicant.skills.length, 1);
+});

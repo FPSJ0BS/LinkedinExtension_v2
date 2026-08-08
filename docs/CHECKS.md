@@ -14,6 +14,7 @@ each one its own Time Machine task with its own `npm run check`. The baseline be
 | `node project-time-machine/scripts/status.js` / `audit.js` | one unlogged change (the guide's own 546-line append); assigned to TASK-0153 rather than absorbed |
 | `npm run check` after TASK-0153 (adopt the guide) | typecheck, build, **475 passed / 0 failed**, docs:check (17 files), validate (31 build files) |
 | `npm run check` after TASK-0154 (Phase 1, tripwires) | typecheck, build, **486 passed / 0 failed**, docs:check, validate |
+| `npm run check` after TASK-0155 (Phase 2, the two merge holes) | typecheck, build, **490 passed / 0 failed**, docs:check, validate |
 
 ## Automated verification - 3.7.8 the section that was never read, every page, and a resume that saves itself
 

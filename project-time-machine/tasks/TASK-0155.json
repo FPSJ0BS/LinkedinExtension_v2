@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0155",
+  "name": "Phase 2: one shared applicant schema, and the two merge holes",
+  "request": "Phase 2: one shared applicant schema, and the two merge holes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:15:33.581Z",
+  "completedAt": "2026-08-08T11:18:24.792Z",
+  "startCommit": "d4eec1dada60c4b825d6cae5612d6f5ab202d639",
+  "gitRef": "task/TASK-0155",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 490 passed / 0 failed (was 486), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 2 of the multiple-LinkedIn-UI support guide: one shared applicant schema, with the two holes in it closed. The guide requires every layout to write into the SAME record, field by field, never replacing valid data with empty data. Auditing the code against that sentence found the rule already true everywhere except two places, and both are load-bearing for every phase after this one. (1) setResume was the only accumulator method that was not fill-empty - a spread, so the LAST writer won, blanks included. collectResume writes TWICE by design (the link is saved BEFORE the download is attempted, so a failed download still leaves a usable address) and on several early exits, so a second write missing filename, pages or viewerUrl erased the first one's and resume_file was empty for a file sitting on disk. It now fills field by field through preferFilled, with two deliberate exceptions: available is OR-ed, because a resume seen once exists, and downloadStatus is the one field a later write MUST be able to move - link_only becoming downloaded is the entire point of writing twice. This is the same fix mergeApplicantRecord already made one layer up for the identical shape, applied early enough that a single extraction cannot lose what it already found. Verified against all six live setResume call sites that none of them intends to clear a field. (2) buildApplicantRecord had no route for currentRole, currentCompany or totalExperience, although normalizeApplicantRecord has always read them as orNull(explicit) || derived - the slot for a page that states them outright existed from the start and had no producer, so anything an adapter wrote to header.currentRole was dropped without a sound. Three lines give them the route. It is a NO-OP today (nothing writes them) and it is what makes the guide's chain - explicit field, top-card headline, applicant summary, latest valid Experience title - expressible at all; Phase 3 supplies the reader. The schema is unchanged: still seventeen applicant fields, still nine CSV columns. Four tests: the second-write matrix; explicit-beats-derived alongside a proof the no-op really is one; the ten-scalar merge matrix in both directions; and the 120-permutation invariance test - the same parsed blocks through a fresh accumulator in every order of the five independent readers, each asserted byte-identical, which is the proof Phase 4's layout detection is built on. Documented deviation, reported rather than hidden: the guide also says never replace detailed data with a shorter incomplete value. preferFilled prefers the newer non-empty value regardless of length; changing that would be a behaviour change with no live evidence behind it, so it was not done. Files: src/applicants-core.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}

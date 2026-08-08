@@ -1805,8 +1805,45 @@
         state.contact.websites = uniqueText([...state.contact.websites, ...(panel?.websites || []), ...(panel?.cvLinks || [])]);
         return state.contact.emails.length + state.contact.phones.length + state.contact.websites.length - before;
       },
+      /**
+       * The resume, filled field by field — the one accumulator hole.
+       *
+       * Every other method here fills an empty field and never replaces a
+       * filled one: `addKeyed` tests each field for emptiness, `addHeader` is
+       * first-wins, `addName` has its one documented exception. `setResume`
+       * was a spread, so it obeyed the opposite rule — the LAST writer won,
+       * blanks included.
+       *
+       * That is not theoretical. `collectResume` writes twice by design: the
+       * link is saved BEFORE the download is attempted, so a failed download
+       * still leaves a usable address, and the second write then carries
+       * whatever that attempt produced. It also writes on several early exits.
+       * A second write missing `filename`, `pages` or `viewerUrl` erased the
+       * first one's, and the record then read as a resume nobody could name.
+       *
+       * `mergeApplicantRecord` already fixed exactly this shape at the record
+       * level and documents why (`{...before, ...after}` had "the identical
+       * hole"); this is the same fix one layer earlier, so a single extraction
+       * cannot lose what it already found before it is ever stored. `available`
+       * is OR-ed for the same reason it is there: a resume seen once exists.
+       * `downloadStatus` is the one field a later write MUST be able to move —
+       * it is the verdict on the attempt, and `link_only` becoming `downloaded`
+       * is the whole point of the second write.
+       */
       setResume(resume) {
-        state.resume = resume ? { ...(state.resume || {}), ...resume } : state.resume;
+        if (!resume) return;
+        const previous = state.resume || {};
+        const merged = { ...previous };
+        for (const [field, value] of Object.entries(resume)) {
+          if (field === "available") {
+            merged.available = Boolean(previous.available || value);
+          } else if (field === "downloadStatus") {
+            merged.downloadStatus = preferFilled(value, previous.downloadStatus);
+          } else {
+            merged[field] = preferFilled(value, previous[field]);
+          }
+        }
+        state.resume = merged;
       },
       addWarning(message) {
         const text = cleanText(message);
@@ -1903,6 +1940,24 @@
         profileUrl: header.profileUrl || "",
         headline: header.headline || "",
         location: header.location || "",
+        // The three columns that were empty for four consecutive releases, and
+        // the reason they could only ever be empty: they are DERIVED from the
+        // Experience entries and from nothing else, so a heading wording the
+        // section table did not know emptied all three at once, silently.
+        //
+        // `normalizeApplicantRecord` has always read them as
+        // `orNull(explicit) || derived` — the slot for a page that states them
+        // outright was there from the start and had no producer, so anything an
+        // adapter wrote to `header.currentRole` was dropped here without a
+        // sound. Giving them the route makes the guide's own chain
+        // ("explicit current-role field → top-card headline → applicant summary
+        // → latest valid Experience title") expressible: an explicit value wins,
+        // and the derivation stays exactly as it was whenever there is none.
+        //
+        // A no-op until a reader fills them, which is Phase 3.
+        currentRole: header.currentRole || "",
+        currentCompany: header.currentCompany || "",
+        totalExperience: header.totalExperience || "",
         appliedAt: header.appliedAt || "",
         contactedAt: header.contactedAt || "",
         applicationStatus: header.applicationStatus || "",
