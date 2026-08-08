@@ -96,7 +96,12 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    already showing this user, and is proven inside the container it claims to belong to.**
 
    *Profile pages:* connections-list pagination · `Contact info` · `Show details` in the Open to work
-   card.
+   card · a section's own **`Show all N …`** expander — Skills, Experience, Education — proven inside
+   that section, because it opens the same member's own full list, sends nothing and changes nothing.
+   That control **navigates** (`/in/<slug>/details/<section>/`), so whatever uses it must capture the
+   profile URL first, treat the details view as that member's page, and return to the profile
+   afterwards; a details view that never loads leaves the section as the profile painted it, never
+   half of one member's list under another's name.
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
    control · a row of the applicant list · the resume viewer's own Download.
 

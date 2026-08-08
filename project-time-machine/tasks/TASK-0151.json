@@ -1,0 +1,22 @@
+{
+  "schema": 2,
+  "id": "TASK-0151",
+  "name": "Rule 5 allows a profile section's own Show all expander",
+  "request": "Rule 5 allows a profile section's own Show all expander",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T10:07:36.865Z",
+  "completedAt": "2026-08-08T10:08:06.587Z",
+  "startCommit": "b8dd4d0a0e724a1fbc4c781ae83a2e8643f6afb0",
+  "gitRef": "task/TASK-0151",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed: tsc --noEmit, build, 477 tests, docs:check, validate-build"
+  ],
+  "result": "Rule 5 now allows a profile section's own 'Show all N ...' expander for Skills, Experience and Education. It opens the same member's own full list on the member's own page, sends nothing, contacts nobody and changes no state, which is the same test Contact info and the Open to work 'Show details' already pass. The amendment carries the constraint the control brings with it: unlike the two overlays, this one NAVIGATES to /in/<slug>/details/<section>/, so any user of it must capture the profile URL before clicking (canonicalizeProfileUrl already truncates to /in/<slug> for exactly this reason), treat the details view as that member's page, and return to the profile afterwards; a details view that never loads must leave the section as the profile painted it rather than risk half of one member's list under another's name (rule 1). The denylist is unchanged and still beats the allowlist. Documentation only - no code yet permits the click, so classifyOpenToWorkControl still refuses 'Show all 12 skills' and its test still holds."
+}
