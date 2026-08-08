@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0149",
+  "name": "Applicant header is anchored on the open applicant, not the top of the panel",
+  "request": "Applicant header is anchored on the open applicant, not the top of the panel",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T09:42:37.897Z",
+  "completedAt": "2026-08-08T09:49:12.035Z",
+  "startCommit": "6488eee03572a31f026d9493bddd602b2a6b7a5c",
+  "gitRef": "task/TASK-0149",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 475 tests, doc links, validate-build"
+  ],
+  "result": "Every applicant was saved with the SAME location. Refusing 'Filter and sort' in TASK-0147 moved the symptom instead of ending it, which is what identified the real cause: applicantPanel() can resolve to a container that also holds the applicant LIST column - the failure findApplicantName was written for, when every record was saved as the name 'Applicants' - and readApplicantHeader then took the panel's first twelve lines. On that container those lines are the list's: 'Applicants', 'All', 'Filter and sort', then the FIRST ROW's name, headline and location. So location was the chrome until a place rule refused it, and then it was the first row's location, which is the same row on every applicant. headline, appliedAt and applicationStatus were exposed to it too. The fix is an ordering, not a new rule: findApplicantName was already called here but AFTER parseApplicantHeader had consumed those lines, so it now runs FIRST and the header is cut from the line where that name is rendered. parseApplicantHeader reads the headline and location by their offset from the name, so moving the starting point moves all of them onto the right person; nothing in the parser changed. The LAST occurrence before the first section is taken because the list column precedes the detail column in document order, and a row only matches when it is this applicant's own row, so both spellings are the same person and this can never reach a stranger. An unfound name falls back to the top of the panel, exactly today's behaviour, so it is never worse. profileUrl had the same exposure and is worse to get wrong - it is hashed into applicantId, so one link off the wrong column merges two applicants into one record - so the /in/ link that NAMES the resolved applicant is preferred, with the first visible one still the fallback. That test is deliberately free: no page-wide query, which would put back the per-snapshot document scan state.jobHeader was introduced to remove, and textContent rather than innerText, because a name getter that forces layout per anchor is what isApplicantRowLink warns about. No control, CSV, schema, pagination or timing change. New test 'the header starts at the open applicant's own name, not at the top of the panel' reproduces the defect in the pure core first - the live panel's lines read from the top return the first row's 'New Delhi, Delhi, India' - then asserts the ordering, the anchor, the last-match loop, the fallback and that the old unconditional shape is gone. Also removed an incorrect changelog cross-reference from the TASK-0147 test comment. Files: extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

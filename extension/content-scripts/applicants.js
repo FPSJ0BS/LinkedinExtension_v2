@@ -1896,10 +1896,51 @@
   }
 
   function readApplicantHeader(panel, sections, accumulator, diagnostics = {}) {
-    // The header is everything above the first recognised section heading.
+    // The name FIRST, and that ordering is the fix.
+    //
+    // THE LIVE DEFECT: every applicant was saved with the same location.
+    // `applicantPanel()` can resolve to a container that also holds the
+    // applicant LIST — the same failure `findApplicantName` was written for,
+    // when every record was saved as "Applicants" — and this function then took
+    // the panel's first twelve lines. On that container those lines are the
+    // list column's: `Applicants`, `All`, `Filter and sort`, then the first
+    // ROW's name, headline and location. So `location` was "Filter and sort"
+    // until a place rule refused it, and then it was the first row's location,
+    // which is the same row on every applicant. `headline`, `appliedAt` and
+    // `applicationStatus` were exposed to it too, and so was `profileUrl`,
+    // which is dealt with at the bottom of this function.
+    //
+    // The name is the one field here already chosen by policy: four sources,
+    // arbitrated against the words LinkedIn's own verdict sentences share at
+    // the front. So it is resolved first and the header STARTS where that name
+    // is rendered — after which every line belongs to the open applicant,
+    // whatever else the panel swallowed. `parseApplicantHeader` reads the
+    // headline and the location by their offset from the name, so moving that
+    // starting point is what moves all of them onto the right person.
+    const chosen = findApplicantName(panel, accumulator);
+
+    // The header is everything from the applicant's own name down to the first
+    // recognised section heading.
     const first = Object.values(sections)[0]?.element || null;
+    const all = toLines(panel.innerText || "");
+    // The LAST occurrence before the sections: the list column precedes the
+    // detail column in document order, so the last one is the panel's own
+    // header rather than a row of the list. Both spellings are the SAME person
+    // — a row only matches when it is this applicant's row — so this can never
+    // reach a stranger; it only prefers the fuller of the two renderings.
+    // Falls back to the top of the panel when the name is not found among the
+    // lines, which is what happens today, so this is never worse.
+    const wanted = Applicants.cleanApplicantName(chosen.name || "");
+    let start = 0;
+    if (wanted) {
+      for (let index = 0; index < all.length; index += 1) {
+        if (first && cleanText(first.innerText || "").startsWith(all[index])) break;
+        if (Applicants.cleanApplicantName(all[index]) === wanted) start = index;
+      }
+    }
+
     const lines = [];
-    for (const line of toLines(panel.innerText || "")) {
+    for (const line of all.slice(start)) {
       if (first && cleanText(first.innerText || "").startsWith(line)) break;
       lines.push(line);
       if (lines.length >= 12) break;
@@ -1909,14 +1950,33 @@
     // The name is chosen by policy, not taken from wherever it happened to be,
     // and it is the one header field the accumulator will let a later, better
     // read replace.
-    const chosen = findApplicantName(panel, accumulator);
     accumulator.addName(chosen.name || header.name, chosen.corroborated);
     delete header.name;
     diagnostics.name = chosen;
 
     // The profile link is the applicant's own /in/ address, taken from the panel
     // rather than guessed from their name.
-    const profileAnchor = [...panel.querySelectorAll("a[href*='/in/']")].find((anchor) => isVisible(anchor));
+    //
+    // "The first visible one" has the same exposure the header above had: a
+    // panel resolved wide enough to hold the list is a panel holding links that
+    // are not this applicant's, and this field is worse to get wrong than the
+    // location, because `profileUrl` is hashed into `applicantId` — one wrong
+    // link, and two applicants become one record. So the link that NAMES the
+    // applicant we just resolved is preferred, and the first visible one is only
+    // the fallback, which is what this did before.
+    //
+    // Costs nothing: no page-wide query — that would put back the per-snapshot
+    // document scan `state.jobHeader` was introduced to remove — and
+    // `textContent` rather than `innerText`, because a name getter that forces
+    // layout per anchor is the one thing `isApplicantRowLink` warns about.
+    const profileLinks = [...panel.querySelectorAll("a[href*='/in/']")].filter((anchor) => isVisible(anchor));
+    const named = wanted
+      ? profileLinks.find(
+          (anchor) =>
+            Applicants.cleanApplicantName(cleanText(anchor.textContent || anchor.getAttribute("aria-label") || "")) === wanted
+        )
+      : null;
+    const profileAnchor = named || profileLinks[0] || null;
     if (profileAnchor) header.profileUrl = Core.canonicalizeProfileUrl(profileAnchor.href || profileAnchor.getAttribute("href"));
 
     accumulator.addHeader(header);

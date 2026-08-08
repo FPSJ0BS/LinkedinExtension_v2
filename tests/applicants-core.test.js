@@ -445,7 +445,7 @@ test("the job header is found by its own tabs, resolved once, and written to eve
 });
 
 test("the location is a rendered place, never whatever the third line happened to be", () => {
-  // THE LIVE DEFECT (3.7.24): every applicant's location was saved as
+  // THE LIVE DEFECT: every applicant's location was saved as
   // **"Filter and sort"** — a button in the *list* column. `location` was
   // `lines[2]` and nothing else, so whatever landed in that position became the
   // location. Array-position guessing, which rule 7 forbids, and the same class
@@ -1343,6 +1343,82 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
   );
   assert.match(snapshot, /readApplicantHeader\(panel, sections, accumulator, diagnostics\)/,
     "the chosen name must be reported in diagnostics");
+});
+
+test("the header starts at the open applicant's own name, not at the top of the panel", async () => {
+  // THE LIVE DEFECT: every applicant was saved with the SAME location. Refusing
+  // "Filter and sort" (3.7.24) moved the symptom rather than ending it, which is
+  // what identified the real cause: `applicantPanel()` resolving wide enough to
+  // include the applicant LIST column — the same failure that once saved six
+  // people as "Applicants" — and the header then taking the panel's first twelve
+  // lines, which on that container are the list's.
+  //
+  // First, the defect in the pure core, where it can be shown. These are the
+  // live panel's lines in order.
+  const wide = [
+    "Applicants",
+    "All",
+    "Filter and sort",
+    "Here are all applicants to your job. Edit qualifications",
+    "Adnan Ahmed · 2nd",
+    '"Innovator | Change Maker | Entrepreneurial Spirit in Action"',
+    "New Delhi, Delhi, India",
+    "Applied 2w ago",
+    "PRAVESH KOTIYAL · 1st",
+    "Human Resource",
+    "Noida, Uttar Pradesh, India",
+    "Applied 13mo ago • Contacted 10mo ago"
+  ];
+
+  // Read from the top — today's behaviour — and PRAVESH is saved with Adnan's
+  // location and Adnan's headline. Adnan is the first row, so every applicant
+  // got the same two values.
+  const fromTop = Applicants.parseApplicantHeader({ text: wide.join("\n") });
+  assert.equal(fromTop.location, "New Delhi, Delhi, India", "the first ROW's location is what was being saved");
+  assert.notEqual(fromTop.location, "Noida, Uttar Pradesh, India");
+
+  // Read from the applicant's own name, and every field is theirs. Nothing in
+  // the parser changed — the starting point did.
+  const anchored = Applicants.parseApplicantHeader({ text: wide.slice(8).join("\n") });
+  assert.equal(anchored.location, "Noida, Uttar Pradesh, India", "anchoring on the name is what fixes it");
+  assert.equal(anchored.headline, "Human Resource");
+  assert.equal(anchored.appliedAt, "13mo ago");
+
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const header = source.slice(source.indexOf("function readApplicantHeader"), source.indexOf("function readQualifications"));
+
+  // The ordering IS the fix: the name is resolved by policy first, and the
+  // header is then cut from where that name is rendered.
+  assert.ok(
+    header.indexOf("findApplicantName(panel, accumulator)") < header.indexOf("Applicants.parseApplicantHeader"),
+    "the name must be chosen before the lines the rest of the header is parsed from"
+  );
+  assert.match(header, /Applicants\.cleanApplicantName\(all\[index\]\) === wanted/,
+    "the header must start where the chosen name appears");
+  assert.match(header, /all\.slice\(start\)/, "and the lines must be taken from there, not from 0");
+
+  // The last occurrence, not the first: the list column precedes the detail
+  // column, and a row only matches when it is this applicant's own row, so the
+  // later one is the fuller rendering of the same person and never a stranger.
+  assert.match(header, /=== wanted\) start = index;\r?\n/,
+    "the loop records the match and keeps going — the last one wins, not the first");
+  assert.match(header, /let start = 0;/, "an unfound name falls back to the top of the panel, as today");
+
+  // The same exposure on the profile link, which is worse to get wrong: it is
+  // hashed into `applicantId`, so one link off the wrong column turns two
+  // applicants into one record. The link that names the resolved applicant wins.
+  assert.match(header, /profileLinks\.find\(/, "the applicant's own link must be preferred");
+  assert.match(header, /\) === wanted\s*\n?\s*\)/, "and 'own' means it names the applicant we resolved");
+  assert.match(header, /named \|\| profileLinks\[0\] \|\| null/,
+    "falling back to today's answer rather than to no link at all");
+  // Free: no page-wide query, which is what `state.jobHeader` was introduced to
+  // remove from this per-snapshot path, and no layout flush per anchor.
+  assert.ok(!/applicantList\(\)/.test(header), "the header must not scan the document once per snapshot");
+  assert.ok(!/anchor\.innerText/.test(header), "textContent — a name getter that forces layout per anchor is the trap");
+
+  // And the shape that caused it is gone.
+  assert.ok(!/for \(const line of toLines\(panel\.innerText \|\| ""\)\)/.test(header),
+    "the header must never again be read from the top of the panel unconditionally");
 });
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
