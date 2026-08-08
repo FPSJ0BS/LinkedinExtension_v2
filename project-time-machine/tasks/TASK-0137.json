@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "id": "TASK-0137",
+  "name": "Rewrite CLAUDE.md as a short working brief, and adopt the applicant collector speed guide",
+  "request": "Rewrite CLAUDE.md as a short working brief, and adopt the applicant collector speed guide",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T07:06:40.937Z",
+  "completedAt": "2026-08-08T07:09:57.344Z",
+  "startCommit": "8892ef1165ca0fb89bb3a4e100b9c74eafb3847e",
+  "gitRef": "task/TASK-0137",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "added",
+      "path": "docs/applicant-collector-speed-guide.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build, 453 tests, validate)"
+  ],
+  "result": "Rewrote CLAUDE.md as a working brief: 1733 lines to 266. It had become a history of the project rather than instructions for working on it - every rule carried the full narrative of the live defect that caused it, which is real value but belongs in CHANGELOG.md, where it already is verbatim. Kept the safety core in full and nothing was silently dropped: never invent data, the contact-provenance rule (tel:/mailto:/labelled field only, with the opened-panel exception), merge-only accumulators, the click allowlist and the ATS denylist that always beats it, container proof, no class-name hard matches, never assume the document scrolls, a hidden tab is never a finished one, pause on challenge, no credential handling, Stop always available and never destructive, two reused tabs, LinkedIn-only hosts, focus only on a direct command, the IndexedDB name, an applicant is a person on a job, notes/tags never touched by extraction, CSV append-never-reorder, and never claim a live fix from local checks. Cut the per-release narrative, the implementation-locking PERMANENT prose and the per-file click counts from the DOC - the TESTS that enforce them are untouched, so behaviour is unchanged and every guard still fails loudly. Added the requested pointer as its own section near the top: read docs/applicant-collector-speed-guide.md before changing applicant speed, scrolling, repeated-profile behaviour, resume timing, applicant switching or delays; keep all existing applicant data collection working; smallest safe changes only; do not modify the Project Time Machine logging system. Adopted docs/applicant-collector-speed-guide.md into the repo - it was untracked and was failing the audit as an unlogged change; parked with watch.js checkpoint plus git stash and restored inside this task rather than being absorbed silently. Time Machine section compressed and relaxed to one task per feature rather than per edit, per the user's choice; the forbidden-git-command list, the rollback table and the scripts themselves are unchanged. Added a 'Things that will bite you' section for the non-obvious constraints (React as a global, no bundler, core IIFEs, worker path, build ID in 5 places, address bar is not identity, an empty section reads as zeros not warnings, no jsdom) and noted the missing applicants diagnostics button under Known issues. No source, test or behaviour change. Files: CLAUDE.md, docs/applicant-collector-speed-guide.md."
+}
