@@ -1,0 +1,58 @@
+{
+  "schema": 2,
+  "id": "TASK-0150",
+  "name": "Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top",
+  "request": "Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T09:58:09.035Z",
+  "completedAt": "2026-08-08T10:05:22.282Z",
+  "startCommit": "8339040371cfd48b9e18daa143721fdb7ab65ca3",
+  "gitRef": "task/TASK-0150",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 477 tests, doc links, build validation"
+  ],
+  "result": "The applicant walk opens the row the page owes next, resolved to an element by ID at the moment it is clicked, and a settled page always hands the list back at its top. Reported as 'it starts from a lower applicant'; three separate causes, none of them the roster's ordering, which 3.7.24 settled and which is unchanged. (1) The ready check compares roster.next(processed) against pending[0] BEFORE the bulk retirement runs, and retiring the already-saved rows on that window advances what the page owes - so the newly-owed row may not be mounted at all and pending[0] is then simply the nearest mounted row below it. The row is now re-asked for after the retirement, via roster.nextDescriptor(processed). (2) pending[0] is a live element on a virtualized list, and between reading it and clicking it the turn may settle the page, sweep for an owed row or grow the list - each of which scrolls, and scrolling is when the list recycles elements. A detached node fails list.contains inside selectApplicantRow, so the click never happens and the person is filed as could-not-open with nothing but their row name. A row is now a VALUE: describeApplicantRow takes key, href and applicationId while the element is attached, the roster keeps one per row merge-only and clears them on reset, and liveApplicantRow(descriptor, held) finds the element by that key against the list as it is now - answering with that row or with nothing. No nearest-row and no first-visible-row fallback (rule 1); an unresolved row is waited for, the next turn's ready check fails and sweepCurrentPage(..., wanted) fetches it back, bounded by MAX_UNRESOLVED_TURNS. The name still comes off the live element because it is attached and about to be clicked; the href comes off the descriptor; the descriptor takes no name for a row with an address, so the lazy innerText getter's per-row reflow does not come back. (3) sweepCurrentPage handed the list back at its top only on the path that confirmed the bottom - the pass budget running out and the list being torn out mid-pass both set pageSettled and left it near the bottom, so the page's first row was opened with the list at its last and every row above had to be swept back one at a time. The hand-back moved into a finally, guarded by handedBack, still scoped to a settle. No control added on any path (still seven .click() sites) and the left list still scrolls only in the per-page sweep. Build ID and version bumped to 3.8.1 so an already-injected content script is replaced."
+}

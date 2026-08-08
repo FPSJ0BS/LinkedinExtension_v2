@@ -1638,7 +1638,7 @@ test("the list pass opens every applicant across every page and takes what the p
   // The walk. Since 3.7.13 there is no second per-row path to be a branch of:
   // Collect Every Applicant was removed and this is what the one loop does.
   const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("async function runEveryApplicant"));
-  const pass = run.slice(run.indexOf("const rowId = Applicants.parseHiringContext(row.href)"));
+  const pass = run.slice(run.indexOf("const rowId = descriptor.applicationId;"));
   assert.ok(pass.length > 200, "the per-row work must be found, not an empty slice");
   assert.match(pass, /assertRunnable\(\)/, "a hidden tab and a Stop are still honoured inside the loop");
 
@@ -1646,7 +1646,7 @@ test("the list pass opens every applicant across every page and takes what the p
   // RENDERED is taken: name, current role, current company, total experience,
   // education. Not a second reading rule — `extractApplicant` is the one the
   // full collection uses, with the button-gated steps switched off.
-  assert.match(pass, /await collectVisibleApplicant\(row, rowId\)/, "each applicant is opened and read");
+  assert.match(pass, /await collectVisibleApplicant\(liveRow, rowId\)/, "each applicant is opened and read");
   const reveal = source.slice(source.indexOf("const VISIBLE_ONLY_OPTIONS"), source.indexOf("async function extractAllApplicants"));
   // Requested outright: "I want the extension to be able to get contact info
   // from the contact info button given in the profile AND I WANT THE RESUME TO
@@ -3008,9 +3008,14 @@ test("a run resumes over the applicants it has not collected yet", async () => {
   // Still scoped to the job — an applicant is a person on a job.
   assert.equal(Applicants.createCollectedIndex(entries, { jobId: "8" }).has({ applicationId: "2" }), false);
 
-  // Decided from the row's own href, before anything is opened.
-  assert.match(run, /const rowId = Applicants\.parseHiringContext\(row\.href\)\.applicationId \|\| ""/,
+  // Decided from the row's own href, before anything is opened — and taken from
+  // the descriptor, which read that href while the row's element was attached,
+  // so a list that has since recycled the element cannot blank the id the store
+  // reconciles on.
+  assert.match(run, /const rowId = descriptor\.applicationId;/,
     "the id in the row's href is all a row knows before it is opened");
+  assert.match(run, /const descriptor = roster\.nextDescriptor\(processed\)/,
+    "and it comes from the page's own roster of who is on it");
   // Retired in BULK on one scan, before anybody is opened. The per-row copy of
   // this check went with the second path in 3.7.13; this one always did the
   // work for both, which is why removing that one changed no behaviour.
@@ -3440,6 +3445,148 @@ test("a roster seeded before the page is settled walks it from the middle, not t
   assert.equal(settled.next(done), key(3),
     "a reset roster still walks past the rows the run had already finished with");
   assert.equal(settled.remaining(done), 7, "and reports only what is genuinely left");
+});
+
+test("the row that is opened is the page's next row, resolved by id at the moment it is clicked", async () => {
+  // THE REPORT: "it starts from a lower applicant". Two separate ways the walk
+  // could open somebody other than the row the page owed next, and both of them
+  // look identical from the outside — a page whose first names are never opened.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("// -------------------------------------------------- coming back to a job"));
+
+  // ------------------------------------------------- 1. a row is now a VALUE
+  // A rendered row is a live element on a virtualized list, and the list
+  // recycles it as soon as it scrolls out of the window. Everything the walk
+  // needs to know about a row is taken while that element is attached, so a
+  // recycled node can neither blank an answer nor be clicked in place of one.
+  const described = Applicants.describeApplicantRow({ href: APPLICANTS_URL, name: "Komal Sharma" });
+  assert.equal(described.key, "id:25550787924", "the descriptor carries the key the walk selects on");
+  assert.equal(described.applicationId, "25550787924", "and the id the store reconciles on");
+  assert.equal(described.href, APPLICANTS_URL, "and the address, read while the row was attached");
+  assert.equal(described.name, "",
+    "the name is NOT taken from a row that has an address: it is a lazy innerText getter, and taking it "
+    + "for every row of every sweep pass is the per-row forced layout the getter exists to remove");
+  assert.equal(Applicants.describeApplicantRow({ name: "  Asha Rao  " }).name, "Asha Rao",
+    "a row with no address at all is described by its name, exactly as it is keyed by it");
+
+  // ---------------------------------------------- 2. the roster keeps them
+  const row = (id) => ({
+    href: `https://www.linkedin.com/hiring/applicants/?applicationId=2555078792${id}&jobId=4277798308`,
+    name: `Applicant ${id}`
+  });
+  const key = (id) => Applicants.applicantRowKey(row(id));
+  const roster = Applicants.createApplicantRoster();
+  roster.add([row(1), row(2), row(3)]);
+  roster.add([row(3), row(4), row(5)]);
+
+  assert.deepEqual(roster.descriptors().map((card) => card.key), [1, 2, 3, 4, 5].map(key),
+    "the page's rows are held as values, in the page's own top-to-bottom order");
+  assert.equal(roster.describe(key(2)).applicationId, "25550787922", "each one keeps what its row said");
+  assert.equal(roster.describe("id:nobody"), null, "and a row this page never held is not invented");
+
+  // The walk asks for the next row as a VALUE, and that is what it opens.
+  assert.equal(roster.nextDescriptor(new Set()).key, key(1), "the page's first row is the first one opened");
+  assert.equal(roster.nextDescriptor(new Set([key(1), key(2)])).key, key(3),
+    "and finishing with rows advances it in page order, never past a row still owed");
+
+  // THE SECOND WAY THE WALK STARTED LOWER DOWN. `pending` holds only what is
+  // MOUNTED. Retiring the rows already saved advances what the page owes, and
+  // the newly-owed row may not be mounted at all — at which point `pending[0]`
+  // is simply the nearest mounted row BELOW it, and taking it steps over a
+  // person the page still owed.
+  const done = new Set([key(1)]);
+  const mounted = [row(4), row(5)];              // 2 and 3 recycled out of the DOM
+  assert.equal(Applicants.applicantRowKey(roster.sort(mounted)[0]), key(4),
+    "the mounted window's own first row is row 4 …");
+  assert.equal(roster.nextDescriptor(done).key, key(2),
+    "… but the page owes row 2, and that is the row the walk must open");
+
+  // Handed back as a copy: the walk keeps one for the whole of an applicant and
+  // must not be able to edit the page's own record of who is on it.
+  const copy = roster.nextDescriptor(new Set());
+  copy.name = "someone else";
+  assert.equal(roster.describe(key(1)).name, "", "a descriptor handed out cannot rewrite the roster's");
+
+  // A new page is a new roster, descriptors included.
+  roster.reset();
+  assert.deepEqual(roster.descriptors(), [], "a pager press leaves nothing of the old page behind");
+
+  // ------------------------------------- 3. and the element is resolved by id
+  assert.match(source, /function liveApplicantRow\(descriptor, held = null\)/,
+    "the element is resolved from the descriptor, not held from whenever it was last seen");
+  const resolver = source.slice(source.indexOf("function liveApplicantRow"), source.indexOf("const LIST_GROW_PASSES"));
+  assert.match(resolver, /if \(rowKey\(candidate\) === key\) return candidate;/,
+    "by the one identifier a row carries before it is opened");
+  assert.match(resolver, /return null;/, "and nothing at all when that row is not mounted");
+  assert.ok(!/\[0\]/.test(withoutComments(resolver)),
+    "there is no first-visible-row fallback: a wrong person who happens to be on screen is still wrong");
+  assert.match(resolver, /held\.control\?\.isConnected/,
+    "a detached element is never handed back — clicking one is refused by selectApplicantRow and files "
+    + "the applicant as 'could not open' with nothing but their row's name");
+
+  assert.match(run, /const descriptor = roster\.nextDescriptor\(processed\) \|\| Applicants\.describeApplicantRow\(row\);/,
+    "the walk opens the row the ROSTER owes next, re-read after the already-saved rows were retired");
+  assert.match(run, /const liveRow = liveApplicantRow\(descriptor, row\);/, "resolved to an element by id");
+  assert.match(run, /if \(!liveRow\) \{[\s\S]{0,700}?continue;/,
+    "and a row that will not resolve is waited for, never substituted");
+  assert.match(run, /await collectVisibleApplicant\(liveRow, rowId\)/,
+    "the element that is clicked is the one just resolved");
+  assert.match(run, /const rowId = descriptor\.applicationId;/,
+    "and the id it is confirmed against comes from the descriptor, which read it while the row was attached");
+  assert.match(run, /name: liveRow\.name,\s*\n\s*href: descriptor\.href/,
+    "the floor record takes its name from the live element and its address from the descriptor");
+  // Bounded, because refusing to open the wrong person must never become
+  // refusing to open anybody.
+  assert.match(run, /unresolvedTurns > MAX_UNRESOLVED_TURNS/, "and it cannot hold the run for ever");
+
+  // ------------------------------- 4. the page's order is never turned around
+  // The roster is built walking DOWN from the top and read from the front. Any
+  // of these would re-introduce the reported walk in a new costume.
+  for (const file of ["extension/content-scripts/applicants.js", "src/applicants-core.js"]) {
+    const text = withoutComments(await readFile(resolve(root, file), "utf8"));
+    assert.ok(!/\.reverse\(\)/.test(text), `${file} must never turn the page's order around`);
+  }
+  const rosterSource = withoutComments(
+    (await readFile(resolve(root, "src/applicants-core.js"), "utf8"))
+  ).slice(0);
+  const rosterBody = rosterSource.slice(rosterSource.indexOf("function createApplicantRoster"), rosterSource.indexOf("function describePanelArrival"));
+  assert.ok(!/\.pop\(\)|\.shift\(\)/.test(rosterBody),
+    "the roster is an ORDER, not a queue that is eaten from one end: progress lives in the run's ledger");
+  assert.ok(!/\.pop\(\)|\.shift\(\)/.test(withoutComments(run)),
+    "and the walk never consumes the roster either — it asks it what is next");
+
+  // Rule 9: this resolves an element, it does not add a control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+});
+
+test("a settled page is always handed back at its top, not only when its bottom was confirmed", async () => {
+  // THE REPORT, the other half: "it starts from a lower applicant". The settle
+  // ends with the list at its top so the page's first applicant is the next one
+  // opened — but only on the path that CONFIRMED the bottom. Two other paths set
+  // `pageSettled` just the same and left the list where the walk had dragged it,
+  // near the bottom: the pass budget running out on a slow page, and the list
+  // being torn out from under the walk. The run then opened the page's first row
+  // with the list standing at its last, so every row above had to be swept back
+  // into view one at a time — and the ones that did not come back were retired
+  // as vanished.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const sweep = source.slice(source.indexOf("async function sweepCurrentPage"), source.indexOf("* Reveal more rows"));
+
+  assert.match(sweep, /\} finally \{/, "the hand-back is guaranteed rather than reached");
+  assert.match(sweep, /if \(typeof wanted !== "function" && !handedBack\) \{/,
+    "on every way out of a settle that has not already done it");
+  assert.match(sweep, /const home = chooseScrollTarget\(applicantList\(\)\);\s*\n\s*if \(home\) scrollPanelTo\(0, home\);/,
+    "and against the list as it is then — never a container the walk was holding");
+  assert.ok(
+    sweep.indexOf("handedBack = true;") < sweep.indexOf("} finally {"),
+    "the confirmed-bottom path records that it has done it, so a settled page is not scrolled twice"
+  );
+  // Scoped to a settle for the same reason `roster.reset()` is: a sweep asked
+  // for one owed row is left exactly where that row is mounted, because moving
+  // it is how the row is lost again.
+  assert.match(sweep, /if \(typeof wanted === "function" && wanted\(\)\) return true;/,
+    "a sweep looking for one row still returns the moment it mounts");
+  assert.ok(!/\.click\(\)/.test(sweep), "and settling a page still presses nothing");
 });
 
 test("an applicant is opened, read and saved exactly once, and 'already open' is the panel's answer", async () => {

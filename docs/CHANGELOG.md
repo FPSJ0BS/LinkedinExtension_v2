@@ -1,5 +1,68 @@
 # CHANGELOG.md
 
+## 3.8.1 — a row is a value, and the element under it is found again at the moment it is clicked
+
+**THE REPORT: the collector starts from a lower applicant.** One symptom, three separate ways to
+produce it, and none of them was the roster's ordering — that was settled in 3.7.24 and is unchanged.
+Each of these let the walk step *past* the row the page owed and carry on from further down.
+
+**1. `pending[0]` is the mounted window's answer, and the turn moved on after asking it.** The turn
+reads the list once at the top, sorts that window back into page order, and checks that its first row
+is the one the roster owes (`owed` / `ready`). All true — and then the bulk retirement below it
+finishes with every row on that window that was already saved. That **advances what the page owes**,
+and the newly-owed row may not be mounted at all, at which point `pending[0]` is simply the nearest
+mounted row *below* it. The check that guarded the choice had been made against a different question.
+
+So the row is re-asked for after the retirement, from the roster, and the walk opens **that** row.
+`roster.nextDescriptor(processed)` is `roster.next` with everything the page knows about the row
+attached to it.
+
+**2. The element it clicked could already have been thrown away.** `pending[0]` is a live element on a
+virtualized list, and between reading it and clicking it the turn may settle the page, sweep for an
+owed row, or grow the list — each of which scrolls and awaits, and scrolling is exactly when the list
+recycles the elements it passes. A detached node fails `list.contains(row.control)` inside
+`selectApplicantRow`, so the click never happens, the row is filed as **could not open**, and the
+person is saved with nothing but the name their row was showing. Silently: it is a legitimate outcome
+with a legitimate message.
+
+**⚠ The rule this establishes: a row is a VALUE, and its element is resolved again from that value at
+the moment it is needed.** `describeApplicantRow` takes the key, the href and the `applicationId`
+while the element is attached; the roster keeps one per row of the page, merge-only (rule 4), and
+`reset()` clears them with the order. `liveApplicantRow(descriptor, held)` then finds the element by
+that key against the list as it is *now*. It answers with that row or with **nothing** — there is no
+nearest-row and no first-visible-row fallback, because a wrong person who happens to be on screen is
+still the wrong person (rule 1). Nothing resolved means the row is not mounted, and the machinery for
+that already existed: the next turn's `ready` check fails and `sweepCurrentPage(…, wanted)` goes and
+fetches that one row back. `MAX_UNRESOLVED_TURNS` bounds it, because refusing to open the wrong person
+must never become refusing to open anybody.
+
+The **name** still comes off the live element — it is about to be clicked, so it is attached, and
+`innerText` on a recycled node answers with whatever it last held. The **href** comes off the
+descriptor for the opposite reason. The descriptor deliberately does *not* carry a name for a row that
+has an address: `row.name` is a lazy `innerText` getter and taking it for every row of every sweep
+pass is the per-row forced layout that getter exists to remove.
+
+**3. A settled page was handed back at its top only when its bottom had been confirmed.**
+`sweepCurrentPage` ends at the top so the page's first applicant is the next one opened — on the one
+path that reached `atBottom && quiet >= LIST_QUIET_PASSES`. The other two exits set `pageSettled` just
+the same and left the list where the walk had dragged it, near the bottom: the pass budget running out
+(`LIST_PAGE_PASSES`, on a slow page that never quietens) and the list being torn out mid-pass. The run
+then opened the page's first row with the list standing at its last, so every row above it had to be
+swept back into view one at a time and the ones that did not come back were retired as vanished — the
+report, from the third direction. The hand-back is now in a `finally`, guarded by `handedBack` so a
+settled page is not scrolled twice, and still scoped to a settle: a sweep asked for one owed row is
+left exactly where that row is mounted, for the same reason it does not `roster.reset()`.
+
+No control was added on any path — still exactly seven `.click()` sites (rule 5) — and the left list
+still scrolls in the one place it is allowed to, the per-page sweep.
+
+Locked by *"the row that is opened is the page's next row, resolved by id at the moment it is
+clicked"*, which drives the pure roster through the retirement case above and proves the mounted
+window's own first row is row 4 while the page still owes row 2, and by *"a settled page is always
+handed back at its top, not only when its bottom was confirmed"*. Both also assert what must never
+come back: no `.reverse()` in either file, and no `.pop()`/`.shift()` in the roster or the walk — the
+roster is an **order**, not a queue eaten from one end, and progress lives in the run's own ledger.
+
 ## 3.8.0 — the block nobody told the map about, and the record that threw away what it had read
 
 Two faults, one cause between them, and one deliberate change of scope.
