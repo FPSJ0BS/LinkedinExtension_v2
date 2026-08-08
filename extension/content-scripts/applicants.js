@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-08-react-v3.8.1";
+  const BUILD_ID = "2026-08-08-react-v3.8.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -4476,49 +4476,6 @@
   }
 
   /**
-   * The live element for ONE row of the page, found by its ID — or nothing.
-   *
-   * **THE TWO WAYS THE WALK USED TO OPEN THE WRONG PERSON, and both of them
-   * looked like "it starts from an applicant lower down the list".**
-   *
-   *   - It clicked the element it was still holding. `pending[0]` is read at the
-   *     top of the turn and clicked at the bottom of it, and in between the turn
-   *     may settle the page, sweep for a row and grow the list — every one of
-   *     which scrolls and awaits, and a virtualized list recycles elements when
-   *     it scrolls. A detached node fails `list.contains` inside
-   *     `selectApplicantRow`, so the row is filed as "could not open" and the
-   *     person is saved with nothing but their row's name.
-   *   - It clicked `pending[0]` rather than the row the page actually owed.
-   *     `pending` holds only what is MOUNTED, so once the bulk retirement below
-   *     has retired the rows already saved, the roster's next row may not be in
-   *     it at all — and `pending[0]` is then simply the nearest mounted row
-   *     BELOW it. The page's own next applicant is stepped over, silently, and
-   *     the walk carries on from further down.
-   *
-   * So the row is resolved by the one identifier it carries before it is opened,
-   * against the list as it is at the moment of the click. **There is no
-   * fallback**: a descriptor that resolves to nothing yields `null`, never the
-   * nearest row, never the first visible one. The caller waits for that row to
-   * mount — `sweepCurrentPage(..., wanted)` goes and finds it — which is the
-   * whole of "the exact next applicant", and the opposite of "whoever is on
-   * screen".
-   *
-   * `held` is the row the turn already has, and is the common case: nothing has
-   * awaited since it was read, so it is the owed row and its element is still in
-   * the document. Confirming that costs one property read, and skips a list
-   * scan per applicant.
-   */
-  function liveApplicantRow(descriptor, held = null) {
-    const key = descriptor?.key || "";
-    if (!key) return null;
-    if (held && held.control?.isConnected && rowKey(held) === key) return held;
-    for (const candidate of applicantRows()) {
-      if (rowKey(candidate) === key) return candidate;
-    }
-    return null;
-  }
-
-  /**
    * How many scroll attempts one "I need the next row" may cost.
    *
    * Raised from 6 when the bottom stopped being believed on sight. The budget
@@ -4693,80 +4650,51 @@
     await waitForDomQuiet(320, 2000);
 
     let quiet = 0;
-    /** Has this settle already put the list back where the walk starts? */
-    let handedBack = false;
-    try {
-      for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
-        assertRunnable();
-        // Re-resolved every pass, for the reason `waitForApplicantList` exists:
-        // the hiring view re-mounts, and a detached container keeps answering with
-        // the range it had when it was unmounted.
-        const live = await waitForApplicantList();
-        if (!live) {
-          walk.stoppedBy = "no-list";
-          return false;
-        }
-        const target = chooseScrollTarget(live);
-        // ONE list scan per pass, and both answers taken from it.
-        const gained = roster.add(applicantRows());
-        walk.rows = Math.max(walk.rows, roster.size);
-        walk.passes += 1;
-        // Found what the caller came for. The list is deliberately left where it
-        // is, because where it is, is where that row is mounted.
-        if (typeof wanted === "function" && wanted()) return true;
-
-        const max = maxScrollPosition(target);
-        const position = currentScrollTop(target);
-        const atBottom = position >= max - 8;
-        quiet = gained > 0 ? 0 : quiet + 1;
-        // The bottom is confirmed rather than believed on sight: LinkedIn fetches
-        // the rest of the page over the network, and a slice still in flight looks
-        // exactly like a page that has ended.
-        if (atBottom && quiet >= LIST_QUIET_PASSES) {
-          // Settled — and handed back at the TOP, because the first applicant of
-          // this page is the next one the run opens. Leaving it at the bottom
-          // would start the page at its last row and then need a sweep back up
-          // for every row above it: correct, but the slow way round.
-          scrollPanelTo(0, chooseScrollTarget((await waitForApplicantList()) || live));
-          handedBack = true;
-          await waitForDomQuiet(320, 2000);
-          roster.add(applicantRows());
-          return true;
-        }
-
-        if (!atBottom) scrollPanelTo(position + Math.max(500, (target?.clientHeight || 600) * 0.8), target);
-        // Either this really is the bottom, or the container being driven is not
-        // the one that scrolls. Dragging the last row into view settles it without
-        // needing to know which.
-        else nudgeListToLastRow();
-        await waitForDomQuiet(380, 2800);
+    for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
+      assertRunnable();
+      // Re-resolved every pass, for the reason `waitForApplicantList` exists:
+      // the hiring view re-mounts, and a detached container keeps answering with
+      // the range it had when it was unmounted.
+      const live = await waitForApplicantList();
+      if (!live) {
+        walk.stoppedBy = "no-list";
+        return false;
       }
-      return false;
-    } finally {
-      /**
-       * A SETTLE ALWAYS HANDS THE LIST BACK AT ITS TOP.
-       *
-       * The branch above does it on the one path that confirmed the bottom, and
-       * that used to be the only path that did. The other two leave the list
-       * exactly where the walk had dragged it — near the bottom of the page —
-       * and both of them still set `pageSettled`: the budget runs out
-       * (`LIST_PAGE_PASSES`, on a slow page that never quietens), or the list is
-       * torn out from under the walk mid-pass. The run then opens the page's
-       * first applicant with the list standing at its last rows, so every row it
-       * owes has to be swept back INTO view one at a time — and the rows that
-       * never come back are retired as vanished. That reads exactly as the
-       * report: the collector starts from an applicant lower down the page.
-       *
-       * The top is where the walk begins, so the top is where a settled page is
-       * handed over, on every way out of it. Scoped to a settle for the reason
-       * the reset is: a sweep asked for one owed row is left where that row is
-       * mounted, because moving it is how the row is lost again.
-       */
-      if (typeof wanted !== "function" && !handedBack) {
-        const home = chooseScrollTarget(applicantList());
-        if (home) scrollPanelTo(0, home);
+      const target = chooseScrollTarget(live);
+      // ONE list scan per pass, and both answers taken from it.
+      const gained = roster.add(applicantRows());
+      walk.rows = Math.max(walk.rows, roster.size);
+      walk.passes += 1;
+      // Found what the caller came for. The list is deliberately left where it
+      // is, because where it is, is where that row is mounted.
+      if (typeof wanted === "function" && wanted()) return true;
+
+      const max = maxScrollPosition(target);
+      const position = currentScrollTop(target);
+      const atBottom = position >= max - 8;
+      quiet = gained > 0 ? 0 : quiet + 1;
+      // The bottom is confirmed rather than believed on sight: LinkedIn fetches
+      // the rest of the page over the network, and a slice still in flight looks
+      // exactly like a page that has ended.
+      if (atBottom && quiet >= LIST_QUIET_PASSES) {
+        // Settled — and handed back at the TOP, because the first applicant of
+        // this page is the next one the run opens. Leaving it at the bottom
+        // would start the page at its last row and then need a sweep back up
+        // for every row above it: correct, but the slow way round.
+        scrollPanelTo(0, chooseScrollTarget((await waitForApplicantList()) || live));
+        await waitForDomQuiet(320, 2000);
+        roster.add(applicantRows());
+        return true;
       }
+
+      if (!atBottom) scrollPanelTo(position + Math.max(500, (target?.clientHeight || 600) * 0.8), target);
+      // Either this really is the bottom, or the container being driven is not
+      // the one that scrolls. Dragging the last row into view settles it without
+      // needing to know which.
+      else nudgeListToLastRow();
+      await waitForDomQuiet(380, 2800);
     }
+    return false;
   }
 
   /**
@@ -5374,22 +5302,6 @@
     const MAX_INCONCLUSIVE_GROWTHS = 3;
     let inconclusive = 0;
 
-    /**
-     * How many turns in a row the page's next row may fail to resolve to a live
-     * element before it is treated as gone.
-     *
-     * The turn after a miss re-reads the list, finds the owed row is not in it,
-     * and sends `sweepCurrentPage` to fetch that one row back — so this is a
-     * backstop rather than the recovery. It exists because refusing to open the
-     * wrong person must never become refusing to open anybody: without a bound,
-     * a row whose element never returns would hold the run for the rest of the
-     * job. Retired exactly as the vanished-row path retires one, and reset by
-     * any row that does resolve.
-     */
-    const MAX_UNRESOLVED_TURNS = 3;
-    let unresolvedKey = "";
-    let unresolvedTurns = 0;
-
     for (;;) {
       // The one moment the applicant list is scrolled: the run has run out of
       // rows it has not done and needs more. `growApplicantList` is asked the
@@ -5625,49 +5537,6 @@
       const row = pending[0];
       if (!row) continue;
 
-      /**
-       * ROSTER[0], BY ID, AGAINST THE LIST AS IT IS NOW.
-       *
-       * `pending[0]` is the mounted window's answer, and it was true when the
-       * window was read at the top of this turn. Two things can have happened
-       * since, and both of them read as "the collector started from an applicant
-       * lower down the list":
-       *
-       *   - the bulk retirement just above finished with rows this page owed
-       *     BEFORE `pending[0]`, which advances what the roster owes next — and
-       *     the newly-owed row may not be mounted at all, in which case
-       *     `pending[0]` is simply the nearest mounted row *below* it;
-       *   - the turn may have settled the page, swept for a row, or grown the
-       *     list, each of which scrolls and awaits, and a virtualized list
-       *     recycles the elements it scrolls past. The element in `pending[0]`
-       *     can be detached by now, and a detached row cannot be clicked — it is
-       *     refused by `selectApplicantRow` and filed as "could not open".
-       *
-       * So the row is taken from the roster as a value and its element resolved
-       * from that value's key, here, immediately before it is opened.
-       * `liveApplicantRow` answers with that row or with nothing; there is no
-       * nearest-row and no first-visible-row fallback, because opening the wrong
-       * person is the defect and a wrong person who happens to be on screen is
-       * still the wrong person. Nothing resolved means the row is not mounted,
-       * and the next turn goes and fetches it.
-       */
-      const descriptor = roster.nextDescriptor(processed) || Applicants.describeApplicantRow(row);
-      const liveRow = liveApplicantRow(descriptor, row);
-      if (!liveRow) {
-        unresolvedTurns = descriptor.key === unresolvedKey ? unresolvedTurns + 1 : 1;
-        unresolvedKey = descriptor.key;
-        if (unresolvedTurns > MAX_UNRESOLVED_TURNS) {
-          processed.add(descriptor.key);
-          state.run.skipped += 1;
-          state.run.index = processed.size;
-          state.run.lastError = `A row on this page never came back as an element and was skipped (${descriptor.key}).`;
-          console.warn(`[Profile Vault ${BUILD_ID}] a row would not resolve to an element`, descriptor.key);
-        }
-        continue;
-      }
-      unresolvedTurns = 0;
-      unresolvedKey = "";
-
       // Consulted for the STOP semantics. Completion is decided above, by
       // exhaustion, so the total handed over is the one thing that is certainly
       // true — there is at least one more row than have been processed — rather
@@ -5679,13 +5548,11 @@
         break;
       }
 
-      const key = descriptor.key;
+      const key = rowKey(row);
       // Decided from the row itself, before anything is opened: the id in its
       // own href is all a row knows about who it leads to, and opening every
-      // applicant to find out they may be skipped is the cost this avoids. Taken
-      // from the descriptor, which read that href while the row was attached, so
-      // an element the list has since recycled cannot make this answer blank.
-      const rowId = descriptor.applicationId;
+      // applicant to find out they may be skipped is the cost this avoids.
+      const rowId = Applicants.parseHiringContext(row.href).applicationId || "";
 
       // ------------------------------------------------------- the applicant
       // "Collect all the applicants like we did in connections": the whole
@@ -5733,13 +5600,8 @@
         listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator)) || listJob;
       }
       const fromRow = Applicants.buildApplicantListRecord({
-        // The name off the element that is about to be clicked — resolved a few
-        // lines above and therefore attached, so `innerText` answers with what
-        // the row is showing rather than with what a recycled node last held.
-        // The address comes from the descriptor for the opposite reason: it was
-        // read while the row was attached and cannot be re-read wrongly.
-        name: liveRow.name,
-        href: descriptor.href,
+        name: row.name,
+        href: row.href,
         job: listJob,
         context: Applicants.parseHiringContext(location.href),
         sourceUrl: location.href,
@@ -5757,7 +5619,7 @@
       if (!fromRow) {
         processed.add(key);
         state.run.skipped += 1;
-        state.run.lastError = `Skipped a list link that is not an applicant${liveRow.name ? `: "${liveRow.name}"` : ""}.`;
+        state.run.lastError = `Skipped a list link that is not an applicant${row.name ? `: "${row.name}"` : ""}.`;
         state.run.index = processed.size;
         state.run.updatedAt = new Date().toISOString();
         continue;
@@ -5773,7 +5635,7 @@
       let opened = true;
       let record = null;
       try {
-        const outcome = await collectVisibleApplicant(liveRow, rowId);
+        const outcome = await collectVisibleApplicant(row, rowId);
         opened = outcome.opened;
         record = outcome.record;
       } catch (error) {

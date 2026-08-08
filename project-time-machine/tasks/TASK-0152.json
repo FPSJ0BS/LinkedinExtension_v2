@@ -1,0 +1,68 @@
+{
+  "schema": 2,
+  "id": "TASK-0152",
+  "name": "Rollback of TASK-0150 (Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top)",
+  "request": "Rollback of TASK-0150 (Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-08T10:17:11.645Z",
+  "completedAt": "2026-08-08T10:17:12.733Z",
+  "startCommit": "0861796bdca38e4bd67de6e195d2d693a0974131",
+  "commit": null,
+  "gitRef": "task/TASK-0152",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-08T10-17-11-489Z created and verified"
+  ],
+  "result": "Reversed TASK-0150 — Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top",
+  "target": {
+    "taskId": "TASK-0150",
+    "taskName": "Applicant walk resolves the page's next row by ID from a stable descriptor, and a settled page always hands the list back at its top",
+    "commit": "b8dd4d0a0e724a1fbc4c781ae83a2e8643f6afb0"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-08T10-17-11-489Z",
+    "commit": "0861796bdca38e4bd67de6e195d2d693a0974131"
+  }
+}

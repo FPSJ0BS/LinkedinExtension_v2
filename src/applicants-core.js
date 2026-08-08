@@ -2251,42 +2251,6 @@
     return `name:${cleanText(row.name).toLowerCase()}`;
   }
 
-  /**
-   * A row as a VALUE: everything the walk needs about it that outlives its node.
-   *
-   * **THE DEFECT THIS EXISTS FOR.** A rendered row is a live element on a
-   * virtualized list, and the list recycles that element the moment it scrolls
-   * out of the window. The walk was handed those elements, held them across a
-   * settle, a sweep and a growth — every one of which awaits and scrolls — and
-   * then clicked whichever one it was still holding. By then the node can be
-   * detached: `selectApplicantRow` asks `list.contains(row.control)`, that is
-   * false, the click never happens, and the applicant is filed as "could not
-   * open" with nothing but the name their row happened to be showing.
-   *
-   * A descriptor is the fix, and it is the same shape as the rest of this
-   * surface's identity rules: the key, the address and the `applicationId`,
-   * taken while the element was attached and readable, and still true afterwards
-   * whatever the DOM does to the element. The element is resolved AGAIN from the
-   * key at the moment it is needed, so nothing stale is ever clicked and nothing
-   * is ever opened by position or by "whatever is on screen instead".
-   *
-   * The NAME is taken only when the row carries no address, exactly as
-   * `applicantRowKey` consults it only then. `row.name` is a lazy getter over
-   * `innerText` and forces a synchronous layout; this runs for every row of
-   * every sweep pass, so taking it eagerly would put back the per-row reflow
-   * that getter exists to remove. The one row actually opened reads its name
-   * from its own live element, which is fresher than a remembered one anyway.
-   */
-  function describeApplicantRow(row = {}) {
-    const href = String(row?.href || "");
-    return {
-      key: applicantRowKey(row),
-      href,
-      applicationId: parseHiringContext(href).applicationId || "",
-      name: href ? "" : cleanText(row?.name)
-    };
-  }
-
   /** Position-free queue selection for a paginated or virtualized row window. */
   function unprocessedApplicantRows(rows = [], processed = new Set()) {
     return (rows || []).filter((row) => !processed.has(applicantRowKey(row)));
@@ -2329,15 +2293,6 @@
   function createApplicantRoster() {
     const order = [];
     const index = new Map();
-    /**
-     * What each row of this page IS, beside where it sits.
-     *
-     * The roster is the one thing that reads every row of the page while every
-     * row is attached — that is what a settle is — so it is the only honest
-     * place to keep the descriptor. Positions alone would still leave the walk
-     * holding elements it read once and clicking them several awaits later.
-     */
-    const cards = new Map();
 
     const reindexFrom = (at) => {
       for (let position = at; position < order.length; position += 1) index.set(order[position], position);
@@ -2362,7 +2317,6 @@
       reset() {
         order.length = 0;
         index.clear();
-        cards.clear();
       },
       /**
        * Merge one rendered window, in the order it rendered. Returns how many
@@ -2372,17 +2326,8 @@
       add(rows = []) {
         const keys = [];
         for (const row of rows || []) {
-          const card = describeApplicantRow(row);
-          if (!card.key || card.key === "name:") continue;
-          keys.push(card.key);
-          // Merge-only, rule 4. A window read mid-hydration knows less about a
-          // row than a later one does, so a second read of the same row fills
-          // the gaps it left and can never blank a field already answered.
-          const known = cards.get(card.key);
-          if (!known) cards.set(card.key, card);
-          else for (const field of ["href", "applicationId", "name"]) {
-            if (!known[field] && card[field]) known[field] = card[field];
-          }
+          const key = applicantRowKey(row);
+          if (key && key !== "name:") keys.push(key);
         }
         // Where an unknown row goes: just before the first row of this window
         // the roster already knows, because everything ahead of that row in the
@@ -2421,31 +2366,6 @@
       next(processed = new Set()) {
         for (const key of order) if (!processed.has(key)) return key;
         return "";
-      },
-      /**
-       * What this page said about one of its rows, independent of its element.
-       *
-       * Handed back as a COPY, so a caller that keeps it — the walk keeps one
-       * for the whole of an applicant — cannot edit the page's own record of
-       * who is on it.
-       */
-      describe(key) {
-        const value = cleanText(key);
-        return cards.has(value) ? { ...cards.get(value) } : null;
-      },
-      /**
-       * The next row of this page as a VALUE rather than as an element.
-       *
-       * This is what the walk opens. `next` says which row is owed; this says
-       * everything known about it, so the element can be resolved again by id at
-       * the moment of the click rather than held from whenever it was last seen.
-       */
-      nextDescriptor(processed = new Set()) {
-        return this.describe(this.next(processed));
-      },
-      /** Every row of this page, in the page's own order, as values. */
-      descriptors() {
-        return order.map((key) => ({ ...cards.get(key) }));
       },
       /** How many, without building the list — this is asked every turn. */
       remaining(processed = new Set()) {
@@ -2645,7 +2565,7 @@
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
-    isApplicantRowLabel, applicantRowKey, describeApplicantRow, unprocessedApplicantRows, createApplicantRoster,
+    isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
