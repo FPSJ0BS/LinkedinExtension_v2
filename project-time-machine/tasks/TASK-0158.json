@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0158",
+  "name": "Phase 5: evidence-driven fallbacks, no invented layout",
+  "request": "Phase 5: evidence-driven fallbacks, no invented layout",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:33:38.926Z",
+  "completedAt": "2026-08-08T11:42:16.860Z",
+  "startCommit": "6ae323c519f1f23fdcc092cb5ab8fb3f951aa2e5",
+  "gitRef": "task/TASK-0158",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 505 passed / 0 failed (was 500), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 5 of the multiple-LinkedIn-UI support guide: fallbacks derived from evidence we actually hold, and no invented layout. THE HONEST PART FIRST: there is no captured sample of a second LinkedIn applicant layout anywhere in this repository and no saved diagnostics naming one, so ZERO layout-specific selectors were added. Writing readers for a hypothesised screen would ship untested selectors for a layout nobody has observed, which rule 20 forbids outright. What shipped instead: (1) looksLikeApplicantHeadline, in the core beside looksLikeApplicantLocation. headline = lines[1] unconditionally was the last positional guess left in the codebase and it is the same defect class as the old location = lines[2], whose fix was a rule about what a location IS rather than a better index. Deliberately a REFUSAL rule, not an acceptance one - a headline is free text and nearly anything can be one, so an acceptance rule would drop real headlines. It refuses page chrome, the application timeline, a line that is ENTIRELY a verdict word (the status pattern is unanchored on purpose, so a headline may contain 'New' or 'Offer'), a section title, a contact detail, a line with no letters in it, the name repeated, and a line that is entirely a button label. lines[1] is still FIRST and still returned unchanged when it passes, so the working layout is untouched; a line that fails yields '' rather than the next plausible line, because falling through would re-invent the position guess one line down, and addHeader being first-wins means a blank is an opening for a later labelled read rather than a loss. The one reading where lines[1] genuinely IS the location - a layout that renders no headline, so the place moves up a line and the location search below finds nothing - leaves BOTH fields blank rather than storing a city as a headline; a place-shaped headline with a real location under it is kept, because then there is no such reading. parseApplicantHeader gained an optional name, backwards compatible, and the adapter passes the name it already resolved by policy. (2) isEmployerCandidate and isCurrentRoleCandidate: the guide's prohibitions on the hiring company, the recruiter company, a school, and the role being applied for, made executable and asked of the job the accumulator already holds. Both reuse INSTITUTION_PATTERN and the existing chrome list rather than inventing a fourth kind of test. (3) isWholeLineControlLabel, asked by all three rules. The click denylist knows 'Message' and 'Connect' and NAME_CHROME_PATTERN deliberately does not - two lists, two questions - and a wide panel can still put a button label where a field belongs. Whole line ONLY, and that is the care taken: the denylist is anchored on word boundaries because it judges a control, and asking it that way of a VALUE would refuse 'Hire Digital' and 'Offerpad', which are real employers. Asserted in both directions. (4) Section aliases for wordings LinkedIn is documented to render: Work/Employment/Job history and bare Employment; Academics, Academic background, Education and training; Skills and expertise; Resume/CV, Resume and CV, Resume attachments, Résumé. Every one is anchored, every one was run against the six content lines pinned since 3.7.22 plus six new near-misses invited by the aliases themselves (Employment Lawyer, Academic Coordinator, History Teacher, ...), and a new invariant test asserts that every wording the section table recognises is also a line the parsers refuse as content - the drift that once let 'Education' be stored as an employer. SECTION_TITLE_NOISE_PATTERN learned the same wordings plus the four auxiliary ones Phase 6 will use. (5) readDocumentCardDetails: a file name read off a card the panel already painted, when the viewer produced none. resume.filename is null on most accounts because LinkedIn's document addresses are opaque media ids with no name in them, so this is a real gain. Read-only - no click, no scroll, and it never supplies an ADDRESS, so the chain that proves an address is a document before anything is written to disk under a person's name is untouched. Two of the new tests initially failed against my own expectations and the code was right both times: 'Open to work' is refused as a headline because NAME_CHROME_PATTERN has always known it is the platform's badge rather than the member's words, and 'Message' needed the whole-line denylist rather than the chrome list. Click budget still seven. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}

@@ -1895,7 +1895,15 @@ test("the resume viewer is opened, scrolled and read rather than only linked", a
   assert.match(step, /control\.element\.click\(\)/, "the viewer must be openable");
   assert.match(step, /await scrollResumeViewer\(overlay\)/, "a PDF viewer renders its pages lazily");
   assert.match(step, /readResumeViewerDetails\(overlay\)/, "and its own details must be read");
-  assert.match(step, /details\.filename \|\| fileNameFrom\(url\)/, "the viewer's name beats one derived from the URL");
+  // 3.9.0 put a third link between the two: a document CARD the panel painted.
+  // The order is what this asserts and the order is unchanged — the viewer's own
+  // name still wins, the URL is still the last resort. The card is only asked
+  // when the viewer produced nothing, which is the common case, because
+  // LinkedIn's document addresses are opaque media ids with no name in them.
+  assert.match(step, /details\.filename \|\| card\.filename \|\| fileNameFrom\(url\)/,
+    "the viewer's name beats the card's, and both beat one derived from the URL");
+  assert.match(step, /const card = details\.filename \? \{ filename: "", fileType: "" \} : readDocumentCardDetails\(panel\)/,
+    "and the card is not even read when the viewer already named the file");
   assert.match(step, /dismissResumeViewer\(overlay, accumulator, diagnostics\)/, "and it must be closed again on every path");
   // A viewer that mounted only once the document arrived still has to be closed.
   assert.match(step, /if \(!overlay\) overlay = findResumeViewer\(\);/, "the viewer is re-resolved before the close");
@@ -5567,4 +5575,225 @@ test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and 
 
   // The click budget is untouched by any of this.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+});
+
+// ------ Phase 5 of the multiple-LinkedIn-UI support guide: the fallbacks
+//
+// The guide's Phase 5 is "Add Support for the Second UI". There is no captured
+// sample of a second LinkedIn applicant layout anywhere in this repository and
+// no saved diagnostics naming one, so writing readers for a hypothesised layout
+// would ship untested selectors for a screen nobody has observed — rule 20, and
+// rule 1's spirit.
+//
+// So this phase ships only what evidence we actually hold: shape rules instead
+// of positional guesses, heading aliases for wordings LinkedIn is documented to
+// render, and a file name read off a card the page already painted. Zero
+// layout-specific selectors were added. Phase 9 builds the capture that would
+// make a real second-UI reader possible.
+
+test("Phase 5: the headline has to BE one, and a line that is not leaves the field empty", () => {
+  // `headline = lines[1]`, unconditionally, was the last positional guess in
+  // the core. It is the same defect class as the old `location = lines[2]`,
+  // whose fix was a rule about what a location IS rather than a better index —
+  // and the comment above APPLICANT_LOCATION_PATTERN says so in as many words.
+  const name = "Nihal Sharma";
+
+  // Real headlines, including the awkward ones. An acceptance rule would have
+  // dropped most of these, which is why this is a refusal rule.
+  for (const headline of [
+    "Human Resource", "Legal Assistant at Bhatia & Khatri", "Student",
+    "Innovator | Change Maker | Entrepreneurial Spirit in Action",
+    "Legal, Compliance, Governance",
+    "Full Stack Developer • React • Node",
+    "Ex-Amazon | IIT Delhi '19"
+  ]) {
+    assert.ok(Applicants.looksLikeApplicantHeadline(headline, { name }), `"${headline}" is a headline`);
+  }
+
+  // What a layout that drops the headline puts in that position instead.
+  for (const other of [
+    "", "   ",
+    "Filter and sort", "Shortlist", "Move to", "Message",        // page chrome
+    "Applied 13mo ago • Contacted 10mo ago",                     // the timeline
+    "Shortlisted", "Not a fit", "Reviewed",                      // a bare verdict
+    "Experience", "Education", "Screening question responses",   // a section title
+    "nihal@example.com", "+91 90000 00000", "https://example.com/x",
+    "2019 - 2024", "1,005",
+    // The badge LinkedIn renders, which `NAME_CHROME_PATTERN` has always known.
+    // Reusing that list means this is refused for free, and refusing it is
+    // right: it is the platform's own decoration, not the member's own words.
+    "Open to work",
+    "Nihal Sharma"                                               // the name, again
+  ]) {
+    assert.ok(!Applicants.looksLikeApplicantHeadline(other, { name }), `"${other}" is not a headline`);
+  }
+
+  // A status WORD inside a real headline is not a status line. The pattern is
+  // unanchored on purpose, so only a line that is entirely a verdict is refused.
+  assert.ok(Applicants.looksLikeApplicantHeadline("New Business Offer Manager", { name }),
+    "a headline may contain the words a verdict is made of");
+
+  // And in the parser: `lines[1]` is still first and still returned unchanged
+  // when it passes, so the layout that works today is untouched.
+  const working = ["PRAVESH KOTIYAL · 1st", "Human Resource", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  const parsed = Applicants.parseApplicantHeader({ text: working.join("\n") });
+  assert.equal(parsed.headline, "Human Resource", "the working layout is unchanged");
+  assert.equal(parsed.location, "Noida, Uttar Pradesh, India");
+
+  // A line that is not a headline yields "" rather than the next plausible one.
+  // Falling through would re-invent the position guess one line down, and
+  // `addHeader` is first-wins, so a blank here is an opening for a later
+  // labelled read rather than a loss (rule 1).
+  const chrome = ["PRAVESH KOTIYAL · 1st", "Shortlisted", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  const refused = Applicants.parseApplicantHeader({ text: chrome.join("\n") });
+  assert.equal(refused.headline, "", "a blank beats a wrong value");
+  assert.equal(refused.location, "Noida, Uttar Pradesh, India", "and the location is still found");
+  assert.equal(refused.applicationStatus, "Shortlisted", "and the status is still read, from where it belongs");
+
+  // THE CASE THIS PROTECTS AGAINST, and the shape of the 3.7.24 defect one field
+  // over: a layout that renders no headline at all, so the place moves up a line.
+  // Storing it as the headline would give every applicant on the job a headline
+  // that is really their city, and an empty location beside it.
+  const noHeadline = ["PRAVESH KOTIYAL", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  const moved = Applicants.parseApplicantHeader({ text: noHeadline.join("\n") });
+  assert.equal(moved.headline, "", "a place in the headline's position is not a headline");
+  assert.equal(moved.location, "", "and it is not silently promoted either — both stay blank (rule 1)");
+
+  // ...but a place-shaped HEADLINE with a real location under it is kept, because
+  // then there is no reading under which line 1 is the location.
+  const commas = ["PRAVESH KOTIYAL", "Legal, Compliance, Governance", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  const kept = Applicants.parseApplicantHeader({ text: commas.join("\n") });
+  assert.equal(kept.headline, "Legal, Compliance, Governance", "a comma-separated headline is still a headline");
+  assert.equal(kept.location, "Noida, Uttar Pradesh, India");
+
+  // The name is optional and the call is backwards compatible.
+  const twoLineName = ["Nihal Sharma", "Nihal Sharma", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  assert.equal(Applicants.parseApplicantHeader({ text: twoLineName.join("\n"), name: "Nihal Sharma" }).headline, "",
+    "a name rendered twice is not a headline");
+  assert.equal(Applicants.parseApplicantHeader({ text: working.join("\n") }).headline, "Human Resource",
+    "and a call with no name still works");
+});
+
+test("Phase 5: the job being applied for is never the applicant's own role or employer", () => {
+  // The guide states both as prohibitions — "do not use the role being applied
+  // for as the current role", "do not use the hiring company, recruiter company,
+  // or school as the applicant's current company". Both are on every applicant's
+  // screen and belong to none of them.
+  assert.ok(!Applicants.isCurrentRoleCandidate("Legal Associate", { jobTitle: "Legal Associate" }),
+    "the posting's own title is not this person's current role");
+  assert.ok(Applicants.isCurrentRoleCandidate("Legal Assistant", { jobTitle: "Legal Associate" }),
+    "a different role is");
+  assert.ok(Applicants.isCurrentRoleCandidate("Legal Associate", {}), "and with no posting to compare, nothing is refused");
+
+  assert.ok(!Applicants.isEmployerCandidate("Acme Recruiting", { hiringCompany: "Acme Recruiting" }),
+    "the company doing the hiring is not this person's employer");
+  assert.ok(Applicants.isEmployerCandidate("Bhatia and Khatri Law Office", { hiringCompany: "Acme Recruiting" }));
+
+  // A school is not an employer. The education reader's own institution test is
+  // reused rather than a fourth kind of test being invented.
+  for (const school of ["CHANDIGARH UNIVERSITY", "Delhi Public School", "Indian Institute of Technology", "Bachelor of Laws"]) {
+    assert.ok(!Applicants.isEmployerCandidate(school, {}), `"${school}" is a school, not an employer`);
+  }
+
+  // Neither may be page chrome or a section title. The chrome list is the one
+  // `looksLikeApplicantLocation` and `chooseApplicantName` already use — one
+  // list, three readers.
+  for (const chrome of ["Filter and sort", "Shortlist", "Move to", "Experience", "Education", "Contact info", "Message", "Connect"]) {
+    assert.ok(!Applicants.isEmployerCandidate(chrome, {}), `"${chrome}" is chrome`);
+    assert.ok(!Applicants.isCurrentRoleCandidate(chrome, {}), `"${chrome}" is chrome`);
+  }
+  assert.ok(!Applicants.isEmployerCandidate("", {}));
+  assert.ok(!Applicants.isCurrentRoleCandidate("", {}));
+
+  // What is deliberately NOT refused: a forbidden CONTROL label such as
+  // "Message" or "Connect". Those live on the click denylist, which is anchored
+  // on word boundaries — refusing them here would cost real employers named
+  // "Hire Digital" or "Offerpad", and a lost employer is as wrong as an invented
+  // one (rule 6 cuts both ways). The structural guarantee is what covers it
+  // instead: this reader only ever takes a value that sits under a recognised
+  // field label, and no page renders "Current company: Message".
+  assert.ok(!Applicants.isEmployerCandidate("Message", {}), "a button label, whole and entire, is refused");
+  assert.ok(Applicants.isEmployerCandidate("Hire Digital", {}), "a real employer is not refused for its name");
+  assert.ok(Applicants.isEmployerCandidate("Offerpad", {}));
+});
+
+test("Phase 5: the section table learned more wordings, and refused every content line while doing it", () => {
+  // Wordings LinkedIn is documented to render for the same sections. Each one is
+  // anchored, and each was run against the six content lines the parsers' own
+  // negative test pins BEFORE it was added — because a wrong key hands one
+  // section's cards to another reader, which is worse than an absent section.
+  for (const [wording, key] of [
+    ["Work history", "experience"], ["Employment history", "experience"], ["Job history", "experience"], ["Employment", "experience"],
+    ["Academics", "education"], ["Academic background", "education"], ["Education and training", "education"], ["Education & training", "education"],
+    ["Skills and expertise", "skills"], ["Skills & expertise", "skills"],
+    ["Resume/CV", "resume"], ["Resume and CV", "resume"], ["Resume attachments", "resume"], ["CV attachment", "resume"], ["Résumé", "resume"]
+  ]) {
+    assert.equal(Applicants.sectionKeyFor(wording), key, `"${wording}" names the ${key} section`);
+    assert.equal(Applicants.sectionKeyFor(`${wording} (3)`), key, "with a count after it too");
+  }
+
+  // THE SAFETY GATE. Every alias above, run against the content lines that have
+  // been pinned since 3.7.22. Not one of them may become a section title.
+  for (const line of [
+    "Legal Assistant", "Bhatia and Khatri Law Office • 2024-Present", "CHANDIGARH UNIVERSITY",
+    "Bachelor of Laws - LLB", "Experience Cloud Consultant", "Education First",
+    // ...and the near-misses the new aliases invite.
+    "Employment Lawyer", "Academic Coordinator", "History Teacher", "Work history shows consistent growth",
+    "Skills and expertise in contract law", "Resume writing consultant"
+  ]) {
+    assert.equal(Applicants.sectionKeyFor(line), "", `"${line}" is content, not a section title`);
+  }
+
+  // The invariant that keeps the two lists from drifting: every wording the
+  // section table recognises is also a line the parsers refuse as content. A
+  // heading the map can find but a parser would store as a job title is how
+  // "Education" became an employer.
+  for (const entry of Applicants.SECTION_PATTERNS) {
+    for (const wording of [
+      "Experience", "Work history", "Employment", "Education", "Academics", "Skills", "Skills and expertise",
+      "About", "Resume", "Resume/CV", "Attachments", "Qualifications", "Screening question responses"
+    ]) {
+      if (Applicants.sectionKeyFor(wording) !== entry.key) continue;
+      assert.ok(Applicants.isSectionTitleLine(wording),
+        `"${wording}" names a section, so no parser may store it as content`);
+    }
+  }
+});
+
+test("Phase 5: a document card names the file when there is no viewer to ask", async () => {
+  // `resume.filename` is null on most accounts because LinkedIn's document
+  // addresses are opaque media ids with no name in them. A card the panel
+  // already painted is an OBSERVATION of the name, not a guess — and reading it
+  // costs no click.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const card = source.slice(source.indexOf("function readDocumentCardDetails"), source.indexOf("function scrollResumeViewer"));
+  assert.ok(card.length > 200 && card.length < 3000, "the card reader must be found, and only it");
+
+  assert.ok(!/\.click\(\)/.test(card), "it presses nothing");
+  assert.ok(!/scroll/i.test(card), "and moves nothing");
+  assert.ok(!/url|href/i.test(card), "and never supplies an ADDRESS — the proven chain is untouched");
+  assert.match(card, /DOCUMENT_EXTENSION_PATTERN\.test\(line\)/, "a file name is a line carrying a document extension");
+  assert.match(card, /VIEWER_NOISE_PATTERN\.test\(line\)/, "and not one of the viewer's own chrome lines");
+
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+});
+
+test("Phase 5: the labelled reader refuses the posting's own title and company", async () => {
+  // The refusals above are only worth having if the reader actually asks them,
+  // and it must ask them of the JOB the accumulator already holds rather than of
+  // anything it re-reads.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const reader = source.slice(source.indexOf("function readLabelledFields"), source.indexOf("const OVERLAY = Core.CONTACT_OVERLAY"));
+  assert.ok(reader.length > 400 && reader.length < 8000, "the labelled reader must be found, and only it");
+
+  assert.match(reader, /isCurrentRoleCandidate\(value, \{ jobTitle: job\.title/, "the role being applied for is refused");
+  assert.match(reader, /isEmployerCandidate\(value, \{ hiringCompany: job\.company/, "and so is the hiring company");
+  assert.match(reader, /looksLikeApplicantHeadline\(value, \{ name: header\.name/, "the headline gets the same shape rule");
+  assert.match(reader, /looksLikeTotalExperience\(value\)/, "and a stated length of service has to look like one");
+  assert.match(reader, /const job = accumulator\.snapshot\(\)\.job/, "asked of what has already been read, not re-read");
+
+  // The header parser is handed the name the adapter resolved by policy.
+  const header = source.slice(source.indexOf("function readApplicantHeader"), source.indexOf("function readQualifications"));
+  assert.match(header, /parseApplicantHeader\(\{ text: lines\.join\("\\n"\), name: chosen\.name \|\| "" \}\)/,
+    "the resolved name goes in with the window, so a name rendered twice is not a headline");
 });

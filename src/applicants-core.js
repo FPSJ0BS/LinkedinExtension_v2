@@ -638,11 +638,19 @@
     // word itself — which is what `collectQualificationSubsections` is for.
     { key: "qualifications", pattern: /^(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?$/i },
     { key: "screening", pattern: /^screening question(?: response)?s?$/i },
-    { key: "experience", pattern: /^(?:work |professional |employment |career )?experiences?$/i },
-    { key: "education", pattern: /^education(?:al background)?$/i },
-    { key: "skills", pattern: /^(?:top )?skills?(?: (?:&|and) endorsements)?$/i },
+    // 3.9.0 aliases. Every one of them is a wording LinkedIn is documented to
+    // render for the same section, every one is anchored `^…$`, and every one
+    // was checked against the six content lines the parsers' own negative test
+    // pins — "Legal Assistant", "CHANDIGARH UNIVERSITY", "Bachelor of Laws -
+    // LLB", "Experience Cloud Consultant", "Education First" and a dated
+    // employer line — before it was added. A wrong key hands one section's cards
+    // to another reader, which is why this table stays narrow even while it
+    // widens.
+    { key: "experience", pattern: /^(?:(?:work|professional|employment|career)\s+)?experiences?$|^(?:work|employment|job)\s+history$|^employment$/i },
+    { key: "education", pattern: /^(?:education(?:al background)?|academics?|academic background|education (?:&|and) training)$/i },
+    { key: "skills", pattern: /^(?:top )?skills?(?: (?:&|and) (?:endorsements|expertise))?$/i },
     { key: "about", pattern: /^(?:about|summary)$/i },
-    { key: "resume", pattern: /^(?:resume|cv|curriculum vitae|attachments?)$/i }
+    { key: "resume", pattern: /^(?:resumes?|résumés?|cv|resume\s*\/\s*cv|resume (?:&|and) cv|curriculum vitae|(?:resume |cv )?attachments?)$/i }
   ]);
 
   /** Every key the table can produce. */
@@ -710,7 +718,7 @@
    * the two: a root that spans one boundary routinely spans the next as well.
    */
   const SECTION_TITLE_NOISE_PATTERN =
-    /^(?:(?:work |professional |employment |career )?experiences?|education(?:al background)?|(?:top )?skills?(?: (?:&|and) endorsements)?|about|summary|licenses? (?:&|and) certifications?|projects?|languages?|recommendations?|interests?|(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?|must[-\s]?haves?(?: qualifications?)?|preferred(?: qualifications?)?|nice[-\s]to[-\s]haves?|screening question(?: response)?s?|supplementary|required|resume|résumé|cv|curriculum vitae|attachments?|contact info(?:rmation)?|view full profile|see full profile|show (?:more|less|all)|see (?:more|less)|(?:experience|education|skill) verified|verified)$/i;
+    /^(?:(?:work |professional |employment |career )?experiences?|(?:work|employment|job) history|employment|education(?:al background)?|academics?|academic background|education (?:&|and) training|(?:top )?skills?(?: (?:&|and) (?:endorsements|expertise))?|about|summary|licenses? (?:&|and) certifications?|projects?|languages?|recommendations?|interests?|(?:screening |job |candidate |applicant )?qualifications?(?: summary| overview| match)?|must[-\s]?haves?(?: qualifications?)?|preferred(?: qualifications?)?|nice[-\s]to[-\s]haves?|screening question(?: response)?s?|supplementary|required|resumes?|résumés?|cv|resume\s*\/\s*cv|resume (?:&|and) cv|curriculum vitae|(?:resume |cv )?attachments?|contact info(?:rmation)?|contact details|top card|profile summary|candidate summary|application details|application information|additional information|supplementary information|view full profile|see full profile|show (?:more|less|all)|see (?:more|less)|(?:experience|education|skill) verified|verified)$/i;
 
   const EXPERIENCE_NOISE_PATTERN = SECTION_TITLE_NOISE_PATTERN;
 
@@ -1507,6 +1515,121 @@
     return APPLICANT_LOCATION_PATTERN.test(text);
   }
 
+  /**
+   * Is this line ENTIRELY the label of a control?
+   *
+   * The click denylist knows "Message", "Connect", "Share", "Hire" and the rest,
+   * and `NAME_CHROME_PATTERN` deliberately does not — they are two different
+   * lists answering two different questions. A wide panel can still put a button
+   * label where a field belongs, so the denylist is worth asking here too.
+   *
+   * **Whole line only, and that is the whole care taken.** The denylist is
+   * anchored on word boundaries because it judges a control's label; asking it
+   * that way of a VALUE would refuse "Hire Digital" and "Offerpad", which are
+   * real employers. A lost employer is as wrong as an invented one (rule 6 cuts
+   * both ways), and no employer is called exactly "Hire".
+   */
+  function isWholeLineControlLabel(value) {
+    const text = cleanText(value);
+    if (!text) return false;
+    const match = FORBIDDEN_APPLICANT_CONTROL_PATTERN.exec(text);
+    return Boolean(match) && cleanText(match[0]).toLowerCase() === text.toLowerCase();
+  }
+
+  /**
+   * A headline, as a panel that renders one writes it.
+   *
+   * `parseApplicantHeader` reads the headline as `lines[1]`, unconditionally,
+   * and that is the last positional guess left in this file. It is the same
+   * defect class as the old `location = lines[2]`, whose fix — documented
+   * immediately above `APPLICANT_LOCATION_PATTERN` — was a rule about what a
+   * location IS rather than a better index. This is that same answer.
+   *
+   * Deliberately a **refusal** rule rather than an acceptance one. A headline is
+   * free text and very nearly anything can be one, so an acceptance rule would
+   * either be useless or would drop real headlines. What it refuses is the
+   * handful of things that are demonstrably NOT a headline and that a layout
+   * which drops the headline puts in that position instead: page chrome, the
+   * application timeline, a bare status word, a section title that leaked into
+   * the window, a contact detail, and the name repeated.
+   *
+   * Note what is NOT here: "it looks like a location". A real headline can be
+   * three comma-separated words ("Legal, Compliance, Governance") and refusing
+   * those would cost a field that is right far more often than it is wrong. The
+   * one reading under which `lines[1]` genuinely IS the location — the layout
+   * that renders no headline at all — is decided inside `parseApplicantHeader`,
+   * where the resolved location is known and the two can be compared.
+   */
+  function looksLikeApplicantHeadline(value, { name = "" } = {}) {
+    const text = cleanText(value);
+    if (!text || text.length > 220) return false;
+    // The chrome list already knows "Filter and sort" and "Shortlist" — reused
+    // rather than copied, exactly as `looksLikeApplicantLocation` reuses it.
+    if (NAME_CHROME_PATTERN.test(text) || NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
+    // A button label, whole and entire — a wide panel can still put one here.
+    if (isWholeLineControlLabel(text)) return false;
+    // "Applied 13mo ago • Contacted 10mo ago" is the timeline, not a headline.
+    if (APPLIED_PATTERN.test(text) || CONTACTED_PATTERN.test(text)) return false;
+    // A bare verdict word. `APPLICATION_STATUS_PATTERN` is unanchored on purpose
+    // — a real headline may well contain "New" or "Offer" — so only a line that
+    // is ENTIRELY a status is refused.
+    const status = APPLICATION_STATUS_PATTERN.exec(text);
+    if (status && cleanText(status[0]).toLowerCase() === text.toLowerCase()) return false;
+    // A section title that reached the window because the panel resolved wide.
+    if (isSectionTitleLine(text)) return false;
+    // A contact detail is a contact detail (rule 2 in spirit: it has a home).
+    if (/@/.test(text) || /^\+?[\d\s()\-.]{7,}$/.test(text) || /^https?:\/\//i.test(text)) return false;
+    // Digits and punctuation alone say nothing about anybody.
+    if (!/[a-z]/i.test(text)) return false;
+    // A two-line name rendering puts the name here again.
+    const person = cleanApplicantName(name);
+    if (person && cleanApplicantName(text).toLowerCase() === person.toLowerCase()) return false;
+    return true;
+  }
+
+  /**
+   * Could this be the applicant's employer?
+   *
+   * The guide states it as a prohibition — "do not use the hiring company,
+   * recruiter company, or school as the applicant's current company" — and this
+   * is that prohibition made executable. All three refusals reuse rules that
+   * already exist rather than inventing a fourth kind of test.
+   */
+  function isEmployerCandidate(value, { hiringCompany = "" } = {}) {
+    const text = cleanText(value);
+    if (!text || text.length > 120) return false;
+    if (isSectionTitleLine(text)) return false;
+    if (NAME_CHROME_PATTERN.test(text) || NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
+    if (isWholeLineControlLabel(text)) return false;
+    // A school is not an employer. `INSTITUTION_PATTERN` is the education
+    // reader's own test, so one list stays one list.
+    if (INSTITUTION_PATTERN.test(text) || SPELLED_DEGREE_PATTERN.test(text)) return false;
+    // The company doing the hiring is on every applicant's screen and belongs to
+    // none of them.
+    const hiring = cleanText(hiringCompany);
+    if (hiring && text.toLowerCase() === hiring.toLowerCase()) return false;
+    return true;
+  }
+
+  /**
+   * Could this be the applicant's current role?
+   *
+   * The guide again: "do not use the role being applied for as the current role
+   * unless LinkedIn clearly labels it as current employment". The job title is
+   * rendered on every applicant's screen — `readJob` already puts it on the
+   * record — so it is the one string that is guaranteed to be wrong here.
+   */
+  function isCurrentRoleCandidate(value, { jobTitle = "" } = {}) {
+    const text = cleanText(value);
+    if (!text || text.length > 120) return false;
+    if (isSectionTitleLine(text)) return false;
+    if (NAME_CHROME_PATTERN.test(text) || NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
+    if (isWholeLineControlLabel(text)) return false;
+    const applied = cleanText(jobTitle);
+    if (applied && text.toLowerCase() === applied.toLowerCase()) return false;
+    return true;
+  }
+
   // -------------------------------------------- fields the page itself labels
   //
   // The guide's chain for the current role is "explicit current-role field →
@@ -1568,7 +1691,13 @@
       /^\d{1,2}\s*(?:years?|yrs?)\s+(?:and\s+)?\d{1,2}\s*(?:months?|mos?)$/i.test(text);
   }
 
-  function parseApplicantHeader({ text = "" } = {}) {
+  /**
+   * @param {{ text?: string, name?: string }} input `name` is the name the
+   *   adapter already resolved by policy. Optional and backwards compatible —
+   *   every existing `{ text }` call keeps working — and it is what lets the
+   *   headline refuse a second rendering of the name.
+   */
+  function parseApplicantHeader({ text = "", name = "" } = {}) {
     const lines = toLines(text);
     const applied = APPLIED_PATTERN.exec(text);
     const contacted = CONTACTED_PATTERN.exec(text);
@@ -1592,10 +1721,28 @@
     const appliedAt = lines.findIndex((line) => APPLIED_PATTERN.test(line));
     const beforeTimeline = lines.slice(2, appliedAt > 0 ? appliedAt : lines.length);
 
+    const chosenName = cleanText(name) || (isApplicantNameCandidate(first) ? first : "");
+    const location = cleanText(beforeTimeline.find(looksLikeApplicantLocation) || "");
+
+    // The headline: still `lines[1]`, still first, and returned exactly as
+    // before whenever it passes. What changed is that it now has to BE one.
+    //
+    // A line that fails yields "" rather than the next plausible line, and that
+    // is deliberate: falling through would re-invent the position guess one line
+    // down. `accumulator.addHeader` is first-wins per field, so a later labelled
+    // read still fills it — a blank here is an opening, not a loss (rule 1).
+    const second = lines[1] ? cleanText(lines[1]) : "";
+    // The one reading under which `lines[1]` genuinely is the location: a layout
+    // that renders no headline at all, so the place moves up a line and the
+    // location search below it finds nothing. Both fields are then left blank
+    // rather than the location being stored as the headline — which is the
+    // shape of the 3.7.24 defect, one field over.
+    const headlineIsTheLocation = Boolean(second) && !location && looksLikeApplicantLocation(second);
+
     return {
       name: isApplicantNameCandidate(first) ? first : "",
-      headline: lines[1] ? cleanText(lines[1]) : "",
-      location: cleanText(beforeTimeline.find(looksLikeApplicantLocation) || ""),
+      headline: !headlineIsTheLocation && looksLikeApplicantHeadline(second, { name: chosenName }) ? second : "",
+      location,
       appliedAt: applied ? cleanText(applied[1]) : "",
       contactedAt: contacted ? cleanText(contacted[1]) : "",
       applicationStatus: status ? cleanText(status[0]) : ""
@@ -3003,6 +3150,7 @@
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
     APPLICANT_LOCATION_PATTERN, looksLikeApplicantLocation,
+    looksLikeApplicantHeadline, isEmployerCandidate, isCurrentRoleCandidate, isWholeLineControlLabel,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,
     nameFromExplanations, chooseApplicantName,
     // the record

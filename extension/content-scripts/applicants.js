@@ -1945,7 +1945,11 @@
       lines.push(line);
       if (lines.length >= 12) break;
     }
-    const header = Applicants.parseApplicantHeader({ text: lines.join("\n") });
+    // The resolved name goes in with the window: a layout that renders the name
+    // over two lines puts it at `lines[1]` as well, and the headline rule needs
+    // to know the name to refuse it. `chosen` is already resolved above, so this
+    // costs nothing.
+    const header = Applicants.parseApplicantHeader({ text: lines.join("\n"), name: chosen.name || "" });
 
     // The name is chosen by policy, not taken from wherever it happened to be,
     // and it is the one header field the accumulator will let a later, better
@@ -2327,16 +2331,25 @@
     const labelled = labelledValuesIn(panel);
     if (!labelled.size) return 0;
 
+    // The posting, which is on every applicant's screen and belongs to none of
+    // them: the role being applied for is not a current role, and the company
+    // doing the hiring is not an employer. `readJob` has already put both on the
+    // accumulator, so this costs nothing.
+    const job = accumulator.snapshot().job || {};
+
     const filled = {};
     for (const field of wanted) {
       const value = labelled.get(field);
       if (!value) continue;
-      // The one field where a wrong value is silently plausible: it lands in a
-      // column of durations beside numbers this extension computed itself, and
-      // an explicit value OUTRANKS the computed one. So it has to look like a
-      // length of service, not merely sit under the right label.
+      // Each field's own shape rule. Every one of these is a refusal the guide
+      // states in prose, made executable — and every one matters because
+      // `orNull(explicit) || derived` means a value accepted here OUTRANKS the
+      // value this extension computed for itself.
       if (field === "totalExperience" && !Applicants.looksLikeTotalExperience(value)) continue;
       if (field === "location" && !Applicants.looksLikeApplicantLocation(value)) continue;
+      if (field === "headline" && !Applicants.looksLikeApplicantHeadline(value, { name: header.name || "" })) continue;
+      if (field === "currentRole" && !Applicants.isCurrentRoleCandidate(value, { jobTitle: job.title || "" })) continue;
+      if (field === "currentCompany" && !Applicants.isEmployerCandidate(value, { hiringCompany: job.company || "" })) continue;
       filled[field] = Applicants.resolveField(
         [{ value, source: "panel-label", evidence: Applicants.FIELD_EVIDENCE.LABELLED }],
         { accept: (text) => Boolean(text) }
@@ -2943,6 +2956,34 @@
   }
 
   /**
+   * The file name a document CARD renders, when there is no viewer to ask.
+   *
+   * Some layouts put the attachment on the panel itself — a card showing
+   * `Nihal_Sharma_Resume.pdf` and a size, with the viewer only opening on
+   * demand. `resume.filename` is null on most accounts today because LinkedIn's
+   * document URLs are opaque media ids with no name in them, so this is a real
+   * gain rather than a hypothetical one, and it is an OBSERVATION: the name is
+   * read off text the page already painted.
+   *
+   * Read-only. No click, and the address is not taken from here — the existing
+   * chain, which proves an address is a document before anything is written to
+   * disk under a person's name, is unchanged.
+   */
+  function readDocumentCardDetails(panel) {
+    const details = { filename: "", fileType: "" };
+    if (!panel) return details;
+    for (const line of toLines(panel.innerText || "")) {
+      if (!DOCUMENT_EXTENSION_PATTERN.test(line) || VIEWER_NOISE_PATTERN.test(line)) continue;
+      const match = /([^\s/\\|·•]+\.(?:pdf|docx?|odt|rtf|txt|pages))\b/i.exec(line);
+      if (!match) continue;
+      details.filename = match[1];
+      details.fileType = fileTypeFrom("", details.filename);
+      return details;
+    }
+    return details;
+  }
+
+  /**
    * Scroll the opened viewer to the bottom so every page renders.
    *
    * A PDF viewer renders pages lazily exactly as the profile does, so a viewer
@@ -3321,9 +3362,14 @@
       return;
     }
 
-    // The viewer's own name wins; the URL is the fallback. Neither is guessed.
-    const filename = details.filename || fileNameFrom(url);
-    const fileType = details.fileType || fileTypeFrom(url, filename);
+    // The viewer's own name wins; a document card the panel painted is next;
+    // the URL is the fallback. None of the three is guessed, and the card is
+    // only asked when the first two produced nothing — which is the common case,
+    // because LinkedIn's document addresses are opaque media ids with no name
+    // in them at all.
+    const card = details.filename ? { filename: "", fileType: "" } : readDocumentCardDetails(panel);
+    const filename = details.filename || card.filename || fileNameFrom(url);
+    const fileType = details.fileType || card.fileType || fileTypeFrom(url, filename);
 
     // Save the verified link into the record BEFORE starting the download. If
     // Chrome refuses, times out, or the worker restarts, the applicant still has
