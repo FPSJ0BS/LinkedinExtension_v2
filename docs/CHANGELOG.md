@@ -1,5 +1,40 @@
 # CHANGELOG.md
 
+## 3.7.27 — a profile walk that stopped short is retried, and says so when it still cannot
+
+**Requested outright: "make sure profile scrolls every time to the bottom in any case — make any
+trigger or hook to do that."**
+
+Everything needed to *know* was already here, and nothing acted on it. `reachedTail` is
+`nextRevealStep` answering *"nothing begins below the fold any more"* — this surface's honest
+equivalent of `atBottom`, and the one needing no guess about which container scrolls — and `logReveal`
+has warned about a short walk since it was written. But a warning in the recruiter's console is not a
+retry: the walk stopped, the sections below where it stopped were never rendered, and the record was
+built without them. That is the difference between *diagnosing* "it stops partway down" and *fixing*
+it.
+
+So a walk that did not reach the bottom now earns **one more attempt**, and one only. It is a fresh
+`revealPanelContent` (`revealRetry`), so it gets a fresh `stuck` set — an anchor a walk proved
+immovable is retired for the life of that walk, and a panel that has since re-mounted or grown may
+well be movable by the very anchor that was retired, which is the most likely way a walk strands
+itself short of the bottom.
+
+**`time-budget` is excluded deliberately, and it is not a loophole.** It means the walk was *working*
+and ran out of clock — `REVEAL_BUDGET_MS` is 45 s — so a retry cannot reach the bottom any faster and
+would simply spend another 45 s per applicant on a run that walks hundreds of them. Every other stop
+(`no-movement`, `nothing-to-reveal`, `scroll-refused`, `pass-budget`) is the *mechanism* failing
+rather than the clock, and is exactly what a second attempt can fix.
+
+**And when even the retry cannot reach it, the record says so** — `accumulator.addWarning`, not only
+the console. A field missing because the panel would not scroll is otherwise indistinguishable from an
+applicant who does not have it, which is rule 1 and the whole reason `logSectionScan` exists.
+`logReveal` reports the retry by name and now judges only the **last** walk: an earlier one stopping
+short is precisely what the retry is for, so warning about a walk that was then rescued would cry wolf
+on every retry.
+
+Files: `extension/content-scripts/applicants.js`, `tests/applicants-core.test.js`,
+`docs/CHANGELOG.md`.
+
 ## 3.7.26 — looking for the next row no longer drags the list back to the top
 
 **Reported: "make it move to every profile just by moving to the next profile without needing to

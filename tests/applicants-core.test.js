@@ -2267,6 +2267,38 @@ test("the bottom of the panel is reached without knowing which container scrolls
   // It scrolls arbitrary ancestors, so the page's own position is restored too.
   assert.match(scan, /const originalWindowY = window\.scrollY/, "the page position must be remembered");
   assert.match(scan, /finally \{[\s\S]*?window\.scrollTo\(\{ top: originalWindowY/, "and handed back on every path");
+
+  // REQUESTED OUTRIGHT: "make sure profile scrolls every time to the bottom in
+  // any case — make any trigger or hook to do that."
+  //
+  // Everything needed to KNOW was already here and nothing acted on it.
+  // `reachedTail` is nextRevealStep answering "nothing begins below the fold any
+  // more", and logReveal has warned about a short walk since it was written —
+  // but a console warning is not a retry: the walk stopped, the sections below
+  // where it stopped were never rendered, and the record was built without them.
+  assert.match(scan, /if \(walked && !walked\.reachedTail && walked\.stoppedBy !== "time-budget"\)/,
+    "a walk that did not reach the bottom earns one more attempt");
+  assert.match(scan, /revealPanelContent\(live, accumulator, diagnostics, "revealRetry"\)/,
+    "and that attempt is a fresh walk, so it gets a fresh set of retired anchors");
+  // time-budget is excluded deliberately and it is not a loophole: it means the
+  // walk was WORKING and ran out of clock (REVEAL_BUDGET_MS is 45s), so a retry
+  // cannot reach the bottom any faster and would spend another 45s per applicant
+  // on a run that walks hundreds. Every other stop is the mechanism failing.
+  assert.match(source, /const REVEAL_BUDGET_MS = 45000/, "the clock that time-budget refers to");
+
+  // And when even the retry cannot reach it, the RECORD says so: a field missing
+  // because the panel would not scroll is otherwise indistinguishable from an
+  // applicant who does not have it (rule 1).
+  assert.match(scan, /if \(finalWalk && !finalWalk\.reachedTail\) \{\s*\n\s*accumulator\.addWarning\(/,
+    "a panel that never reached its bottom is stated on the record, not only in the console");
+
+  // The console line reports the retry by name, and judges only the LAST walk —
+  // an earlier one stopping short is exactly what the retry is for, so warning
+  // about a walk that was then rescued would cry wolf on every retry.
+  const log = source.slice(source.indexOf("function logReveal"), source.indexOf("function logSectionScan"));
+  assert.match(log, /\["retry", diagnostics\?\.revealRetry\]/, "the retry is reported by name");
+  assert.match(log, /const short = walks\.slice\(-1\)\.filter\(\(\[, walk\]\) => !walk\.reachedTail\);/,
+    "and only the last walk decides whether the panel was fully read");
 });
 
 test("the reveal walk scrolls the applicant's column and never the recruiter's list", async () => {

@@ -1540,15 +1540,24 @@
    * and `movedBy: 0` names that failure in one line.
    */
   function logReveal(diagnostics, name) {
-    const walks = [["reveal", diagnostics?.reveal], ["after-regions", diagnostics?.revealAfterRegions]]
-      .filter(([, walk]) => walk);
+    const walks = [
+      ["reveal", diagnostics?.reveal],
+      ["after-regions", diagnostics?.revealAfterRegions],
+      // The extra attempt a walk that stopped short earns. Reported by name, so
+      // "it needed a retry and got there" and "it never got there" are one line
+      // apart rather than the same silence.
+      ["retry", diagnostics?.revealRetry]
+    ].filter(([, walk]) => walk);
     if (!walks.length) return;
-    const short = walks.filter(([, walk]) => !walk.reachedTail);
+    // Only the LAST walk decides whether this applicant's panel was fully read:
+    // an earlier one stopping short is precisely what the retry exists for, and
+    // warning about a walk that was then rescued would cry wolf on every retry.
+    const short = walks.slice(-1).filter(([, walk]) => !walk.reachedTail);
     const label = `[Profile Vault ${BUILD_ID}] panel reveal — ${name || "applicant"}: `
       + walks.map(([which, walk]) =>
         `${which} ${walk.passes} pass(es), moved ${Math.round(walk.movedBy)}px, `
         + `${walk.reachedTail ? "reached the bottom" : "DID NOT reach the bottom"} (${walk.stoppedBy})`).join("; ");
-    if (short.length) console.warn(label, diagnostics.reveal, diagnostics.revealAfterRegions);
+    if (short.length) console.warn(label, diagnostics.reveal, diagnostics.revealAfterRegions, diagnostics.revealRetry);
     else console.info(label);
   }
 
@@ -3755,6 +3764,54 @@
       // only true if the answer is re-checked after something new arrives.
       // Cheap when nothing moved: the quiet rule ends this in three passes.
       live = await revealPanelContent(live, accumulator, diagnostics, "revealAfterRegions") || live;
+
+      /**
+       * ⚠ THE PROFILE MUST REACH ITS BOTTOM, AND A WALK THAT DID NOT IS RETRIED.
+       *
+       * **Requested outright: "make sure profile scrolls every time to the bottom
+       * in any case — make any trigger or hook to do that."**
+       *
+       * Everything needed to *know* was already here and nothing acted on it.
+       * `reachedTail` is `nextRevealStep` answering "nothing begins below the
+       * fold any more" — this surface's honest equivalent of `atBottom`, and the
+       * one that needs no guess about which container scrolls — and `logReveal`
+       * has warned about a short walk since it was written. But a warning in the
+       * recruiter's console is not a retry: the walk stopped, the sections below
+       * where it stopped were never rendered, and the record was built without
+       * them. That is the difference between *diagnosing* "it stops partway down"
+       * and *fixing* it.
+       *
+       * One more attempt, and one only. It is a fresh `revealPanelContent`, so it
+       * gets a fresh `stuck` set — an anchor a previous walk proved immovable is
+       * retired for the life of that walk, and a panel that has since re-mounted
+       * or grown may well be movable by the very anchor that was retired, which
+       * is the most likely way a walk strands itself short of the bottom.
+       *
+       * **`time-budget` is deliberately excluded, and that is not a loophole.**
+       * It means the walk was working and ran out of clock — `REVEAL_BUDGET_MS`
+       * is 45 s — so a retry cannot reach the bottom any faster and would simply
+       * spend another 45 s per applicant, on a run that walks hundreds of them.
+       * Every other stop (`no-movement`, `nothing-to-reveal`, `scroll-refused`,
+       * `pass-budget`) is the mechanism failing rather than the clock, and is
+       * exactly what a second attempt can fix.
+       *
+       * And when even the retry cannot reach it, the record says so. A field
+       * missing because the panel would not scroll is otherwise indistinguishable
+       * from an applicant who does not have it (rule 1), which is the whole
+       * reason `logSectionScan` exists.
+       */
+      const walked = diagnostics.revealAfterRegions || diagnostics.reveal;
+      if (walked && !walked.reachedTail && walked.stoppedBy !== "time-budget") {
+        live = livePanel(live);
+        live = await revealPanelContent(live, accumulator, diagnostics, "revealRetry") || live;
+      }
+      const finalWalk = diagnostics.revealRetry || walked;
+      if (finalWalk && !finalWalk.reachedTail) {
+        accumulator.addWarning(
+          `the profile panel did not scroll to its bottom (${finalWalk.stoppedBy}); `
+          + "anything below that point was never rendered and so was not read"
+        );
+      }
 
       // Everything below the fold has now mounted, so anything it left collapsed
       // exists for the first time. The expander pass before the walk could only
