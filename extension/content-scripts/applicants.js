@@ -3228,9 +3228,59 @@
   function nextRevealStep(root, stuck) {
     if (!(root instanceof Element)) return null;
     const fold = window.innerHeight || document.documentElement?.clientHeight || 0;
+    /**
+     * The other column is never an anchor for this one.
+     *
+     * **THE REPORT: "the left applicant list sometimes moves while the right
+     * profile is being read."** `scrollableRegions` has excluded the list since
+     * it was written — walking it is the list walk's job, and dragging it here
+     * moves the row the run is standing on — and this function, which is the
+     * pass that actually scrolls, never did.
+     *
+     * It matters because `root` is routinely **both columns**. `applicantPanel()`
+     * resolves a strict panel only when one container carries
+     * `PANEL_MIN_SECTIONS` *hydrated* section headings, which on this surface it
+     * routinely does not (the whole reason `buildSectionMap` widens page-wide);
+     * the fallback then refuses a `main` holding more than one row link and lands
+     * on `document.querySelector("main") || document.body`, which holds the list.
+     * From there the last rendered element — the tail this walk aims at — is
+     * usually the last list row, so the reveal spent its passes scrolling the
+     * recruiter's list instead of the applicant.
+     *
+     * Nothing readable is lost by refusing it: a list row is not the open
+     * applicant's content, and every section collector already refuses a heading
+     * or a root inside the list. It is the same guard `scrollableRegions` makes,
+     * in the same both-directions form, so a wrapper holding the list is refused
+     * too — its own children are still offered, so the panel's content is still
+     * reachable through them.
+     */
+    const list = applicantList();
     let tail = null;
     for (const element of root.querySelectorAll("section,article,div,li,p,h1,h2,h3,h4")) {
-      if (!isVisible(element) || !cleanText(element.innerText || "")) continue;
+      if (list && (list.contains(element) || element.contains(list))) continue;
+      // Cheapest test first, and the reason is layout.
+      //
+      // `isVisible` costs a `getComputedStyle` and two rect reads, and
+      // `innerText` is layout-aware: it consults style and line breaking over the
+      // element's whole subtree. Both were paid for **every** div, section, li, p
+      // and heading under the panel — hundreds of them — on every one of up to
+      // `REVEAL_MAX_PASSES` passes, twice per applicant, on a run that walks a
+      // job one applicant at a time.
+      //
+      // `textContent` answers the only question being asked here — "is there any
+      // text in this element at all" — without consulting style or geometry, and
+      // `/\S/` stops at the first non-space character. It is the rule
+      // `sectionLabelsIn` already follows ("textContent measured before
+      // isVisible, so the common case costs no layout") and the one
+      // `applicantRows()` was corrected to.
+      //
+      // It can only ever widen the candidate set, and then only by a visible box
+      // whose text is all inside a hidden child. A candidate is an ANCHOR — it
+      // decides where the walk scrolls to, never what is read — so a slightly
+      // wider set cannot cost a field.
+      const text = element.textContent;
+      if (!text || !/\S/.test(text)) continue;
+      if (!isVisible(element)) continue;
       // The tail is the last rendered element whatever else is true of it, so it
       // is recorded before any of the refusals below.
       tail = element;
@@ -3335,7 +3385,7 @@
    * panel walk and discovery both use, so a region that is already at its end
    * costs one pass rather than twenty-five.
    */
-  async function revealRegion(region, accumulator, diagnostics) {
+  async function revealRegion(region, accumulator, diagnostics, panel = null) {
     let added = 0;
     const startTop = region.scrollTop;
     let seen = cleanText(region.innerText || "").length;
@@ -3354,7 +3404,29 @@
         if (settled && position >= max - Applicants.COLUMN_SCROLL_EPSILON && quiet >= 1) break;
         region.scrollTop = Math.min(max, position + Math.max(400, region.clientHeight * 0.85));
         await waitForDomQuiet(300, 2200);
-        added += snapshotPanel(livePanel(null), accumulator, diagnostics);
+        // `livePanel(panel)`, not `livePanel(null)`.
+        //
+        // The null form resolves the panel from scratch on **every pass**, and
+        // that resolve is one of the most expensive calls in this file: a
+        // document-wide `querySelectorAll`, then per candidate an `isVisible`, a
+        // `rowLinksIn`, a `headingsIn` (its own heading scan, with an `innerText`
+        // per heading) and `element.innerText.length` — the whole column's text,
+        // built to compare sizes. Paid up to `REGION_MAX_PASSES` times per
+        // region, for every region, in every one of `REGION_ROUNDS` rounds, per
+        // applicant.
+        //
+        // Every other walk on this surface threads its panel through instead —
+        // `scanApplicantPanel` and `revealPanelContent` both do `livePanel(live)`
+        // on every step — because that is what the helper is for: it hands back
+        // the same node while it is still connected and re-resolves only once it
+        // is detached, which is the case the null form was reaching for. So the
+        // re-mount is still caught and the identical panel is still read; what
+        // goes is re-deriving an unchanged answer hundreds of times.
+        //
+        // It cannot narrow what is read: a connected panel is the one every other
+        // pass of this extraction is already reading, and `buildSectionMap` still
+        // widens page-wide for any section the panel does not hold.
+        added += snapshotPanel(livePanel(panel), accumulator, diagnostics);
         const grown = cleanText(region.innerText || "").length;
         quiet = grown > seen ? 0 : quiet + 1;
         seen = Math.max(seen, grown);
@@ -3405,7 +3477,10 @@
     // case is one extra scan.
     for (let round = 0; round < REGION_ROUNDS; round += 1) {
       assertRunnable();
-      let regions = scrollableRegions(livePanel(panel) || document.body);
+      // Resolved once per round and handed to both the region search and the
+      // reads inside it, rather than re-derived per pass — see `revealRegion`.
+      const host = livePanel(panel) || document.body;
+      let regions = scrollableRegions(host);
 
       // Nothing at all on the first look is the case above: wait for the panel
       // to settle and ask once more before concluding there is no region.
@@ -3425,7 +3500,7 @@
         if (!document.contains(region)) continue;
         walked.add(region);
         diagnostics.regions.walked += 1;
-        diagnostics.regions.added += await revealRegion(region, accumulator, diagnostics);
+        diagnostics.regions.added += await revealRegion(region, accumulator, diagnostics, host);
       }
     }
     return diagnostics.regions.added;

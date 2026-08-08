@@ -2207,6 +2207,94 @@ test("the bottom of the panel is reached without knowing which container scrolls
   assert.match(scan, /finally \{[\s\S]*?window\.scrollTo\(\{ top: originalWindowY/, "and handed back on every path");
 });
 
+test("the reveal walk scrolls the applicant's column and never the recruiter's list", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const step = source.slice(source.indexOf("function nextRevealStep"), source.indexOf("const REVEAL_MAX_PASSES"));
+
+  // THE REPORT: "the left applicant list sometimes moves while the right profile
+  // is being read", and "do not scroll the left applicant list while extracting
+  // the right-side profile".
+  //
+  // `scrollableRegions` has excluded the list since it was written — walking it
+  // belongs to the list walk, and dragging it here moves the row the run is
+  // standing on. `nextRevealStep`, which is the pass that actually scrolls, did
+  // not, and its `root` is routinely BOTH columns: `applicantPanel()` resolves a
+  // strict panel only when one container carries PANEL_MIN_SECTIONS *hydrated*
+  // section headings, which on this surface it routinely does not — the whole
+  // reason buildSectionMap widens page-wide — and the fallback refuses a `main`
+  // holding more than one row link, landing on `document.querySelector("main")
+  // || document.body`. From there the last rendered element, which is the tail
+  // this walk aims at, is usually the last list row.
+  assert.match(step, /if \(list && \(list\.contains\(element\) \|\| element\.contains\(list\)\)\) continue;/,
+    "the other column is never an anchor for this one");
+  // Resolved once for the whole pass: applicantList() is a document-wide scan
+  // with an isVisible per candidate, and this loop runs over every element.
+  assert.match(step, /const list = applicantList\(\);/, "and the list is resolved once per pass, not per element");
+
+  // Nothing readable is given up by refusing it, and that is what makes the
+  // guard safe rather than merely faster: a list row is not the open applicant's
+  // content, and every section collector already refuses a heading or a root
+  // inside the list.
+  const map = source.slice(source.indexOf("function collectSections"), source.indexOf("/** Visible entity blocks"));
+  assert.match(map, /if \(list && list\.contains\(heading\.element\)\) continue/,
+    "the section search refuses the list too, so the reveal is not the only thing keeping it out");
+
+  // The guard the region walk has always had must stay: both are the same rule.
+  const regions = source.slice(source.indexOf("function scrollableRegions"), source.indexOf("async function revealRegion"));
+  assert.match(regions, /if \(list && \(list\.contains\(element\) \|\| element\.contains\(list\)\)\) continue;/,
+    "and revealing a nested region still refuses it in the same both-directions form");
+});
+
+test("revealing costs no forced layout per candidate and no panel re-resolve per pass", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const step = withoutComments(source.slice(source.indexOf("function nextRevealStep"), source.indexOf("const REVEAL_MAX_PASSES")));
+
+  // `isVisible` costs a getComputedStyle and two rect reads, and `innerText` is
+  // layout-aware — it consults style and line breaking over the element's whole
+  // subtree. Both were paid for EVERY div, section, li, p and heading under the
+  // panel, on every one of up to REVEAL_MAX_PASSES passes, twice per applicant,
+  // on a run that walks a job one applicant at a time.
+  //
+  // `textContent` answers the only question asked here — is there any text at
+  // all — without consulting style or geometry. It is the rule sectionLabelsIn
+  // already follows and the one applicantRows() was corrected to, and it can
+  // only widen the candidate set, by a visible box whose text is all inside a
+  // hidden child. A candidate is an ANCHOR: it decides where the walk scrolls,
+  // never what is read, so a wider set cannot cost a field.
+  assert.ok(!/innerText/.test(step), "no forced layout per candidate per reveal pass");
+  assert.match(step, /const text = element\.textContent;/, "the text test must not consult style or geometry");
+  assert.ok(
+    step.indexOf("element.textContent") < step.indexOf("isVisible(element)"),
+    "and it must be asked before isVisible, so the common case costs no layout"
+  );
+
+  // The same rule, on the read inside the region walk. `livePanel(null)` resolves
+  // the panel from scratch every pass, and that resolve is one of the most
+  // expensive calls in the file: a document-wide querySelectorAll, then per
+  // candidate an isVisible, a rowLinksIn, a headingsIn and the whole column's
+  // innerText. Paid up to REGION_MAX_PASSES times per region, per region, per
+  // round, per applicant. Every other walk threads its panel through instead, and
+  // livePanel() is what makes that identical: the same node while it is
+  // connected, a fresh resolve once it is detached.
+  const walk = withoutComments(source.slice(source.indexOf("async function revealRegion"), source.indexOf("async function revealNestedRegions")));
+  assert.match(walk, /async function revealRegion\(region, accumulator, diagnostics, panel = null\)/,
+    "the region walk is given the panel it is reading");
+  assert.match(walk, /snapshotPanel\(livePanel\(panel\), accumulator, diagnostics\)/,
+    "and reuses it while it is connected instead of re-deriving it every pass");
+  assert.ok(!/livePanel\(null\)/.test(walk), "no page-wide panel resolve inside the pass loop");
+  const nested = withoutComments(source.slice(source.indexOf("async function revealNestedRegions"), source.indexOf("async function revealPanelContent")));
+  assert.match(nested, /const host = livePanel\(panel\) \|\| document\.body;/, "resolved once per round");
+  assert.match(nested, /revealRegion\(region, accumulator, diagnostics, host\)/, "and handed down rather than looked up again");
+
+  // What must NOT change: this is a cost fix, so every bound that decides when a
+  // walk ENDS stays exactly where it was. The floor, the quiet rule and the
+  // bottom test are what stop a panel being read half way.
+  assert.match(source, /const REVEAL_MIN_PASSES = 4/, "the floor is untouched");
+  assert.match(source, /const REVEAL_QUIET_PASSES = 3/, "so is the quiet rule");
+  const region = source.slice(source.indexOf("async function revealRegion"), source.indexOf("async function revealNestedRegions"));
+  assert.match(region, /const settled = pass \+ 1 >= REVEAL_MIN_PASSES/, "and the region walk still shares the floor");
+});
+
 test("a section outside the resolved panel is still the open applicant's", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const map = source.slice(source.indexOf("function collectSections"), source.indexOf("/** Visible entity blocks"));

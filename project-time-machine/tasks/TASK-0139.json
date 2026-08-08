@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0139",
+  "name": "Applicant collector: stop the reveal walk dragging the left list, and take the forced layout and the panel re-resolve out of its inner loops",
+  "request": "Applicant collector: stop the reveal walk dragging the left list, and take the forced layout and the panel re-resolve out of its inner loops",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T07:28:32.357Z",
+  "completedAt": "2026-08-08T07:33:32.528Z",
+  "startCommit": "d0cf56b3e3e8788b9795ed40413e908e30790c72",
+  "gitRef": "task/TASK-0139",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed",
+    "npm test passed - 455 tests, 0 failures, including the two new ones",
+    "npm run validate passed - 31 build files, 4 React entry points, service-worker imports",
+    "npm run docs:check FAILED on 15 pre-existing broken CLAUDE.md links (content.js, connections.js, applicants.js, vendor/ and the docs/ companions, all stale after the extension/ and docs/ reorganisation). Verified pre-existing by stashing this task's changes and re-running: identical failure. Not fixed here - unrelated to this task and belongs in its own."
+  ],
+  "result": "Three cost-only fixes on the applicant collector's per-applicant reveal path, from docs/applicant-collector-speed-guide.md. No floor, quiet rule, bottom test, budget, wait, click or read was changed, and nothing was removed from what a walk collects.\n\n(1) nextRevealStep no longer offers the left applicant list as a scroll anchor for the right panel. scrollableRegions has refused the list since it was written; nextRevealStep, the pass that actually scrolls, never did - and its root is routinely BOTH columns, because applicantPanel() resolves a strict panel only when one container carries PANEL_MIN_SECTIONS hydrated headings (routinely none here, the whole reason buildSectionMap widens page-wide) and the fallback lands on main/body, which holds the list. The tail this walk aims at was then usually the last list row, so the reveal dragged the recruiter's list and confirmed its bottom instead of the applicant's. Same both-directions guard scrollableRegions uses; the list is resolved once per pass. Nothing readable is given up - a list row is not the applicant's content and every section collector already refuses the list.\n\n(2) nextRevealStep tests textContent before isVisible instead of isVisible then innerText. innerText is layout-aware and was paid for every div/section/li/p/heading under the panel, on up to REVEAL_MAX_PASSES (40) passes, twice per applicant. This is the rule sectionLabelsIn already follows and applicantRows() was corrected to. It can only widen the candidate set, and a candidate is an ANCHOR - it decides where the walk scrolls, never what is read - so it cannot cost a field.\n\n(3) revealRegion reads through livePanel(panel) instead of livePanel(null). The null form resolved the panel from scratch every pass (document-wide querySelectorAll, then per candidate isVisible + rowLinksIn + headingsIn + the whole column's innerText), up to REGION_MAX_PASSES (25) per region, per region, per REGION_ROUNDS (4), per applicant. Every other walk threads its panel through; livePanel() still re-resolves once the node is detached, which is the case the null form was reaching for. revealNestedRegions resolves it once per round and hands it down.\n\nDeliberately NOT done: the guide also asks for the resume before the full scroll and for no return to the top. Both are load-bearing for data. collectResume is passed header.name, which is what the file is saved to disk under and is only settled after the scan (corroborated against the qualification explanations); moving it earlier saves files under an unarbitrated name. The final scroll-to-top ends in a snapshotPanel - a read taken once everything below has hydrated, into a merge-only accumulator - so removing it removes a chance to capture a late top-card value.\n\nTwo new tests. docs/CHANGELOG.md 3.7.23. Files: extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md."
+}

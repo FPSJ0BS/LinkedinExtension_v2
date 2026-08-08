@@ -1,5 +1,76 @@
 # CHANGELOG.md
 
+## 3.7.23 — the reveal walk scrolls one column, and stops paying for the other
+
+Three changes on the per-applicant reveal path, from
+[`docs/applicant-collector-speed-guide.md`](applicant-collector-speed-guide.md). All three are
+**cost, never verdict**: no floor, quiet rule, bottom test, budget, wait, click or read was changed,
+and nothing was removed from what a walk collects.
+
+**1. The left applicant list is no longer an anchor for the right panel** (`nextRevealStep`).
+Reported as *"the left applicant list sometimes moves while the right profile is being read"*, and
+asked for as *"do not scroll the left applicant list while extracting the right-side profile"*.
+`scrollableRegions` has refused the list since it was written — walking it belongs to the list walk,
+and dragging it here moves the row the run is standing on — and `nextRevealStep`, **the pass that
+actually scrolls**, never did. That matters because its `root` is routinely *both columns*:
+`applicantPanel()` resolves a strict panel only when one container carries `PANEL_MIN_SECTIONS`
+**hydrated** section headings, which on this surface it routinely does not — that is the whole reason
+`buildSectionMap` widens page-wide — and the fallback refuses a `main` holding more than one row link,
+landing on `document.querySelector("main") || document.body`, which holds the list. From there the
+last rendered element, which is the **tail** this walk aims at, is usually the last list row: so the
+reveal spent its passes dragging the recruiter's list and confirming *its* bottom instead of the
+applicant's. Refusing it gives up nothing readable — a list row is not the open applicant's content,
+and every section collector already refuses a heading or a root inside the list — and it is the same
+both-directions guard `scrollableRegions` makes, so a wrapper holding the list is refused while its
+own children are still offered. The list is resolved **once per pass**, not per element.
+
+**2. No forced layout per candidate, per pass** (`nextRevealStep`). `isVisible` costs a
+`getComputedStyle` and two rect reads, and `innerText` is *layout-aware*: it consults style and line
+breaking across the element's whole subtree. Both were paid for **every** `div`, `section`, `li`, `p`
+and heading under the panel — hundreds of them — on every one of up to `REVEAL_MAX_PASSES` (40)
+passes, **twice** per applicant, on a run that walks a job one applicant at a time. `textContent`
+answers the only question asked here — is there any text at all — without consulting style or
+geometry, and `/\S/` stops at the first non-space character. This is the rule `sectionLabelsIn`
+already follows (*"textContent measured before isVisible, so the common case costs no layout"*) and
+the one `applicantRows()` was corrected to. It can only ever **widen** the candidate set, and then
+only by a visible box whose text is all inside a hidden child — and a candidate is an **anchor**: it
+decides where the walk scrolls, never what is read, so a wider set cannot cost a field.
+
+**3. The region walk stops re-deriving the panel on every pass** (`revealRegion`). It read through
+`livePanel(null)`, which resolves the panel **from scratch** every time: a document-wide
+`querySelectorAll`, then per candidate an `isVisible`, a `rowLinksIn`, a `headingsIn` (its own heading
+scan, with an `innerText` per heading) and `element.innerText.length` — the whole column's text, built
+only to compare sizes. Paid up to `REGION_MAX_PASSES` (25) times per region, for every region, in
+every one of `REGION_ROUNDS` (4) rounds, per applicant. Every other walk on this surface threads its
+panel through instead — `scanApplicantPanel` and `revealPanelContent` both do `livePanel(live)` on
+every step — because that is what the helper is *for*: the same node while it is connected, a fresh
+resolve once it is **detached**, which is the case the null form was reaching for. So the re-mount is
+still caught and the identical panel is still read. It cannot narrow what is collected: a connected
+panel is the one every other pass of the extraction is already reading, and `buildSectionMap` still
+widens page-wide for any section the panel does not hold. `revealNestedRegions` resolves it once per
+round and hands it down.
+
+**What was deliberately NOT done, and why.** The guide also asks for the resume to be handled *before*
+the full profile scroll, and for the walk not to return to the top after reaching the bottom. Both
+were left alone because both are load-bearing for data:
+
+- **Resume ordering.** `collectResume` is passed `header.name` and that is the name the file is saved
+  to disk under. The name is only settled *after* the scan — it is corroborated against the
+  qualification explanation sentences, which is what stops the panel's first line being saved as
+  somebody's name. Moving the resume ahead of the scan saves files under an empty or unarbitrated
+  name, which is rule 1. The viewer is already only ever a *fallback*: the PERMANENT rule means
+  nothing is opened at all when the document address is already on the page.
+- **The final read from the top.** `scanApplicantPanel` ends with a scroll to the top, a wait and a
+  `snapshotPanel`. That snapshot is a **read**, taken once everything below has hydrated, and the
+  accumulator is merge-only — deleting it deletes a chance to capture a top-card value that arrived
+  late. A scroll that ends in a read is not a wasted scroll.
+
+Locked by *"the reveal walk scrolls the applicant's column and never the recruiter's list"* and
+*"revealing costs no forced layout per candidate and no panel re-resolve per pass"*, the second of
+which also re-asserts that `REVEAL_MIN_PASSES`, `REVEAL_QUIET_PASSES` and the region walk's shared
+floor are untouched. Files: `extension/content-scripts/applicants.js`,
+`tests/applicants-core.test.js`, `docs/CHANGELOG.md`.
+
 ## 3.7.22 — a section ends where the next one begins
 
 Reported against one live applicant, with both halves of the record pasted: **Experience** held their
