@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0157",
+  "name": "Phase 4: layout detection that can only reorder readers",
+  "request": "Phase 4: layout detection that can only reorder readers",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:28:46.997Z",
+  "completedAt": "2026-08-08T11:33:18.348Z",
+  "startCommit": "70234fd4c6156734507625e94699bbbb4d5b565a",
+  "gitRef": "task/TASK-0157",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 500 passed / 0 failed (was 496), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 4 of the multiple-LinkedIn-UI support guide: layout detection whose only possible output is a reader ORDER. The guide's constraint is that a detected UI 'may only decide which reader runs first' and must not change the schema, the workflow, the save format, pagination or current-UI behaviour, and the design is what makes that mechanical rather than aspirational: describeApplicantLayout returns a PERMUTATION of a fixed reader list and nothing else - there is nowhere in its return shape to put a value, a selector, a threshold or a field. APPLICANT_READER_PREFIX (job, qualifications, header) is frozen and no layout may reorder it, because the qualifications' explanation sentences are what the name is corroborated against and reading the header first leaves the very first snapshot with no arbiter; APPLICANT_READER_TAIL is the six that write to disjoint accumulator maps. The verdict is decided from five features of the screen this extension was written against - the qualifications card (or its two subheadings, the case collectQualificationSubsections exists for), the screening section, two or more profile sections, a stacked top card, and a contact control - needing three of five, because a slow panel routinely has not hydrated all of them. A CONTRADICTION is a signal positively asserting a different shape (a labelled top card, a drawer/popover/inline contact, labelled employment fields), never merely the absence of one, which is what a half-hydrated panel looks like - so a slow render is called generic, not a new layout. 'generic' is the safe default for a structural reason rather than an optimistic one: it runs the same readers, promoting only the labelled one, and every writer downstream is fill-empty, so an unrecognised layout can produce the same record or a fuller one and never a worse one. On the adapter side applicantLayoutSignals returns plain data - resolved section keys, unmatched heading texts, rendered label keys, control presence, a link count, a top-card shape judged by what the second and third lines ARE rather than where they sit. No element escapes it and it contains no class-name matching (rule 7), which is what lets the decision be a pure unit-testable function. It is memoised on the panel's identity AND on the panel element, the second half deliberately: a panel that renders no application link and no /in/ link has an empty identity, and that is exactly the markup a layout phase exists for - keying on identity alone would leave the one layout we cannot recognise paying for a heading scan, a label sweep and two control sweeps on every snapshot, dozens of times per applicant. snapshotPanel now dispatches through a named reader map so the order can be data. Four proofs: every reader runs exactly once under every layout and under garbage/empty/null/wrong-type signals; the prefix is never reordered; the verdict's keys are exactly layout/matched/contradicted/readerOrder; and - the one that matters - all 720 orders of the six permutable readers produce a byte-identical record, which restates Phase 2's proof against the list detection actually permutes so the two cannot drift apart. Plus a source bound: the verdict is consulted in one place, no reader branches on it, and extractApplicant - where the record is built and saved - never mentions it. Click budget still seven. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}

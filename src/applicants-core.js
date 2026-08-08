@@ -1345,6 +1345,102 @@
     return cleanText(result);
   }
 
+  // ------------------------------------------------------- which layout is it
+  //
+  // The guide's Phase 4: "detect only meaningful layout differences", from
+  // several stable features rather than one generated class, and — stated as
+  // the hard constraint — "the detected UI may only decide which reader runs
+  // first. It must not change the applicant schema, workflow, save format,
+  // pagination, or current UI behaviour."
+  //
+  // The design that makes that constraint mechanical rather than aspirational:
+  // this function returns a PERMUTATION of a fixed list and nothing else. It
+  // cannot return a value, a selector, a threshold or a field, because there is
+  // nowhere in its return shape to put one.
+
+  /**
+   * The readers whose order is fixed, and why.
+   *
+   * `job` seeds the record. `qualifications` must precede `header` because the
+   * platform's own verdict sentences are what the name is corroborated against,
+   * and reading the header first leaves the very first snapshot with no arbiter
+   * at all. No layout may reorder these three.
+   */
+  const APPLICANT_READER_PREFIX = Object.freeze(["job", "qualifications", "header"]);
+
+  /**
+   * The readers whose order genuinely does not matter.
+   *
+   * Each writes to its own map in the accumulator, none reads another's output,
+   * and `buildApplicantRecord` folds them all at the end — which is asserted
+   * exhaustively over all 120 orders rather than argued.
+   */
+  const APPLICANT_READER_TAIL = Object.freeze(["screening", "experience", "education", "skills", "contacts", "labelled"]);
+
+  const APPLICANT_READERS = Object.freeze([...APPLICANT_READER_PREFIX, ...APPLICANT_READER_TAIL]);
+
+  const APPLICANT_LAYOUT = Object.freeze({
+    /** The recruiter screen this extension was written against. */
+    CURRENT: "current",
+    /** Something that positively asserts a different shape. */
+    ALTERNATIVE: "alternative",
+    /** Anything else — and the safe default, deliberately. */
+    GENERIC: "generic"
+  });
+
+  /**
+   * Which layout the panel is, from signals that are all content.
+   *
+   * `signals` is a plain object the adapter measured once; nothing here touches
+   * a DOM, so the whole decision is unit-testable. Every signal is derived from
+   * rendered text, resolved section keys, accessible labels or link counts —
+   * never from a generated class name (rule 7).
+   *
+   * **"generic" is the safe default, and it is safe for a structural reason.**
+   * The generic order runs the labelled reader earlier than "current" does and
+   * runs every reader either way; `addHeader` is first-wins and `addKeyed` fills
+   * blanks only. So an unrecognised layout can only produce the same record or a
+   * fuller one — never a worse one. An unrecognised layout is not a failure
+   * mode, which is the entire point.
+   */
+  function describeApplicantLayout(signals = {}) {
+    const input = signals && typeof signals === "object" ? signals : {};
+    const sectionKeys = new Set((Array.isArray(input.sectionKeys) ? input.sectionKeys : []).filter(Boolean));
+    const labelKeys = new Set((Array.isArray(input.labelKeys) ? input.labelKeys : []).filter(Boolean));
+    const contactSurface = cleanText(input.contactSurface).toLowerCase();
+    const topCardShape = cleanText(input.topCardShape).toLowerCase();
+
+    const matched = [];
+    // The five features of the screen this extension reads today. Three of five
+    // is the bar, because a slow panel routinely has not hydrated all of them.
+    if (sectionKeys.has("qualifications") || Number(input.qualificationSubheadings) >= 2) matched.push("qualifications-card");
+    if (sectionKeys.has("screening")) matched.push("screening-section");
+    if (["experience", "education", "skills"].filter((key) => sectionKeys.has(key)).length >= 2) matched.push("profile-sections");
+    if (topCardShape === "name-headline-location") matched.push("stacked-top-card");
+    if (contactSurface === "modal" || (input.hasContactControl && !contactSurface)) matched.push("contact-modal");
+
+    // A contradiction is a signal POSITIVELY asserting the other shape — never
+    // merely the absence of one, which is what a half-hydrated panel looks like.
+    const contradicted = [];
+    if (topCardShape === "labelled") contradicted.push("labelled-top-card");
+    if (["drawer", "popover", "inline", "expanded"].includes(contactSurface)) contradicted.push(`contact-${contactSurface}`);
+    if (labelKeys.has("currentCompany") || labelKeys.has("currentRole")) contradicted.push("labelled-employment");
+
+    let layout = APPLICANT_LAYOUT.GENERIC;
+    if (matched.length >= 3 && !contradicted.length) layout = APPLICANT_LAYOUT.CURRENT;
+    else if (contradicted.length) layout = APPLICANT_LAYOUT.ALTERNATIVE;
+
+    // The ONLY output. A permutation of `APPLICANT_READERS`, with the prefix
+    // frozen. "current" leaves the labelled reader last, where it costs a
+    // bounded sweep and finds nothing; anything else promotes it, so a layout
+    // that states its fields outright has them before the derivation runs.
+    const tail = layout === APPLICANT_LAYOUT.CURRENT
+      ? [...APPLICANT_READER_TAIL]
+      : ["labelled", ...APPLICANT_READER_TAIL.filter((reader) => reader !== "labelled")];
+
+    return { layout, matched, contradicted, readerOrder: Object.freeze([...APPLICANT_READER_PREFIX, ...tail]) };
+  }
+
   /**
    * Choose the applicant's name from everything that claims to be it.
    *
@@ -2899,6 +2995,8 @@
     looksLikeEducationBlock, looksLikeEducationCandidate, looksLikeQuestionBlock,
     // choosing between two readers that both claim to have found a field
     FIELD_EVIDENCE, EVIDENCE_CONFIDENCE, resolveField, fieldValue,
+    // which layout the panel is — an answer that may only reorder the readers
+    APPLICANT_LAYOUT, APPLICANT_READERS, APPLICANT_READER_PREFIX, APPLICANT_READER_TAIL, describeApplicantLayout,
     // fields a page may state outright instead of leaving to be derived
     APPLICANT_FIELD_LABEL_PATTERNS, APPLICANT_LABELLED_FIELDS, applicantFieldForLabel, looksLikeTotalExperience,
     // job and applicant headers

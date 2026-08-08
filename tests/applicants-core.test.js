@@ -5360,3 +5360,211 @@ test("Phase 3: the labelled reader runs last, writes only through the accumulato
   assert.match(reader, /diagnostics\.readers/, "the source and confidence are reported");
   assert.ok(!/record\.|buildApplicantRecord/.test(reader), "and never written into the record");
 });
+
+// ------ Phase 4 of the multiple-LinkedIn-UI support guide: layout detection
+//
+// The guide's constraint is the whole design: "The detected UI may only decide
+// which reader runs first. It must not change the applicant schema, workflow,
+// save format, pagination, or current UI behaviour."
+//
+// `describeApplicantLayout` returns a PERMUTATION of a fixed list and nothing
+// else — there is nowhere in its return shape to put a value, a selector, a
+// threshold or a field. These four assertions are what make that mechanical
+// rather than aspirational, and the fourth is the one that actually matters.
+
+test("Phase 4: detection can only ever reorder the readers, never add or drop one", () => {
+  // Over every layout it can report, and over inputs no adapter would ever
+  // produce: garbage, empty, null, undefined, wrong types.
+  const inputs = [
+    {},
+    null,
+    undefined,
+    "not an object",
+    42,
+    { sectionKeys: null, labelKeys: 7, contactSurface: {}, topCardShape: [] },
+    { sectionKeys: ["qualifications", "screening", "experience", "education", "skills"], topCardShape: "name-headline-location", hasContactControl: true },
+    { sectionKeys: ["experience"], labelKeys: ["currentCompany"], contactSurface: "drawer", topCardShape: "labelled" },
+    { sectionKeys: ["experience", "education"], contactSurface: "popover" },
+    { qualificationSubheadings: 2, sectionKeys: ["screening", "experience", "education"], topCardShape: "name-headline-location" }
+  ];
+
+  const everyReader = [...Applicants.APPLICANT_READERS].sort();
+  for (const signals of inputs) {
+    const verdict = Applicants.describeApplicantLayout(signals);
+
+    assert.deepEqual([...verdict.readerOrder].sort(), everyReader,
+      `every reader runs exactly once, whatever the signals (${JSON.stringify(signals)})`);
+    assert.deepEqual([...verdict.readerOrder].slice(0, 3), [...Applicants.APPLICANT_READER_PREFIX],
+      "and the frozen prefix is never reordered: qualifications must precede the header");
+    assert.deepEqual(Object.keys(verdict).sort(), ["contradicted", "layout", "matched", "readerOrder"],
+      "the verdict can hold no value, no selector, no threshold and no field");
+    assert.ok(Object.values(Applicants.APPLICANT_LAYOUT).includes(verdict.layout), "and the layout is one of the three");
+  }
+
+  // The prefix is not merely conventional — it is why the name has an arbiter.
+  assert.deepEqual([...Applicants.APPLICANT_READER_PREFIX], ["job", "qualifications", "header"]);
+});
+
+test("Phase 4: an unrecognised layout is a safe default, not a failure", () => {
+  const L = Applicants.APPLICANT_LAYOUT;
+
+  // The screen this extension was written against: the qualifications card, the
+  // screening section, two or more profile sections, a stacked top card, and a
+  // contact control. Three of five is the bar, because a slow panel routinely
+  // has not hydrated all of them.
+  const current = Applicants.describeApplicantLayout({
+    sectionKeys: ["qualifications", "screening", "experience", "education", "skills"],
+    topCardShape: "name-headline-location",
+    hasContactControl: true,
+    rowLinkCount: 1
+  });
+  assert.equal(current.layout, L.CURRENT);
+  assert.equal(current.contradicted.length, 0);
+  assert.ok(current.matched.length >= 3);
+
+  // An account that renders only the two qualification subheadings and never
+  // the word — the case `collectQualificationSubsections` exists for — is still
+  // the current layout.
+  const subheadings = Applicants.describeApplicantLayout({
+    sectionKeys: ["screening", "experience", "education"],
+    qualificationSubheadings: 2,
+    topCardShape: "name-headline-location"
+  });
+  assert.equal(subheadings.layout, L.CURRENT);
+
+  // A CONTRADICTION is a signal positively asserting a different shape — never
+  // merely the absence of one, which is what a half-hydrated panel looks like.
+  for (const signals of [
+    { topCardShape: "labelled" },
+    { contactSurface: "drawer" },
+    { contactSurface: "popover" },
+    { contactSurface: "inline" },
+    { labelKeys: ["currentCompany"] }
+  ]) {
+    const verdict = Applicants.describeApplicantLayout({
+      sectionKeys: ["qualifications", "screening", "experience", "education", "skills"],
+      hasContactControl: true,
+      ...signals
+    });
+    assert.equal(verdict.layout, L.ALTERNATIVE, `${JSON.stringify(signals)} asserts a different shape`);
+    assert.ok(verdict.contradicted.length > 0, "and it says which signal did");
+  }
+
+  // Nothing recognised at all is generic, and generic is safe for a STRUCTURAL
+  // reason rather than an optimistic one: it runs the same readers, promoting
+  // only the labelled one, and every writer downstream is fill-empty. So an
+  // unrecognised layout can produce the same record or a fuller one — never a
+  // worse one.
+  assert.equal(Applicants.describeApplicantLayout({}).layout, L.GENERIC);
+  assert.equal(Applicants.describeApplicantLayout(undefined).layout, L.GENERIC);
+  assert.equal(Applicants.describeApplicantLayout({ sectionKeys: ["experience"] }).layout, L.GENERIC);
+
+  // A half-hydrated panel is generic, not alternative: absence contradicts
+  // nothing, which is what keeps a slow render from being called a new layout.
+  const half = Applicants.describeApplicantLayout({ sectionKeys: ["experience"], hasContactControl: false });
+  assert.equal(half.layout, L.GENERIC);
+  assert.equal(half.contradicted.length, 0);
+
+  // The only difference any of it makes: where the labelled reader sits.
+  assert.equal(current.readerOrder[current.readerOrder.length - 1], "labelled",
+    "on today's layout it runs last, where it costs a bounded sweep and finds nothing");
+  assert.equal(Applicants.describeApplicantLayout({}).readerOrder[3], "labelled",
+    "and on anything else it runs first of the tail, before the derivation");
+});
+
+test("Phase 4: reordering the readers cannot change the record, over every order there is", () => {
+  // THE PROOF. Phase 2 established it for the five independent readers; this
+  // restates it against the list detection actually permutes, so the two can
+  // never drift apart — and it is the assertion that makes the guide's "must
+  // not change the applicant schema, workflow, save format or current UI
+  // behaviour" a fact rather than a promise.
+  //
+  // The tail is six readers, so exhaustive is 720 orders. The prefix is not
+  // permuted at all, and assertion #1 above is what guarantees detection can
+  // never touch it.
+  const apply = {
+    screening: (a) => a.addScreening(Applicants.parseScreeningBlock(["Do you have 3 years of experience?", "Ideal answer: Yes", "Yes"])),
+    experience: (a) => a.addExperience(Applicants.parseExperienceBlock(["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present", "Drafted contracts"])),
+    education: (a) => a.addEducation(Applicants.parseEducationBlock(["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB", "2019 - 2024"])),
+    skills: (a) => a.addSkill("Contract Drafting"),
+    contacts: (a) => a.addContactPanel({ emails: ["nihal@example.com"], phones: [], websites: [] }),
+    // The labelled reader, which is the one detection actually moves.
+    labelled: (a) => a.addHeader({ currentRole: "Senior Legal Counsel", currentCompany: "Khatri LLP" })
+  };
+
+  const build = (order) => {
+    const accumulator = Applicants.createApplicantAccumulator();
+    accumulator.addJob({ id: "4277798308", title: "Legal Associate" });
+    accumulator.addQualification(Applicants.parseQualificationBlock({
+      category: Applicants.QUALIFICATION_CATEGORY.MUST_HAVE,
+      lines: ["3+ years of legal experience", "Nihal Sharma has 6 years of experience"]
+    }));
+    accumulator.addName("Nihal Sharma", true);
+    accumulator.addHeader({ headline: "Human Resource", location: "Noida, Uttar Pradesh, India" });
+    for (const reader of order) apply[reader](accumulator);
+    const record = Applicants.buildApplicantRecord({
+      snapshot: accumulator.snapshot(),
+      context: { jobId: "4277798308", applicationId: "25550787924" },
+      sourceUrl: APPLICANTS_URL,
+      buildId: "test"
+    });
+    return JSON.stringify({ ...record, collectedAt: "", updatedAt: "", extraction: { ...record.extraction, timestamp: "" } });
+  };
+
+  const permutations = (list) => list.length <= 1 ? [list] : list.flatMap(
+    (item, index) => permutations([...list.slice(0, index), ...list.slice(index + 1)]).map((rest) => [item, ...rest])
+  );
+
+  const orders = permutations([...Applicants.APPLICANT_READER_TAIL]);
+  assert.equal(orders.length, 720, "every order of the six readers detection is allowed to permute");
+
+  const expected = build(orders[0]);
+  for (const order of orders) {
+    assert.equal(build(order), expected, `reading in the order ${order.join(" → ")} must produce the same record`);
+  }
+
+  // And it is a real record, so this is not 720 comparisons of an empty object.
+  const record = JSON.parse(expected);
+  assert.equal(record.applicant.name, "Nihal Sharma");
+  assert.equal(record.applicant.currentRole, "Senior Legal Counsel", "the labelled reader's value, wherever it ran");
+  assert.equal(record.applicant.contact.email, "nihal@example.com");
+  assert.equal(Object.keys(record.applicant).length, 17, "and the schema did not move");
+});
+
+test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and nothing else", async () => {
+  // The one thing a pure test cannot see: whether the adapter USES the verdict
+  // for anything other than order. So the identifier is bounded by source.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  const snapshot = source.slice(source.indexOf("function snapshotPanel"), source.indexOf("function nextRevealStep"));
+  assert.ok(snapshot.length > 400, "the snapshot function must be found, not an empty slice");
+  assert.match(snapshot, /for \(const reader of verdict\.readerOrder\) readers\[reader\]\(\);/,
+    "the readers run in the order the verdict gives, and the verdict gives an order");
+  assert.match(snapshot, /diagnostics\.layout = \{/, "and the verdict is reported");
+
+  // Nothing may branch on the layout inside a reader, a save path, a click
+  // guard or an identity check. That is what would turn "which reader runs
+  // first" into "what this layout is allowed to do".
+  const uses = [...source.matchAll(/describeApplicantLayout|verdict\.layout/g)].length;
+  assert.ok(uses <= 3, `the layout verdict is consulted in one place, not ${uses}`);
+  assert.ok(!/if \(.*layout === /.test(source), "no reader may branch on the layout");
+  assert.ok(!/layout/.test(source.slice(source.indexOf("async function extractApplicant"), source.indexOf("const VISIBLE_ONLY_OPTIONS"))),
+    "and the extraction — where the record is built and saved — never mentions it");
+
+  // The signals are content, never a class name (rule 7), and no element
+  // escapes into them, which is what keeps the decision pure.
+  const signals = source.slice(source.indexOf("function applicantLayoutSignals"), source.indexOf("function snapshotPanel"));
+  assert.ok(signals.length > 400, "the signal reader must be found, not an empty slice");
+  assert.ok(!/class\*?=/.test(signals), "a layout may never be identified by a generated class name");
+  assert.ok(!/\.click\(\)/.test(signals), "and measuring it presses nothing");
+  assert.match(signals, /state\.layoutSignals/, "it is measured once per applicant, not once per snapshot");
+  assert.match(signals, /held\.identity === identity/, "keyed on who the panel is showing, so it invalidates itself");
+  // ...and on the element when the panel names nobody, which is exactly the
+  // markup a layout phase exists for. Without it, the one layout we cannot
+  // recognise would pay for four sweeps on every snapshot.
+  assert.match(signals, /held\.panel === live/, "and on the panel itself when there is no identity to key on");
+  assert.match(signals, /held\.panel\?\.isConnected/, "a remount re-measures rather than answering from a detached node");
+
+  // The click budget is untouched by any of this.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+});

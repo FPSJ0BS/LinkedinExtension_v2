@@ -116,6 +116,16 @@
      * `beginRun` and whenever the element leaves the document.
      */
     jobHeader: null,
+    /**
+     * What the open panel looked like, measured once and keyed on who it shows.
+     *
+     * The layout verdict is asked once per snapshot and there are dozens of
+     * snapshots per applicant, but nothing it reads changes between them — the
+     * same reason `jobHeader` is resolved once per run. Keyed on `panelIdentity`
+     * so it invalidates itself the moment the panel shows somebody else, and
+     * never stored at all when the panel has no identity to key it on.
+     */
+    layoutSignals: null,
     handler: null,
     urlTimer: null,
     visibilityHandler: null,
@@ -329,6 +339,9 @@
     // since the last one, and a stale bar would title everybody with the job
     // they are not applying to — worse than no title at all (rule 1).
     state.jobHeader = null;
+    // ...and for the same reason, what the panel looked like. A reload or a
+    // re-route can change the layout under a run that is still running.
+    state.layoutSignals = null;
     clearHiddenLatchIfVisible();
     // A page-condition verdict is never carried across runs, for exactly the
     // reason `wentHidden` is re-derived above: the last run's evidence describes
@@ -3436,6 +3449,63 @@
 
   const SCAN_BUDGET_MS = 90000;
 
+  /**
+   * What the panel looks like, as plain data.
+   *
+   * Everything here is CONTENT — resolved section keys, rendered labels, the
+   * accessible name of a control, a count of links. Not one generated class name
+   * (rule 7), and no element ever leaves this function, which is what lets the
+   * decision it feeds be a pure unit-testable one.
+   *
+   * Measured once per applicant, memoised on the panel's own identity, and
+   * deliberately NOT once per snapshot: `recordSectionScan` already explains why
+   * — reading `innerText` across the page is the expensive thing, and a scan
+   * takes dozens of snapshots.
+   */
+  function applicantLayoutSignals(panel, sections) {
+    // Keyed on WHO the panel shows, and on the panel element itself when it
+    // shows nobody nameable. The second half is not belt-and-braces: a panel
+    // that renders no application link and no `/in/` link has an empty
+    // identity, and that is precisely the markup a layout phase exists for — so
+    // keying on identity alone would leave the one layout we cannot recognise
+    // paying for a heading scan, a label sweep and two control sweeps on every
+    // snapshot, dozens of times per applicant. The element is stable for as long
+    // as the panel is mounted, and a remount re-measures, which is correct.
+    const live = panel?.isConnected ? panel : null;
+    const identity = panelIdentity(live || undefined) || "";
+    const held = state.layoutSignals;
+    if (held && held.identity === identity && (identity || held.panel === live) && held.panel?.isConnected) {
+      return held.signals;
+    }
+
+    const headings = panel ? headingsIn(panel) : [];
+    const labelled = panel ? labelledValuesIn(panel) : new Map();
+    const contact = panel ? findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT) : null;
+    const resume = panel ? findControl(panel, Applicants.CONTROL_PURPOSE.RESUME) : null;
+    const lines = panel ? toLines(panel.innerText || "").slice(0, 4) : [];
+
+    const signals = {
+      sectionKeys: Object.keys(sections || {}),
+      unmatchedHeadings: headings.filter((heading) => !heading.key).map((heading) => heading.text).slice(0, 12),
+      qualificationSubheadings: headings.filter((heading) => !heading.key && Applicants.qualificationCategoryOf(heading.text)).length,
+      labelKeys: [...labelled.keys()],
+      hasContactControl: Boolean(contact),
+      // What the CONTROL says it opens, never what a class is called. Left empty
+      // rather than guessed — the surface is only knowable once it is open, and
+      // Phase 11 is where that is decided.
+      contactSurface: "",
+      resumeSurface: resume ? (Applicants.isResumeDocumentUrl(resumeUrlFrom(resume.element.getAttribute?.("href"))) ? "link" : "viewer") : "",
+      rowLinkCount: panel ? rowLinksIn(panel) : 0,
+      // The shape of the top card, judged by what the second and third lines
+      // ARE rather than by where they sit: a name, then free text, then a place.
+      topCardShape: labelled.has("headline") || labelled.has("currentRole") || labelled.has("currentCompany")
+        ? "labelled"
+        : (lines.length >= 3 && Applicants.looksLikeApplicantLocation(lines[2]) ? "name-headline-location" : "unknown")
+    };
+    state.layoutSignals = { identity, panel: live, signals };
+    return signals;
+  }
+
   function snapshotPanel(panel, accumulator, diagnostics) {
     const before = accumulator.counts();
     // Resolved once per snapshot and handed to every reader. Each of them used
@@ -3443,22 +3513,33 @@
     // read, dozens of reads per applicant, and seven chances for two readers to
     // disagree about where a section was.
     const sections = buildSectionMap(panel);
-    attempt("job", accumulator, () => readJob(accumulator));
-    // Qualifications first, and deliberately: their explanation sentences are
-    // what the name is corroborated against, so reading the header before them
-    // would leave the very first snapshot with no arbiter at all.
-    attempt("qualifications", accumulator, () => readQualifications(sections, accumulator, accumulator.snapshot().header.name || ""));
-    const header = attempt("applicant header", accumulator, () => readApplicantHeader(panel, sections, accumulator, diagnostics));
-    void header;
-    attempt("screening responses", accumulator, () => readScreeningResponses(sections, accumulator));
-    attempt("experience", accumulator, () => readExperience(sections, accumulator));
-    attempt("education", accumulator, () => readEducation(sections, accumulator));
-    attempt("skills", accumulator, () => readSkills(sections, accumulator));
-    attempt("contacts", accumulator, () => readRenderedContacts(panel, accumulator));
-    // Last, and last on purpose: `addHeader` is first-wins per field, so a
-    // reader that runs after every other one can fill a gap and can never
-    // overwrite anything. It is inert on the layout that works today.
-    attempt("labelled fields", accumulator, () => readLabelledFields(panel, accumulator, diagnostics));
+
+    // Every reader, by name. The dispatch exists so that the ORDER can be data
+    // rather than a sequence of statements — which is the only thing layout
+    // detection is allowed to decide.
+    const readers = {
+      job: () => attempt("job", accumulator, () => readJob(accumulator)),
+      // Qualifications first, and deliberately: their explanation sentences are
+      // what the name is corroborated against, so reading the header before them
+      // would leave the very first snapshot with no arbiter at all. This pair is
+      // in the frozen prefix and no layout may separate them.
+      qualifications: () => attempt("qualifications", accumulator, () => readQualifications(sections, accumulator, accumulator.snapshot().header.name || "")),
+      header: () => attempt("applicant header", accumulator, () => readApplicantHeader(panel, sections, accumulator, diagnostics)),
+      screening: () => attempt("screening responses", accumulator, () => readScreeningResponses(sections, accumulator)),
+      experience: () => attempt("experience", accumulator, () => readExperience(sections, accumulator)),
+      education: () => attempt("education", accumulator, () => readEducation(sections, accumulator)),
+      skills: () => attempt("skills", accumulator, () => readSkills(sections, accumulator)),
+      contacts: () => attempt("contacts", accumulator, () => readRenderedContacts(panel, accumulator)),
+      // On the layout that works today this runs last, where it costs a bounded
+      // sweep and finds nothing. `addHeader` is first-wins per field, so
+      // wherever it runs it can fill a gap and can never overwrite anything.
+      labelled: () => attempt("labelled fields", accumulator, () => readLabelledFields(panel, accumulator, diagnostics))
+    };
+
+    const verdict = Applicants.describeApplicantLayout(applicantLayoutSignals(panel, sections));
+    diagnostics.layout = { layout: verdict.layout, matched: verdict.matched, contradicted: verdict.contradicted, readerOrder: [...verdict.readerOrder] };
+    for (const reader of verdict.readerOrder) readers[reader]();
+
     const after = accumulator.counts();
     diagnostics.totals = after;
     // Which sections this read could see at all. The cheap half of the section
