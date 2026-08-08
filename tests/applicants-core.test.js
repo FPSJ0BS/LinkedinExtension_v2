@@ -1014,7 +1014,7 @@ test("the applicants adapter clicks only its gated controls", async () => {
     "every open must go through a classified verdict"
   );
   assert.match(source, /pager\.element\.click\(\);/, "and so must the pager");
-  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("/** The disclosure LinkedIn mounted"));
+  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("const CONTACT_SURFACE_SELECTOR"));
   assert.match(dismiss, /element\.click\(\)/, "and one dismiss closes whichever overlay was opened");
   assert.equal((dismiss.match(/\.click\(\)/g) || []).length, 1, "the dismiss is one click, retried — never several controls");
   assert.match(source, /Applicants\.classifyApplicantControl\(/, "the policy decides which element that is");
@@ -1273,15 +1273,19 @@ test("the resume is downloaded, not previewed, whenever the page already has the
   // without the extension ever mentioning it, which is the whole complaint.
   assert.ok(!/if \(overlay\) await closeOpenedOverlay\(overlay\)/.test(step),
     "the close result must not be discarded");
-  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 3,
-    "every one of the three exits from this step closes the viewer");
+  // Four exits since 3.9.0. The fourth is the non-throwing identity re-check:
+  // the resume step is the only one whose output is a FILE saved under somebody's
+  // name, and it is the one most likely to run long enough for the panel to
+  // change underneath it. It closes the viewer like the other three.
+  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 4,
+    "every one of the four exits from this step closes the viewer");
   const dismiss = source.slice(source.indexOf("async function dismissResumeViewer"), source.indexOf("const MAX_RESUME_BYTES"));
   assert.match(dismiss, /the resume viewer would not close/, "and a viewer that refuses to go says so on the record");
 
   // The person's name reaches the worker; the path never leaves this file.
   assert.match(step, /applicantName,\s*\n\s*applicantKey/, "the applicant's name must be sent to the downloader");
   assert.match(step, /fileType,/, "and the type, so the saved copy keeps the right extension");
-  assert.match(source, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| ""\)/,
+  assert.match(source, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| "", expected\)/,
     "the name the record carries is the name the file is saved under");
   assert.ok(!/RESUME_FOLDER|profile-vault-resumes/.test(step), "a content script must never build the download path");
 });
@@ -1676,8 +1680,8 @@ test("the list pass opens every applicant across every page and takes what the p
   assert.ok(!/resume: false/.test(reveal), "and must reach the resume");
   // And the file it saves is named after the person, not after LinkedIn's media
   // id — the record's own resolved name, which is settled before this runs.
-  assert.match(extract, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| ""\)/,
-    "the resume is saved under the applicant's own name");
+  assert.match(extract, /await collectResume\(panel, accumulator, diagnostics, applicantKey, header\.name \|\| "", expected\)/,
+    "the resume is saved under the applicant's own name, and only while the panel still shows them");
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   assert.match(worker, /Applicants\.resumeFileName\(\{\s*\n?\s*name: message\?\.applicantName/,
     "and the worker builds the filename from it");
@@ -4564,7 +4568,7 @@ test("a repainting viewer cannot testify about the page, and one resume cannot s
   // 5. The dismiss polls instead of sleeping — but never through `waitFor`, which
   //    calls `assertRunnable()` and would throw a Stop straight out of a dismiss,
   //    leaving the preview on screen. That is the complaint it exists to answer.
-  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("/** The disclosure LinkedIn mounted"));
+  const dismiss = source.slice(source.indexOf("async function closeOpenedOverlay"), source.indexOf("const CONTACT_SURFACE_SELECTOR"));
   assert.ok(!/waitFor\(/.test(dismiss), "a dismiss must run on the failure path, so it never asserts runnability");
   assert.ok(!/await wait\(250\)/.test(dismiss), "and must not pay the worst case on every applicant");
   assert.match(dismiss, /for \(let waited = 0; waited < DISMISS_CONFIRM_MS; waited \+= DISMISS_POLL_MS\)/,
@@ -6437,4 +6441,167 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
   assert.ok(branch.length > 300, "the relay must be found, not an empty slice");
   assert.ok(!/revealApplicantTab/.test(branch), "a read-only command never steals focus");
   assert.match(branch, /ensureContentScript/, "but it does make sure something is listening");
+});
+
+
+// ------ Phase 11 of the multiple-LinkedIn-UI support guide: contact and resume
+//
+// "Contact may appear as a modal, a drawer, a popover, an inline block or an
+// expanded section. Resume may appear as a direct link, a document card, button
+// metadata, a viewer descriptor or a download action. Keep one Contact opening
+// per applicant, keep the resume linked to the correct applicant, keep the
+// current file naming and download behaviour, and never reuse a previous
+// applicant's resume link."
+//
+// Every widening here is READ-ONLY. The click budget is still seven.
+
+test("Phase 11: the contact disclosure gained four surfaces and got stricter, not looser", async () => {
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const finder = source.slice(source.indexOf("function findContactDisclosure"), source.indexOf("async function openContactAndCollect"));
+  assert.ok(finder.length > 600 && finder.length < 6000, "the finder must be found, and only it");
+
+  // The four new surfaces, by ROLE and STATE. The two `class*=` selectors that
+  // were already there are kept exactly as they were and none was added.
+  const selector = source.slice(source.indexOf("const CONTACT_SURFACE_SELECTOR"), source.indexOf("function contactSurfaceCandidates"));
+  for (const surface of ["[role='tooltip']", "[role='region'][aria-label]", "details[open]", "[aria-expanded='true']"]) {
+    assert.ok(selector.includes(surface), `a contact disclosure may also be ${surface}`);
+  }
+  assert.equal((selector.match(/class\*=/g) || []).length, 2,
+    "and no new class-name match was introduced (rule 7)");
+
+  // THE POINT: carrying contact content is still necessary and is NO LONGER
+  // SUFFICIENT. The old finder searched the whole document and took the first
+  // visible thing with an email in it — which, on a slow teardown between
+  // applicants, can be the PREVIOUS applicant's disclosure. Widening the search
+  // without closing that would have made the leak more likely, not less.
+  assert.match(finder, /if \(!carries\) continue;/, "it still has to look like contact details");
+  assert.match(finder, /const named = Boolean\(target\)/, "1. the control's own aria-controls target");
+  assert.match(finder, /const revealed = expanded/, "2. or a region the control says it expanded");
+  assert.match(finder, /const fresh = Array\.isArray\(before\)/, "3. or something that was not there before we pressed");
+  assert.match(finder, /const own = Boolean\(panel\) && panel\.contains\(element\)/, "4. or the applicant's own panel");
+  assert.match(finder, /if \(!named && !revealed && !fresh && !own\) continue;/,
+    "and a candidate tied to this applicant by NONE of the four is refused");
+  assert.match(finder, /element\.contains\(list\) \|\| element === list/, "and never the recruiter's list");
+
+  // The pre-click sample, which is what makes (3) possible — the same reasoning
+  // as `watchResumeRequests`' `buffered: false`.
+  const open = source.slice(source.indexOf("async function openContactAndCollect"), source.indexOf("const MAX_EXPANSIONS"));
+  assert.ok(open.length > 600, "the contact step must be found, not an empty slice");
+  assert.ok(
+    open.indexOf("const surfacesBefore = contactSurfaceCandidates()") < open.indexOf("control.element.click()"),
+    "the surfaces are sampled BEFORE the click, or 'it appeared when we pressed' means nothing"
+  );
+
+  // ONE open per applicant, unchanged: one click, no loop around it.
+  assert.equal((open.match(/\.click\(\)/g) || []).length, 1, "one contact control, pressed once");
+  assert.ok(!/for \([^)]*\)[\s\S]{0,200}?control\.element\.click\(\)/.test(open), "and never in a loop");
+
+  // Rule 2 is untouched: the provenance requirement is still lifted in exactly
+  // one place, and nothing off the click path may take a phone number.
+  assert.equal((source.match(/trusted: true/g) || []).length, 1, "one trusted read, still");
+  assert.ok(!/allow: \[[^\]]*phone/.test(source), "and no reader takes a number off the click path");
+});
+
+test("Phase 11: every resume variant is reached without an eighth click", async () => {
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  // A viewer that describes itself as a document, held to a HIGHER bar than the
+  // six selectors that were already there: `role='document'` is a role a page
+  // can put on almost anything, and a wrong viewer is a wrong file under
+  // somebody's name.
+  const viewer = source.slice(source.indexOf("const RESUME_VIEWER_SELECTOR"), source.indexOf("function readResumeViewerDetails"));
+  assert.ok(viewer.length > 300, "the viewer finder must be found, not an empty slice");
+  assert.match(viewer, /\[role='document'\],\[aria-roledescription\*='document' i\]/, "a viewer may describe itself as one");
+  assert.match(viewer, /if \(widened\.includes\(element\)\) \{[\s\S]{0,200}?RESUME_CONTROL_PATTERN\.test\(named\)/,
+    "and a widened candidate must NAME itself a resume, not merely hold something");
+
+  // Button metadata: the sweep widened, the DECISION did not.
+  const attributes = source.slice(source.indexOf("const DOCUMENT_URL_ATTRIBUTES"), source.indexOf("/**\n   * The resume FILE's address"));
+  for (const attribute of ["data-document-url", "data-media-url", "data-attachment-url"]) {
+    assert.ok(attributes.includes(attribute), `an address may be carried on ${attribute}`);
+  }
+  // `isResumeDocumentUrl` refuses a LinkedIn route first, so a broader sweep
+  // still cannot return a page as a resume — the 3.7.1 defect, still fixed.
+  assert.equal(Applicants.isResumeDocumentUrl("https://www.linkedin.com/hiring/applicants/?applicationId=1"), false);
+  assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
+
+  // And none of it costs a click.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
+    .map((match) => ({ name: match[1], at: match.index }));
+  const ownerOf = (offset) => {
+    let owner = "";
+    for (const declaration of declarations) {
+      if (declaration.at < offset) owner = declaration.name;
+      else break;
+    }
+    return owner;
+  };
+  assert.deepEqual(
+    [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(match.index)).sort(),
+    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "selectApplicantRow"],
+    "and each one is still owned by its own gated function — none moved house"
+  );
+});
+
+test("Phase 11: a resume is never saved under the wrong applicant, and the check does not throw", async () => {
+  // The resume step is the only one whose output is a FILE saved under
+  // somebody's name, and it is the one most likely to run long enough for the
+  // panel to change underneath it — a viewer opens, a document is fetched, a
+  // download is waited on.
+  //
+  // `extractApplicant` checks identity three times and that count is PINNED,
+  // deliberately, so no path can be added that saves without checking. A fourth
+  // throwing check there would break that proof. So this one is local and
+  // non-throwing: it refuses the file, not the applicant.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("function snapshotPanel"));
+  assert.ok(step.length > 2000, "the resume step must be found, not an empty slice");
+
+  assert.match(step, /if \(expected && describeApplicantArrival\(expected\)\.state === Applicants\.PANEL_ARRIVAL\.OTHER\)/,
+    "the panel is asked again, immediately before the link is written");
+  assert.ok(!/assertExpectedApplicant/.test(step), "and it does not throw — that would end the applicant, not the file");
+  assert.match(step, /diagnostics\.resume\.status = Applicants\.RESUME_STATUS\.NOT_ATTEMPTED;\s*\n\s*await dismissResumeViewer/,
+    "NOT_ATTEMPTED, so a stored resume survives");
+  assert.match(step, /the panel changed applicant while the resume was being read/, "and the record says why");
+
+  // NOT_ATTEMPTED is the right verdict because the merge reads it as "I did not
+  // look" and keeps what was already there — refusing a WRONG file without
+  // destroying a right one.
+  const stored = Applicants.normalizeApplicantRecord({
+    job: { id: "1" }, applicationId: "2",
+    applicant: { name: "Nihal Sharma", resume: { available: true, filename: "Nihal Sharma.pdf", downloadStatus: Applicants.RESUME_STATUS.DOWNLOADED } }
+  });
+  const refused = Applicants.normalizeApplicantRecord({
+    job: { id: "1" }, applicationId: "2",
+    applicant: { name: "Nihal Sharma", resume: { downloadStatus: Applicants.RESUME_STATUS.NOT_ATTEMPTED } }
+  });
+  const merged = Applicants.mergeApplicantRecord(stored, refused);
+  assert.equal(merged.applicant.resume.filename, "Nihal Sharma.pdf", "a right file is not destroyed by a refused one");
+  assert.equal(merged.applicant.resume.downloadStatus, Applicants.RESUME_STATUS.DOWNLOADED);
+
+  // The three throwing checks in `extractApplicant` are still exactly three.
+  const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("const VISIBLE_ONLY_OPTIONS"));
+  assert.equal((extract.match(/assertExpectedApplicant\(expected\)/g) || []).length, 3, "still three, and no more");
+});
+
+test("Phase 11: an eighth click would need the rule to change first, and it has not", async () => {
+  // If a document-card layout ever turns out to need a panel-level Download,
+  // `probePanelDownloadControls` is what will say so: it classifies with
+  // `inContainer: false` so no path can press what it finds, and reports
+  // `outside-resume-viewer` when the label qualified and only the container
+  // proof refused it. Its live output is the evidence; the rule changes first.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const probe = source.slice(source.indexOf("function probePanelDownloadControls"), source.indexOf("const DISMISS_SELECTOR"));
+  assert.ok(probe.length > 200, "the probe must be found, not an empty slice");
+  assert.ok(!/\.click\(\)/.test(probe), "it observes and never presses");
+  assert.match(probe, /inContainer: false/, "so no verdict it produces can ever be `allowed`");
+  assert.match(probe, /verdict\.reason !== "outside-resume-viewer"/, "and it reports exactly the signal that would justify a rule change");
+
+  // And CLAUDE.md's allowlist has not gained one.
+  const claude = await readFile(resolve(root, "CLAUDE.md"), "utf8");
+  const rule = claude.slice(claude.indexOf("*Hiring pages:*"), claude.indexOf("**Permanently forbidden everywhere:**"));
+  assert.ok(rule.length > 100, "the hiring allowlist must be found");
+  assert.match(rule, /the resume viewer's own Download/, "the viewer's Download is allowed");
+  assert.ok(!/panel'?s own Download|panel-level Download/.test(rule), "and the panel's is not");
 });

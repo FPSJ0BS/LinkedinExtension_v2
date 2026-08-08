@@ -2626,19 +2626,81 @@
     return !document.contains(overlay) || !isVisible(overlay);
   }
 
-  /** The disclosure LinkedIn mounted after the contact control was clicked. */
-  function findContactDisclosure(panel) {
-    const candidates = [
-      ...document.querySelectorAll("[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal,[role='menu'],[class*='dropdown__content'],[class*='contact']")
-    ];
-    for (const element of candidates) {
+  /**
+   * Every surface a contact disclosure is ever mounted on.
+   *
+   * The first seven are what has always been searched — a modal, a dialog, a
+   * menu, a dropdown. The last four are the guide's other Contact variants: a
+   * drawer or a popover (`role='tooltip'`, a labelled `role='region'`), an
+   * expanded `<details>`, and an inline block revealed by the control's own
+   * `aria-expanded`. Roles and STATE, never a generated class name (rule 7);
+   * the two `class*=` entries predate this and are kept exactly as they were.
+   */
+  const CONTACT_SURFACE_SELECTOR =
+    "[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal,[role='menu']," +
+    "[class*='dropdown__content'],[class*='contact']," +
+    "[role='tooltip'],[role='region'][aria-label],details[open],[aria-expanded='true']";
+
+  /** Every candidate surface on the page right now, visible or not. */
+  function contactSurfaceCandidates() {
+    return [...document.querySelectorAll(CONTACT_SURFACE_SELECTOR)];
+  }
+
+  /**
+   * The disclosure LinkedIn mounted after THIS applicant's control was clicked.
+   *
+   * **The widening comes with a binding, and the binding makes this STRICTER
+   * than it was.** The old version searched the whole document and returned the
+   * first visible thing containing an email — which, on a slow teardown between
+   * applicants, can be the PREVIOUS applicant's disclosure still on screen. That
+   * is a live leak, and widening the search without closing it would have made
+   * it more likely rather than less.
+   *
+   * So carrying contact content is still necessary and is no longer sufficient.
+   * A candidate must also be tied to this applicant, one of four ways:
+   *
+   *   1. it is the control's own `aria-controls` target — the markup says so;
+   *   2. the control is `aria-expanded="true"` and the candidate is the region
+   *      it sits in or the one immediately after it — the drawer and inline cases;
+   *   3. it was NOT on the page before the click — the same reasoning as
+   *      `watchResumeRequests`' `buffered: false`, and the strongest of the four,
+   *      because a thing that appeared when we pressed is the thing we opened;
+   *   4. it is inside the applicant's own panel — which is rule 2's exception
+   *      verbatim: an element inside a panel this extension opened is that
+   *      person's own card by construction.
+   *
+   * `before` is the candidate set sampled immediately before the click. A caller
+   * that cannot supply one still gets 1, 2 and 4.
+   */
+  function findContactDisclosure(panel, control = null, before = null) {
+    const opener = control?.element || control || null;
+    const controls = opener?.getAttribute?.("aria-controls") || "";
+    const expanded = opener?.getAttribute?.("aria-expanded") === "true";
+    const target = controls ? document.getElementById(controls.split(/\s+/)[0]) : null;
+
+    for (const element of contactSurfaceCandidates()) {
       if (!isVisible(element)) continue;
+      // Never the recruiter's list, whatever it contains.
+      const list = applicantList();
+      if (list && (element.contains(list) || element === list)) continue;
+
       // Its own text has to look like contact details, or it is some other menu.
       const text = cleanText(element.innerText || "");
       if (!text) continue;
-      if (Core.EMAIL_PATTERN?.test(text)) return element;
-      if (element.querySelector("a[href^='mailto:'],a[href^='tel:']")) return element;
-      if (/contact info|email|phone|mobile/i.test(text) && element !== panel) return element;
+      const carries =
+        Core.EMAIL_PATTERN?.test(text) ||
+        Boolean(element.querySelector("a[href^='mailto:'],a[href^='tel:']")) ||
+        (/contact info|email|phone|mobile/i.test(text) && element !== panel);
+      if (!carries) continue;
+
+      // ...and it has to be THIS applicant's.
+      const named = Boolean(target) && (element === target || element.contains(target) || target.contains(element));
+      const revealed = expanded && Boolean(opener) && (element.contains(opener) || (opener.nextElementSibling === element));
+      const fresh = Array.isArray(before) ? !before.includes(element) : false;
+      const own = Boolean(panel) && panel.contains(element) && element !== panel;
+      if (!named && !revealed && !fresh && !own) continue;
+
+      return element;
     }
     return null;
   }
@@ -2670,6 +2732,11 @@
       return 0;
     }
 
+    // Sampled BEFORE the click, so a surface that appears afterwards is known
+    // to be the one this press opened rather than one already on screen from
+    // the applicant before. The same reasoning as watchResumeRequests' buffered:false.
+    const surfacesBefore = contactSurfaceCandidates();
+
     try {
       control.element.click();
       diagnostics.contact.clicked = true;
@@ -2681,7 +2748,7 @@
     // 1. Wait for the disclosure to mount. It is fetched, so it appears a beat
     //    after the click, and on a throttled tab that beat is seconds.
     const started = Date.now();
-    const overlay = await waitFor(() => findContactDisclosure(panel), {
+    const overlay = await waitFor(() => findContactDisclosure(panel, control, surfacesBefore), {
       timeoutMs: OVERLAY.OPEN_TIMEOUT_MS,
       pollMs: OVERLAY.POLL_MS,
       label: "contact-disclosure"
@@ -2700,7 +2767,7 @@
     let step = Core.createContactOverlayState();
     while (!step.done) {
       assertRunnable();
-      const found = findContactDisclosure(panel);
+      const found = findContactDisclosure(panel, control, surfacesBefore);
       if (found) live = found;
       const present = document.contains(live);
       let carriesValue = false;
@@ -2836,10 +2903,20 @@
   }
 
   /** Attributes a rendered document address is actually written into. */
-  const DOCUMENT_URL_ATTRIBUTES = ["src", "data", "href", "data-src", "data-source-url", "data-delayed-url", "content"];
+  // 3.9.0 added the last three, for the guide's "button metadata" resume
+  // variant — a card or a control that carries the document's address on itself
+  // rather than rendering it in an `iframe`. Widening the SWEEP is safe because
+  // it does not widen the DECISION: `isResumeDocumentUrl` is what accepts an
+  // address, and it refuses a linkedin.com route first, so a broader search
+  // still cannot return a page as a resume (which was the 3.7.1 defect).
+  const DOCUMENT_URL_ATTRIBUTES = [
+    "src", "data", "href", "data-src", "data-source-url", "data-delayed-url", "content",
+    "data-document-url", "data-media-url", "data-attachment-url"
+  ];
   const DOCUMENT_URL_SELECTOR = [
     "iframe[src]", "embed[src]", "object[data]", "a[download][href]", "a[href]",
-    "[data-src]", "[data-source-url]", "[data-delayed-url]", "meta[content]"
+    "[data-src]", "[data-source-url]", "[data-delayed-url]", "meta[content]",
+    "[data-document-url]", "[data-media-url]", "[data-attachment-url]"
   ].join(",");
 
   /**
@@ -2992,16 +3069,40 @@
     };
   }
 
-  /** The viewer LinkedIn mounted after the resume control was clicked. */
+  /**
+   * The viewer LinkedIn mounted after the resume control was clicked.
+   *
+   * The first six selectors are what has always been searched. `[role='document']`
+   * and an `aria-roledescription` naming a document are the guide's "viewer
+   * descriptor" variant, and they are held to a HIGHER bar than the rest: a
+   * widened candidate must carry a resume-shaped accessible name as well as
+   * looking like a viewer, because `role='document'` is a role a page can put on
+   * almost anything and a wrong viewer is a wrong file under somebody's name.
+   */
+  const RESUME_VIEWER_SELECTOR =
+    "[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal,[class*='document-viewer'],[class*='resume']";
+  const RESUME_VIEWER_WIDENED_SELECTOR = "[role='document'],[aria-roledescription*='document' i]";
+
   function findResumeViewer() {
-    for (const element of document.querySelectorAll("[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal,[class*='document-viewer'],[class*='resume']")) {
+    const strict = [...document.querySelectorAll(RESUME_VIEWER_SELECTOR)];
+    const widened = [...document.querySelectorAll(RESUME_VIEWER_WIDENED_SELECTOR)].filter(
+      (element) => !strict.includes(element)
+    );
+    for (const element of [...strict, ...widened]) {
       if (!isVisible(element)) continue;
-      if (element.querySelector("iframe[src],embed[src],object[data],canvas")) return element;
       const named = [
         element.getAttribute("aria-label") || "",
         (element.getAttribute("aria-labelledby") || "").replace(/[-_]/g, " "),
+        element.getAttribute("aria-roledescription") || "",
         cleanText(element.innerText || "").slice(0, 200)
       ].join(" ");
+      // A widened candidate has to NAME itself a resume; the original six may
+      // qualify on their embedded document alone, exactly as before.
+      if (widened.includes(element)) {
+        if (Applicants.RESUME_CONTROL_PATTERN.test(named)) return element;
+        continue;
+      }
+      if (element.querySelector("iframe[src],embed[src],object[data],canvas")) return element;
       if (Applicants.RESUME_CONTROL_PATTERN.test(named)) return element;
     }
     return null;
@@ -3300,7 +3401,7 @@
     return document_;
   }
 
-  async function collectResume(panel, accumulator, diagnostics, applicantKey, applicantName = "") {
+  async function collectResume(panel, accumulator, diagnostics, applicantKey, applicantName = "", expected = "") {
     diagnostics.resume = {
       found: false, clicked: false, opened: false, scrolledSteps: 0,
       openedViewer: false, viewerClosed: true, foundInRequests: false,
@@ -3461,6 +3562,27 @@
     const card = details.filename ? { filename: "", fileType: "" } : readDocumentCardDetails(panel);
     const filename = details.filename || card.filename || fileNameFrom(url);
     const fileType = details.fileType || card.fileType || fileTypeFrom(url, filename);
+
+    // Is this still the applicant we were asked for?
+    //
+    // The resume step is the one most likely to take a while — a viewer opens, a
+    // document is fetched, a download is waited on — and it is the only step
+    // whose output is a FILE saved under somebody's name. `extractApplicant`
+    // checks identity three times and that count is pinned, deliberately, so
+    // that no path can be added which saves without checking; adding a fourth
+    // throwing check there would break the proof. So this one is NON-THROWING
+    // and local: it refuses the file rather than the applicant.
+    //
+    // `NOT_ATTEMPTED` is the right verdict because `mergeApplicantRecord` reads
+    // it as "I did not look" and keeps whatever was already stored — so this
+    // refuses a WRONG file without destroying a right one.
+    if (expected && describeApplicantArrival(expected).state === Applicants.PANEL_ARRIVAL.OTHER) {
+      accumulator.addWarning("the panel changed applicant while the resume was being read; the link was discarded");
+      diagnostics.resume.reason = "panel-changed";
+      diagnostics.resume.status = Applicants.RESUME_STATUS.NOT_ATTEMPTED;
+      await dismissResumeViewer(overlay, accumulator, diagnostics);
+      return;
+    }
 
     // Save the verified link into the record BEFORE starting the download. If
     // Chrome refuses, times out, or the worker restarts, the applicant still has
@@ -4461,7 +4583,7 @@
         // The name the record will carry, which is the name the file is saved
         // under. It is settled by now: the qualification explanations that
         // corroborate it were read on the very first snapshot.
-        await collectResume(panel, accumulator, diagnostics, applicantKey, header.name || "");
+        await collectResume(panel, accumulator, diagnostics, applicantKey, header.name || "", expected);
       } catch (error) {
         // Same rule as the contact disclosure above, and this is the site that
         // actually fires: opening the resume viewer is the step most likely to

@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0164",
+  "name": "Phase 11: contact and resume variants",
+  "request": "Phase 11: contact and resume variants",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T12:09:19.248Z",
+  "completedAt": "2026-08-08T12:16:32.082Z",
+  "startCommit": "318f6fb34ed685ca530045e5d9f6892d196448ff",
+  "gitRef": "task/TASK-0164",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 529 passed / 0 failed (was 525), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 11 of the multiple-LinkedIn-UI support guide: contact and resume variants, with the click budget still at seven and each of the seven still owned by its own gated function. CONTACT gained four surfaces - role=tooltip, a labelled role=region, an open details, and an aria-expanded=true block - covering the guide's drawer, popover, inline and expanded-section variants. Roles and STATE, never a generated class name; the two class*= selectors that were already there are unchanged and none was added. THE WIDENING CAME WITH A BINDING THAT MAKES THE FINDER STRICTER THAN IT WAS, and that is the important half: the old version searched the whole document and returned the first visible thing containing an email, which on a slow teardown between applicants can be the PREVIOUS applicant's disclosure still on screen - a live leak, and widening the search without closing it would have made it more likely rather than less. Carrying contact content is still necessary and is no longer sufficient; a candidate must also be tied to this applicant one of four ways: it is the control's own aria-controls target, or the control says aria-expanded=true and it is the region it sits in or the one immediately after, or it was NOT on the page before the click (the strongest of the four, and the same reasoning as watchResumeRequests' buffered:false - a thing that appeared when we pressed is the thing we opened), or it is inside the applicant's own panel, which is rule 2's exception verbatim. Anything containing the recruiter's list is refused outright. The pre-click sample is taken before the press, or 'it appeared when we pressed' means nothing. ONE open per applicant is unchanged - one click, no loop - and rule 2 is untouched: trusted:true still appears exactly once and nothing off the click path may take a phone number. RESUME, all zero-click: findResumeViewer accepts role=document and an aria-roledescription naming a document, held to a HIGHER bar than the six selectors that were already there, because role=document is a role a page can put on almost anything and a wrong viewer is a wrong file under somebody's name - a widened candidate must NAME itself a resume. Three data-* attributes were added to the address sweep for the guide's button-metadata variant; the sweep widened and the DECISION did not, because isResumeDocumentUrl still refuses a linkedin.com route first, so a broader search still cannot return a page as a resume (the 3.7.1 defect, asserted still fixed). And a NON-THROWING identity re-check immediately before the link is written. The resume step is the only one whose output is a file saved under somebody's name and the one most likely to run long enough for the panel to change underneath it; extractApplicant's three throwing checks are pinned deliberately so that no path can be added which saves without checking, and a fourth would break that proof - so this one refuses the FILE rather than the applicant, reports NOT_ATTEMPTED, and closes the viewer. NOT_ATTEMPTED is the right verdict because mergeApplicantRecord reads it as 'I did not look' and keeps what was already stored, so this refuses a wrong file without destroying a right one - asserted end to end through the merge. If a document-card layout ever genuinely needs a panel-level Download, probePanelDownloadControls is what will say so - it classifies with inContainer:false so nothing can press what it finds - and CLAUDE.md rule 5 would have to change first, which is asserted to still be true. Four existing tests changed: two slices ended on a comment this phase rewrote (an indexOf of -1 slices to end of file and makes an assertion vacuous), the resume step gained a fourth exit and all four still close the viewer, and collectResume's call now carries the applicant it was asked for. Files: extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}
