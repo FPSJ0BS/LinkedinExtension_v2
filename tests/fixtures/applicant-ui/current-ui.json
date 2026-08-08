@@ -1,0 +1,189 @@
+{
+  "capture": {
+    "schemaVersion": 1,
+    "name": "current-ui",
+    "buildId": "2026-08-08-react-v3.9.0",
+    "capturedAt": "2026-08-08T00:00:00.000Z",
+    "layout": "current",
+    "surface": "hiring-applicants"
+  },
+  "signals": {
+    "sectionKeys": [
+      "qualifications",
+      "screening",
+      "experience",
+      "education",
+      "skills"
+    ],
+    "unmatchedHeadings": [
+      "Person A"
+    ],
+    "qualificationSubheadings": 0,
+    "labelKeys": [],
+    "hasContactControl": true,
+    "contactSurface": "",
+    "resumeSurface": "viewer",
+    "rowLinkCount": 1,
+    "topCardShape": "name-headline-location"
+  },
+  "sectionScan": {
+    "headings": [
+      {
+        "where": "panel",
+        "text": "Person A",
+        "key": "",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Qualifications",
+        "key": "qualifications",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Screening question responses",
+        "key": "screening",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Experience",
+        "key": "experience",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Education",
+        "key": "education",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Skills",
+        "key": "skills",
+        "bounds": ""
+      }
+    ],
+    "resolved": [
+      {
+        "key": "qualifications",
+        "heading": "Qualifications",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 2
+      },
+      {
+        "key": "screening",
+        "heading": "Screening question responses",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 1
+      },
+      {
+        "key": "experience",
+        "heading": "Experience",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 2
+      },
+      {
+        "key": "education",
+        "heading": "Education",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 1
+      },
+      {
+        "key": "skills",
+        "heading": "Skills",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 3
+      }
+    ],
+    "missing": [
+      "about",
+      "resume"
+    ],
+    "auxiliary": []
+  },
+  "headerText": [
+    "Person A",
+    "Human Resource",
+    "Noida, Uttar Pradesh, India",
+    "Applied 13mo ago"
+  ],
+  "nameCandidates": [
+    {
+      "value": "Person A",
+      "source": "list-row",
+      "evidence": "text"
+    },
+    {
+      "value": "Person A",
+      "source": "profile-link",
+      "evidence": "text"
+    }
+  ],
+  "labelled": [],
+  "blocks": {
+    "qualifications": [
+      [
+        "3+ years of legal experience",
+        "Person A has 6 years of experience"
+      ],
+      [
+        "Bachelor of Laws",
+        "Person A has a Bachelor of Laws - LLB"
+      ]
+    ],
+    "screening": [
+      [
+        "Do you have 3 years of experience?",
+        "Ideal answer: Yes",
+        "Yes"
+      ]
+    ],
+    "experience": [
+      [
+        "Legal Assistant",
+        "Company A • 2024 - Present",
+        "Drafted and reviewed commercial contracts"
+      ],
+      [
+        "Paralegal",
+        "Company A • 2022 - 2024",
+        "Research and filings"
+      ]
+    ],
+    "education": [
+      [
+        "University A",
+        "Bachelor of Laws - LLB",
+        "2019 - 2024"
+      ]
+    ],
+    "skills": [
+      [
+        "Contract Drafting"
+      ],
+      [
+        "Legal Research"
+      ],
+      [
+        "Compliance"
+      ]
+    ]
+  },
+  "links": [
+    {
+      "rel": "profile"
+    },
+    {
+      "rel": "application"
+    }
+  ],
+  "readers": {},
+  "pseudonyms": 3
+}

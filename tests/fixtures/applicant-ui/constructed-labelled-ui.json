@@ -1,0 +1,190 @@
+{
+  "capture": {
+    "schemaVersion": 1,
+    "name": "constructed-labelled-ui",
+    "buildId": "2026-08-08-react-v3.9.0",
+    "capturedAt": "2026-08-08T00:00:00.000Z",
+    "layout": "alternative",
+    "surface": "hiring-applicants"
+  },
+  "signals": {
+    "sectionKeys": [
+      "experience",
+      "education",
+      "skills"
+    ],
+    "unmatchedHeadings": [
+      "Person A",
+      "Application details"
+    ],
+    "qualificationSubheadings": 0,
+    "labelKeys": [
+      "currentRole",
+      "currentCompany",
+      "totalExperience"
+    ],
+    "hasContactControl": true,
+    "contactSurface": "drawer",
+    "resumeSurface": "link",
+    "rowLinkCount": 1,
+    "topCardShape": "labelled"
+  },
+  "sectionScan": {
+    "headings": [
+      {
+        "where": "panel",
+        "text": "Person A",
+        "key": "",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Work history",
+        "key": "experience",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Academics",
+        "key": "education",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Skills and expertise",
+        "key": "skills",
+        "bounds": ""
+      },
+      {
+        "where": "panel",
+        "text": "Application details",
+        "key": "",
+        "bounds": "applicationDetails"
+      },
+      {
+        "where": "panel",
+        "text": "Contact information",
+        "key": "",
+        "bounds": "contact"
+      }
+    ],
+    "resolved": [
+      {
+        "key": "experience",
+        "heading": "Work history",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 1
+      },
+      {
+        "key": "education",
+        "heading": "Academics",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 1
+      },
+      {
+        "key": "skills",
+        "heading": "Skills and expertise",
+        "foundIn": "panel",
+        "narrowedFrom": "",
+        "blocks": 2
+      }
+    ],
+    "missing": [
+      "qualifications",
+      "screening",
+      "about",
+      "resume"
+    ],
+    "auxiliary": [
+      {
+        "where": "panel",
+        "text": "Application details",
+        "key": "applicationDetails"
+      },
+      {
+        "where": "panel",
+        "text": "Contact information",
+        "key": "contact"
+      }
+    ]
+  },
+  "headerText": [
+    "Person A",
+    "Wellness Programme Lead",
+    "New Delhi, Delhi, India",
+    "Applied 2mo ago"
+  ],
+  "nameCandidates": [
+    {
+      "value": "Person A",
+      "source": "panel-heading",
+      "evidence": "heading"
+    }
+  ],
+  "labelled": [
+    {
+      "label": "currentRole",
+      "value": "Wellness Programme Lead"
+    },
+    {
+      "label": "currentCompany",
+      "value": "Company A"
+    },
+    {
+      "label": "totalExperience",
+      "value": "6 years"
+    }
+  ],
+  "blocks": {
+    "qualifications": [],
+    "screening": [],
+    "experience": [
+      [
+        "Wellness Programme Lead",
+        "Company A • 2021 - Present",
+        "Ran the residential programme"
+      ]
+    ],
+    "education": [
+      [
+        "University A",
+        "Bachelor of Technology - BTech",
+        "2016 - 2020"
+      ]
+    ],
+    "skills": [
+      [
+        "Programme Management"
+      ],
+      [
+        "Stakeholder Engagement"
+      ]
+    ]
+  },
+  "links": [
+    {
+      "rel": "profile"
+    },
+    {
+      "rel": "mailto"
+    },
+    {
+      "rel": "media"
+    }
+  ],
+  "readers": {
+    "currentRole": {
+      "source": "panel-label",
+      "evidence": "labelled",
+      "confidence": 0.8
+    },
+    "currentCompany": {
+      "source": "panel-label",
+      "evidence": "labelled",
+      "confidence": 0.8
+    }
+  },
+  "pseudonyms": 3
+}
