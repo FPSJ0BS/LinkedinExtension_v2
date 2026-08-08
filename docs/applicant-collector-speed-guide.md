@@ -216,23 +216,45 @@ The fix is complete when:
 
 ## Testing
 
-Test at least five applicants on one page.
+Do not run the full collector regression after every small speed or scrolling edit.
 
-For every applicant, verify:
+### During normal speed and scrolling work
+
+Run only the focused checks related to the code changed.
+
+Examples:
+
+- If row selection changed, verify that the exact next applicant opens directly.
+- If profile scrolling changed, verify that the right-side profile reaches the bottom and the left applicant list does not move.
+- If waiting logic changed, verify that the correct applicant is confirmed and unnecessary delay is reduced.
+- If resume ordering changed, verify the resume flow still works for one applicant with a resume.
+- If save timing changed, verify that one applicant is saved once.
+
+Use the smallest useful test that proves the current change.
+
+### Run the full regression only when required
+
+Run the complete five-applicant and pagination test:
+
+- Before declaring the speed work complete
+- Before creating the final commit or release
+- After changing shared extraction flow, applicant identity, saving, pagination, contact handling, or resume handling
+- When a focused test shows unexpected behaviour
+- When the user specifically asks for a complete validation
+
+The full regression should verify:
 
 - Correct applicant opened
 - Right-side profile reached the bottom
-- All existing fields were collected
+- Existing fields were collected
 - Contact details were collected
 - Resume downloaded when available
 - Applicant saved once
 - Next applicant opened directly
+- Pagination still worked
+- Collected data did not regress
 
-Also test moving to the next page.
-
-Compare the collected data before and after the speed fix.
-
-If any existing field stops being collected, the fix is not complete.
+A small speed or scrolling edit should not be blocked by rerunning every full-data test each time.
 
 ---
 

@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "id": "TASK-0138",
+  "name": "Adopt focused-testing policy in the applicant collector speed guide",
+  "request": "Adopt focused-testing policy in the applicant collector speed guide",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T07:22:42.596Z",
+  "completedAt": "2026-08-08T07:22:59.806Z",
+  "startCommit": "2b46b9e6003c4a1acac07cb4c45698f1ba6ecc30",
+  "gitRef": "task/TASK-0138",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/applicant-collector-speed-guide.md"
+    }
+  ],
+  "checks": [],
+  "result": "Docs only: the speed guide's Testing section now calls for focused checks during normal speed and scrolling work, and reserves the full five-applicant plus pagination regression for named trigger points (declaring the speed work complete, a release, changes to shared extraction/identity/saving/pagination/contact/resume, an unexpected focused result, or an explicit request). This change was made by the user outside a task and is being logged as its own task rather than absorbed into the speed work that follows. No code touched."
+}
