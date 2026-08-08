@@ -1,5 +1,26 @@
 # PHASES.md
 
+## Completed in 3.9.0 — multiple LinkedIn applicant UI support
+
+The twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),
+one Project Time Machine task each. Local checks only — the live half is a user step (rule 20).
+
+| Phase | Task | Goal | Status |
+|---|---|---|---|
+| — | TASK-0153 | Adopt the guide and name it in CLAUDE.md as a governing contract | Complete |
+| 1 | TASK-0154 | Pin the working UI with eleven tripwires; **zero production lines changed** | Complete |
+| 2 | TASK-0155 | One shared schema; close the `setResume` spread and give the three derived columns a route | Complete |
+| 3 | TASK-0156 | The section table into the core, `resolveField`, and a reader for the labelled fields | Complete |
+| 4 | TASK-0157 | Layout detection whose only output is a reader order, proved inert over 720 permutations | Complete |
+| 5 | TASK-0158 | Shape rules and heading aliases from evidence held; **no invented layout** | Complete |
+| 6 | TASK-0159 | Section boundaries, `cutToOwnSection` into the core, header window by document order | Complete |
+| 7 | TASK-0160 | The scroll target is never the applicant list, and the list's movement is measured | Complete |
+| 8 | TASK-0161 | Download Diagnostics on the Applicants page — closes a standing known issue | Complete |
+| 9 | TASK-0162 | Capture Current Applicant UI: read-only, sanitized, zero clicks | Complete |
+| 10 | TASK-0163 | Fixture regressions over capture projections; `linkedom` declined, with reasons | Complete |
+| 11 | TASK-0164 | Contact and resume variants, still seven clicks, contact finder stricter | Complete |
+| 12 | TASK-0165 | Release 3.9.0, and the build-ID consistency check that was always missing | Complete |
+
 ## Completed in 3.0.0
 
 | Phase | Goal | Status |

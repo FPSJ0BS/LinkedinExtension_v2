@@ -1,5 +1,61 @@
 # CHANGELOG.md
 
+## 3.9.0 — the same person, whichever way the page is drawn
+
+Twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),
+one Time Machine task each, TASK-0153 to TASK-0165. The brief was to survive *slightly different*
+LinkedIn applicant layouts — the same data rendered somewhere else — by **adding fallback readers,
+never by replacing the ones that work**. Nothing in the applicant record, the CSV, the workflow or
+the click budget changed, and that is asserted at the end rather than promised at the start:
+**seventeen applicant fields, nine CSV columns byte for byte, seven clicks.**
+
+**The safety argument is structural, and it is the reason this was possible at all.** The
+accumulator is fill-empty-only — `addHeader` is first-wins per field, `addKeyed` fills blanks, and
+`addName` has its one documented exception. So a fallback that runs *after* the reader it backs up
+and writes *only* through the accumulator is incapable of regressing the working layout whether or
+not its selectors are right. Every phase was built to satisfy those two conditions, because it is
+the only such argument provable in a repository with no DOM in its test runner.
+
+**Two holes in that argument, closed first.** `setResume` was a spread — the only accumulator method
+where the last writer won, blanks included — and `collectResume` writes twice by design, so a second
+write missing `filename` erased the first one's and `resume_file` was empty for a file sitting on
+disk. And `buildApplicantRecord` had no route at all for `currentRole`, `currentCompany` or
+`totalExperience`: `normalizeApplicantRecord` has always read them as `orNull(explicit) || derived`,
+so the slot for a page that states them outright existed from the start and had no producer.
+
+**The single most consequential change is that the section table can now be tested.** It lived in
+the DOM adapter, and a heading wording it does not recognise makes a whole section invisible — all
+three of those columns are derived from Experience and from nothing else, which is why they came
+back empty on four consecutive releases. It is now pure, in the core, unit-tested wording by
+wording, and `diagnostics.sectionScan.headings[].key === ""` already names every wording that failed
+on every live run: acting on such a report is now a three-line test instead of a live-only gamble.
+
+**What the guide asked for that could not be honestly delivered, and why.** Phase 5 is "add support
+for the second UI". There is no captured sample of a second LinkedIn applicant layout in this
+repository and no saved diagnostics naming one, so **zero layout-specific selectors were added**.
+What shipped instead is what evidence we hold: shape rules where there were positional guesses
+(`looksLikeApplicantHeadline` retires the last `lines[1]` in the core, the same way
+`looksLikeApplicantLocation` retired `lines[2]`), refusals the guide states in prose made executable
+(`isEmployerCandidate`, `isCurrentRoleCandidate`), heading aliases for wordings LinkedIn is
+documented to render, and a reader for the three columns that had none. Phase 9 builds the capture
+that makes a real second-UI reader possible; Phase 10 is the format it lands in.
+
+**`linkedom` was declined**, though Phase 10 permits it. It has no layout, so `innerText` collapses
+to `textContent` and every parser here consumes `toLines(element.innerText)`; no layout means no
+`isVisible`, which gates every heading, control, block and candidate panel, so it would have to be
+stubbed — and then the program under test is not the program that ships. A fixture is instead the
+capture's DOM-free projection, replayed through the real parsers with no dependencies at all.
+
+Also here: layout detection whose only possible output is a permutation of a fixed reader list,
+proved inert by running all 720 orders and comparing the records byte for byte; a scroll chooser that
+refuses a container holding the recruiter's list, with the list's own movement now measured at
+runtime and warned about; section boundaries for a top card, a contact block, application details and
+additional information, recognised for element-level narrowing and for the report but deliberately
+never for the line-level cut; a contact finder that gained four surfaces and got **stricter** while
+doing it; a resume that cannot be written under an applicant the panel has stopped showing; and the
+Applicants page finally sending `PV_APPLICANT_DIAGNOSTICS`, which the worker had answered since 3.6
+and nothing had ever asked for.
+
 ## 3.8.0 — the block nobody told the map about, and the record that threw away what it had read
 
 Two faults, one cause between them, and one deliberate change of scope.

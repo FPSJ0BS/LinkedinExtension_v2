@@ -1,0 +1,70 @@
+{
+  "schema": 2,
+  "id": "TASK-0165",
+  "name": "Phase 12: release 3.9.0",
+  "request": "Phase 12: release 3.9.0",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T12:16:59.362Z",
+  "completedAt": "2026-08-08T12:20:34.933Z",
+  "startCommit": "c8f3310a83e70f2743768421c0437ca3adc6d742",
+  "gitRef": "task/TASK-0165",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PHASES.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 531 passed / 0 failed (was 475 before the series), docs:check 17 files, validate 31 build files; dist/build-meta.json reads 3.9.0 and all five injected scripts carry 2026-08-08-react-v3.9.0"
+  ],
+  "result": "Phase 12 of the multiple-LinkedIn-UI support guide: release 3.9.0, and the check that was always missing. ONE version bump for the whole twelve-phase series rather than one per phase, and the reason matters: the build ID exists for the worker/popup handshake, so a mismatch does not fail in npm run check - it fails at RUNTIME, on the user's machine, by refusing to inject a content script, with a symptom that looks exactly like a LinkedIn change. Six files times twelve tasks is seventy-two chances to leave one behind. Bumped to 2026-08-08-react-v3.9.0 in content.js, connections.js, applicants.js, background.ts, popup.tsx and build.mjs, with the version to 3.9.0 in manifest.json and build.mjs - and in package.json, which was STALE AT 3.7.8 while the extension shipped 3.8.0, a real pre-existing inconsistency fixed here explicitly rather than absorbed silently. THE NEW CHECK: CLAUDE.md has always said the build ID must match in five places (it lists six files - the prose is stale from before applicants.js existed) and nothing ever asserted it. Now one test reads all six, asserts a single value, asserts its shape, and asserts that the manifest, the build script and package.json agree on the version the build ID names. A second test restates the three promises the whole series was measured against, so the release itself is the thing asserting them: seven clicks, seventeen applicant fields in order, and nine CSV columns byte for byte including the BOM. Docs: a CHANGELOG entry that states plainly what could NOT be honestly delivered and why (no capture of a second layout exists, so zero layout-specific selectors were added; linkedom declined with three technical reasons); a twelve-row PHASES table; PROJECT_STATUS at 3.9.0 with the open live questions; and a CHECKS.md section carrying every real check result, the seven intermediate failures worth recording - three of which were mistakes in my TESTS rather than in the code - and a seven-item live checklist whose first entry is that the CURRENT UI still works, because local checks passed while current_role was empty for four consecutive releases. Verified dist/ carries the new build ID in all five injected scripts and build-meta.json reads 3.9.0. RULE 20 STANDS: none of these twelve phases has been run against a live LinkedIn page, and loading dist/ in Chrome is the user's step, always. Files: the six build-ID sites, extension/manifest.json, package.json, docs/CHANGELOG.md, docs/PHASES.md, docs/PROJECT_STATUS.md, docs/CHECKS.md, tests/applicants-core.test.js."
+}

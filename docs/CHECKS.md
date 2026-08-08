@@ -24,6 +24,67 @@ each one its own Time Machine task with its own `npm run check`. The baseline be
 | `npm run check` after TASK-0162 (Phase 9, sanitized capture) | typecheck, build, **520 passed / 0 failed**, docs:check, validate |
 | `npm run check` after TASK-0163 (Phase 10, fixture regressions) | typecheck, build, **525 passed / 0 failed**, docs:check, validate |
 | `npm run check` after TASK-0164 (Phase 11, contact and resume variants) | typecheck, build, **529 passed / 0 failed**, docs:check, validate |
+| `npm run check` after TASK-0165 (Phase 12, release 3.9.0) | typecheck, build, **531 passed / 0 failed**, docs:check, validate |
+
+The suite grew **475 → 531**. Every phase ran `npm run check` before its task was closed, and no
+phase closed with a failure.
+
+### Intermediate failures worth recording
+
+Each of these caught a real mistake rather than a stale assertion, and three of them were mistakes in
+the *tests* rather than in the code — recorded because "the code was right and my test was wrong" is
+worth knowing.
+
+- **A date range redacted as a phone number.** The capture sanitizer's digit-run rule turned
+  `2019 - 2024` into `+00 000 000 0000`. A date under a degree is exactly what proves an education
+  card parsed, so `DATE_RANGE_PATTERN` — the reader's own rule — now exempts it.
+- **Half-redacted credentials.** `authorization: Basic YWJj` and `csrf-token: ajax:1234567890`
+  survived with their second half intact, because a token is not one word. The rule now takes the
+  rest of the line.
+- **The share weight swamped depth.** Phase 7 first weighted the text share at 40, and a shallow page
+  shell carrying all the text beat the deep region actually doing the scrolling — the same wrong
+  answer by a different route. Reduced to 20, which breaks ties without deciding the choice.
+- **`"Open to work"` and `"Message"`.** Two Phase 5 assertions were wrong about the codebase:
+  `NAME_CHROME_PATTERN` has always known the first is the platform's badge rather than the member's
+  words, and the second needed a whole-line check against the click denylist, which was then added.
+- **`deepKeys` descended into arrays.** A layout with an empty Screening section reported a different
+  "schema" — a fact about the applicant, not the schema.
+- **The leakage check compared pseudonyms.** Every fixture is sanitized independently and each starts
+  numbering at A, so it was measuring the pseudonymiser rather than the readers.
+- **Four slices ended on a comment.** `withoutComments` removes banners, so `indexOf` returned -1 and
+  sliced to end of file — which makes every "must not contain" assertion silently vacuous. All four
+  now end on a declaration.
+
+### What only a live run can confirm (rule 20)
+
+Local checks passed while `current_role` was empty for four consecutive releases. **This section is
+the important one, and every item in it is the user's step.** Load `dist/` at `chrome://extensions`
+(Developer mode → Load unpacked), then reload the LinkedIn tab — the build ID changed, so an
+already-injected content script is replaced.
+
+1. **The current UI still works.** On a real job's applicant list: name, email, mobile, current role,
+   current company, total experience, Experience, Education and the resume file all populated as
+   before. Nothing in these twelve phases was verified against a live panel.
+2. **Contact still opens exactly once per applicant**, and the phone number still arrives. Phase 11
+   made the disclosure finder *stricter* — it now requires a candidate to be tied to this applicant
+   as well as to carry contact details — and only a live run can show that the real disclosure
+   satisfies one of the four bindings.
+3. **Resume still downloads** under the applicant's own name, and the viewer still closes. The
+   widened `role='document'` acceptance and the three new `data-*` attributes are untested against
+   real markup.
+4. **The right panel still reaches the bottom and the left list stays still.** Phase 7 changed the
+   scroll chooser's scoring; check `diagnostics.reveal.listMoved` in the downloaded report — it should
+   be 0, and a warning on any record means it was not.
+5. **Every applicant saves once, pagination still walks, Stop still ends everything, and an
+   interrupted run still restarts.** None of the run machinery was touched, but nothing proves that
+   live except a live run.
+6. **The CSV is unchanged.** Export before and after and diff them.
+7. **Download Diagnostics and Capture Current Applicant UI both work**, and the capture file contains
+   no name, address or number — worth opening once before sending it anywhere.
+
+**And the request this series ends on:** on any layout where a column reads wrong, press **Capture
+Current Applicant UI** and keep the file. It names nobody, and it is what makes a genuine second-UI
+reader possible in a follow-up task — which is precisely what Phase 5 could not do without one.
 
 ## Automated verification - 3.7.8 the section that was never read, every page, and a resume that saves itself
 

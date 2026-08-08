@@ -1,10 +1,29 @@
 # Profile Vault React — Project Status
 
-**Status date:** 2026-08-03
-**Version:** 3.7.8
-**Build ID:** `2026-08-03-react-v3.7.8`
+**Status date:** 2026-08-08
+**Version:** 3.9.0
+**Build ID:** `2026-08-08-react-v3.9.0`
 
-## Latest work — the section that was never read, every page, and a resume that saves itself (3.7.8)
+## Latest work — the same person, whichever way the page is drawn (3.9.0)
+
+Twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),
+TASK-0153 to TASK-0165, one Time Machine task each. Applicant collection now has a fallback layer
+under every reader, a section table that can be unit-tested, layout detection that can only reorder
+readers, a sanitized capture for a layout nobody has seen, and fixture regressions replayed through
+the real parsers. **Nothing in the record, the CSV, the workflow or the click budget changed** —
+seventeen applicant fields, nine CSV columns byte for byte, seven clicks, asserted at the end rather
+than promised at the start. Suite 475 → 531.
+
+The honest limits, stated in the release rather than buried: **no capture of a second LinkedIn
+applicant layout exists**, so zero layout-specific selectors were added — Phase 5 shipped shape rules,
+refusals and documented heading aliases instead, and Phase 9 built the capture that would make a real
+second-UI reader possible. `linkedom` was declined for Phase 10 with reasons recorded in the fixture
+suite's own header.
+
+**Still open:** none of 3.9.0 has been run live. `docs/CHECKS.md` carries the seven-item live
+checklist; the first item is that the *current* UI still works, and it is the one that matters most.
+
+## Previously — the section that was never read, every page, and a resume that saves itself (3.7.8)
 
 `npm run check` passes here: typecheck, build, **411 tests**, validate.
 

@@ -6605,3 +6605,84 @@ test("Phase 11: an eighth click would need the rule to change first, and it has 
   assert.match(rule, /the resume viewer's own Download/, "the viewer's Download is allowed");
   assert.ok(!/panel'?s own Download|panel-level Download/.test(rule), "and the panel's is not");
 });
+
+
+// ------ Phase 12 of the multiple-LinkedIn-UI support guide: the release
+//
+// One version bump for the whole twelve-phase series, and the check that should
+// always have existed alongside it.
+
+test("Phase 12: the build ID is the same string in all six places it is written", async () => {
+  // CLAUDE.md has always said the build ID must match in five places (it lists
+  // six files — the prose is stale from before `applicants.js` existed), and
+  // nothing has ever asserted it. That matters more than a normal missing test:
+  // the build ID exists for one job, the worker/popup handshake, so a mismatch
+  // does not fail here. It fails at RUNTIME, on the user's machine, by refusing
+  // to inject a content script — with a symptom that looks exactly like a
+  // LinkedIn change.
+  //
+  // Six files, twelve tasks, seventy-two chances to leave one behind, which is
+  // why this series bumped once at the end rather than per phase.
+  const files = [
+    "extension/content-scripts/content.js",
+    "extension/content-scripts/connections.js",
+    "extension/content-scripts/applicants.js",
+    "src/background.ts",
+    "src/react/popup.tsx",
+    "scripts/build.mjs"
+  ];
+
+  const found = new Map();
+  for (const file of files) {
+    const source = await readFile(resolve(root, file), "utf8");
+    const match = /(?:const (?:BUILD_ID|EXPECTED_BUILD_ID) = |buildId: )"([^"]+)"/.exec(source);
+    assert.ok(match, `${file} must declare a build ID`);
+    found.set(file, match[1]);
+  }
+
+  const values = [...new Set(found.values())];
+  assert.equal(values.length, 1,
+    `one build ID, six files — found ${JSON.stringify([...found])}`);
+  assert.match(values[0], /^\d{4}-\d{2}-\d{2}-react-v\d+\.\d+\.\d+$/, "and it names the release it belongs to");
+
+  // The VERSION is a second string, in three more places, and the build script
+  // already refuses a manifest that disagrees with it. `package.json` is not
+  // covered by that check and had drifted to 3.7.8 while the extension shipped
+  // 3.8.0 — corrected in this task and now asserted.
+  const manifest = JSON.parse(await readFile(resolve(root, "extension/manifest.json"), "utf8"));
+  const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  const build = await readFile(resolve(root, "scripts/build.mjs"), "utf8");
+  const declared = /version: "([^"]+)"/.exec(build);
+  assert.ok(declared, "the build script must declare a version");
+  assert.equal(manifest.version, declared[1], "the manifest and the build agree");
+  assert.equal(pkg.version, declared[1], "and so does package.json");
+  assert.ok(values[0].endsWith(`v${declared[1]}`), "and the build ID names that version");
+});
+
+test("Phase 12: twelve phases changed no schema, no CSV and no click", async () => {
+  // The three promises the whole series was measured against, restated once at
+  // the end so the release itself is the thing asserting them.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
+
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "seven clicks in, seven clicks out");
+
+  assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt",
+    "contact", "resume", "experience", "education", "skills",
+    "screeningResponses", "qualifications", "applicationStatus"
+  ], "the same seventeen applicant fields the series started with");
+
+  assert.deepEqual([...APPLICANT_TABLE_COLUMNS], [
+    "applicant_name", "email", "mobile", "resume_file",
+    "current_role", "current_company", "total_experience", "education"
+  ]);
+  assert.deepEqual(APPLICANT_CSV_COLUMNS.map((column) => column[0]), ["#", ...APPLICANT_TABLE_COLUMNS]);
+  assert.equal(
+    applicantsToCsv([]).replace(/^﻿/, "").split("\r\n")[0],
+    '"#","applicant_name","email","mobile","resume_file","current_role","current_company","total_experience","education"',
+    "and the same nine CSV columns, byte for byte"
+  );
+});
