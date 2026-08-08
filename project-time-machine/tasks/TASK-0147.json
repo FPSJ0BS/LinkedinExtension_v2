@@ -1,0 +1,29 @@
+{
+  "schema": 2,
+  "id": "TASK-0147",
+  "name": "Applicant location is a rendered place, not the third line",
+  "request": "Applicant location is a rendered place, not the third line",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T09:06:09.183Z",
+  "completedAt": "2026-08-08T09:07:39.090Z",
+  "startCommit": "f9b16ec0b44395c0548ac4640383f775e6ccf46b",
+  "gitRef": "task/TASK-0147",
+  "files": [
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run typecheck passed",
+    "npm run build passed (31 files)",
+    "npm test passed (459 tests)",
+    "node scripts/validate-build.mjs passed"
+  ],
+  "result": "The applicant's location is chosen by looking like a place instead of by its position. Cause: parseApplicantHeader took location as lines[2] - the third line of the header text and nothing else - so whatever landed there became the location, which on the live panel was the list column's 'Filter and sort' button. That is the array-position guessing rule 7 forbids, and the same class of mistake that once saved six people as 'Applicants' by taking the first line as the name; the answer then was a rule about what a name IS, and this is the same answer. APPLICANT_LOCATION_PATTERN accepts 'City, Region, Country' as the panel writes it - two to four comma-separated parts with no digits, @, | or quotes - or an 'Area'/'Region' phrase, which LinkedIn renders without commas. looksLikeApplicantLocation additionally consults NAME_CHROME_PATTERN and NAME_CONTROL_PHRASE_PATTERN, which already knew 'Filter and sort' and every panel button; the location simply never asked them, and they are reused rather than copied so one chrome list stays one list. The search runs over the lines between the headline and the application timeline, bounded above by the timeline because the location always precedes it, so a panel resolved too wide cannot reach past it for something place-shaped. A panel with no place-shaped line leaves the field empty rather than filling it with the line that happened to be there (rule 1). The name and headline are untouched."
+}

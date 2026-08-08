@@ -444,6 +444,44 @@ test("the job header is found by its own tabs, resolved once, and written to eve
   assert.match(source, /job: listJob,/, "and the one job read is what every row carries");
 });
 
+test("the location is a rendered place, never whatever the third line happened to be", () => {
+  // THE LIVE DEFECT (3.7.24): every applicant's location was saved as
+  // **"Filter and sort"** — a button in the *list* column. `location` was
+  // `lines[2]` and nothing else, so whatever landed in that position became the
+  // location. Array-position guessing, which rule 7 forbids, and the same class
+  // of mistake that once saved six people as "Applicants" by taking the first
+  // line as the name. The answer then was a rule about what a name IS.
+  const panel = ["PRAVESH KOTIYAL · 1st", "Human Resource", "Noida, Uttar Pradesh, India", "Applied 13mo ago • Contacted 10mo ago"];
+  assert.equal(Applicants.parseApplicantHeader({ text: panel.join("\n") }).location, "Noida, Uttar Pradesh, India");
+
+  // Chrome in front of the real location no longer costs it — the place is
+  // found, rather than the position being trusted.
+  const withChrome = ["PRAVESH KOTIYAL · 1st", "Human Resource", "Filter and sort", "Noida, Uttar Pradesh, India", "Applied 13mo ago"];
+  const fixed = Applicants.parseApplicantHeader({ text: withChrome.join("\n") });
+  assert.equal(fixed.location, "Noida, Uttar Pradesh, India");
+  assert.equal(fixed.headline, "Human Resource", "and the headline is untouched");
+
+  // And when nothing on the panel looks like a place, the field stays EMPTY
+  // rather than taking the line that was there (rule 1).
+  assert.equal(
+    Applicants.parseApplicantHeader({ text: ["PRAVESH KOTIYAL · 1st", "Human Resource", "Filter and sort", "Applied 13mo ago"].join("\n") }).location,
+    "",
+    "a wrong location is worse than a blank one"
+  );
+
+  for (const place of ["Noida, Uttar Pradesh, India", "New Delhi, Delhi, India", "Delhi, India", "Greater Delhi Area"]) {
+    assert.ok(Applicants.looksLikeApplicantLocation(place), `"${place}" is a place`);
+  }
+  // Every one of these was on the live panel or beside it.
+  for (const chrome of [
+    "Filter and sort", "Shortlist", "Move to", "Contact", "Interview with AI", "Applicants (1,005)",
+    "Human Resource", '"Innovator | Change Maker | Entrepreneurial Spirit in Action"',
+    "Applied 13mo ago • Contacted 10mo ago"
+  ]) {
+    assert.ok(!Applicants.looksLikeApplicantLocation(chrome), `"${chrome}" is not a place`);
+  }
+});
+
 test("the applicant header strips the badges and never reads the timeline as a status", () => {
   const header = Applicants.parseApplicantHeader({
     text: [

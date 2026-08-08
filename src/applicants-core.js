@@ -1163,6 +1163,36 @@
   const APPLICATION_STATUS_PATTERN =
     /\b(?:shortlisted|not a fit|maybe|good fit|reviewed|in review|interviewing|interviewed|offer|hired|rejected|declined|withdrawn|new|pending|contacted|archived)\b/i;
 
+  /**
+   * A place, as the panel actually renders one.
+   *
+   * THE LIVE DEFECT (3.7.24): every applicant's location was saved as
+   * **"Filter and sort"** — a button in the *list* column. `location` was
+   * `lines[2]`, the third line of the header text and nothing else, so whatever
+   * landed in that position became the location. That is the array-position
+   * guessing rule 7 forbids, and it is the same class of mistake that once saved
+   * six people as "Applicants" by taking the first line as the name; the answer
+   * then was a rule about what a name IS, and this is the same answer.
+   *
+   * "City, Region, Country" as the panel writes it — two to four comma-separated
+   * parts with no digits, no `@`, no `|` and no quotes — or a "…Area"/"…Region"
+   * phrase, which LinkedIn renders without commas. A line that does not look
+   * like a place leaves the field **empty** rather than filling it with the line
+   * that happened to be there (rule 1).
+   */
+  const APPLICANT_LOCATION_PATTERN =
+    /^[^,\d@|"'()]{2,60}(?:,\s*[^,\d@|"'()]{2,60}){1,3}$|^[^,\d@|"'()]{2,60}\s(?:area|region)$/i;
+
+  function looksLikeApplicantLocation(value) {
+    const text = cleanText(value);
+    if (!text || text.length > 120) return false;
+    // The chrome list already knows "Filter and sort" — the location simply
+    // never asked it. Reused rather than copied, so one list stays one list.
+    if (NAME_CHROME_PATTERN.test(text) || NAME_CONTROL_PHRASE_PATTERN.test(text)) return false;
+    if (APPLIED_PATTERN.test(text) || CONTACTED_PATTERN.test(text)) return false;
+    return APPLICANT_LOCATION_PATTERN.test(text);
+  }
+
   function parseApplicantHeader({ text = "" } = {}) {
     const lines = toLines(text);
     const applied = APPLIED_PATTERN.exec(text);
@@ -1179,10 +1209,18 @@
     // Taking it unconditionally is what saved the list's own heading,
     // "Applicants", as six different people's names.
     const first = lines.length ? cleanApplicantName(lines[0]) : "";
+
+    // The location sits between the headline and the application timeline, and
+    // is chosen by looking like a place rather than by its index. Bounded above
+    // by the timeline because the location always precedes it, so a panel that
+    // resolved too wide cannot reach past it for something place-shaped.
+    const appliedAt = lines.findIndex((line) => APPLIED_PATTERN.test(line));
+    const beforeTimeline = lines.slice(2, appliedAt > 0 ? appliedAt : lines.length);
+
     return {
       name: isApplicantNameCandidate(first) ? first : "",
       headline: lines[1] ? cleanText(lines[1]) : "",
-      location: lines[2] && !APPLIED_PATTERN.test(lines[2]) ? cleanText(lines[2]) : "",
+      location: cleanText(beforeTimeline.find(looksLikeApplicantLocation) || ""),
       appliedAt: applied ? cleanText(applied[1]) : "",
       contactedAt: contacted ? cleanText(contacted[1]) : "",
       applicationStatus: status ? cleanText(status[0]) : ""
@@ -2516,6 +2554,7 @@
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
+    APPLICANT_LOCATION_PATTERN, looksLikeApplicantLocation,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,
     nameFromExplanations, chooseApplicantName,
     // the record
