@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0153",
+  "name": "Adopt the multiple-LinkedIn-UI support guide",
+  "request": "Adopt the multiple-LinkedIn-UI support guide",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:08:28.106Z",
+  "completedAt": "2026-08-08T11:09:15.613Z",
+  "startCommit": "0a41cb96fa0c6b5e8d3a073ab4c216fcafc89231",
+  "gitRef": "task/TASK-0153",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/multiple-linkedin-dom-ui-support-guide.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed (475 tests, typecheck, build, docs:check, validate)"
+  ],
+  "result": "Logged the multiple-LinkedIn-UI support guide and its 12-phase plan, and named it in CLAUDE.md as the second governing contract for applicant DOM and layout work, beside the speed guide. Its one rule is restated inline because it is the one every later phase is measured against: add a fallback reader AFTER the working one, never replace working extraction logic to support another UI, and write every layout into the same applicant record. No code changed."
+}

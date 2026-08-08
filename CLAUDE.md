@@ -21,6 +21,14 @@ applicant switching, or delays, read:**
 
 [`docs/applicant-collector-speed-guide.md`](docs/applicant-collector-speed-guide.md)
 
+**Before changing an applicant DOM selector, a field location, section detection, a contact or resume
+layout, a scroll container, or anything to do with supporting more than one LinkedIn layout, read:**
+
+[`docs/multiple-linkedin-dom-ui-support-guide.md`](docs/multiple-linkedin-dom-ui-support-guide.md)
+
+Its one rule, which every rule below already implies: **add a fallback reader after the working one; never
+replace working extraction logic to support another UI.** All UIs write into the same applicant record.
+
 **Keep all existing applicant data collection working. Make only the smallest safe changes and do not
 modify the Project Time Machine logging system.**
 
