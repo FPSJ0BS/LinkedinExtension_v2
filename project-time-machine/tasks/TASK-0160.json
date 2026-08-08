@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "TASK-0160",
+  "name": "Phase 7: scroll containers",
+  "request": "Phase 7: scroll containers",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:47:16.617Z",
+  "completedAt": "2026-08-08T11:52:21.919Z",
+  "startCommit": "45431223550a1ebf56d49cf092f5a0d3be4fab2b",
+  "gitRef": "task/TASK-0160",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "added",
+      "path": "docs/Web_Development_AI_Agents_Internship_Log.pdf",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 513 passed / 0 failed (was 509), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 7 of the multiple-LinkedIn-UI support guide: scroll containers. Most of what the guide asks was already true - revealPanelContent walks with scrollIntoView, which is deliberately blind to which container scrolls, so a column this code fails to recognise still moves. Three real gaps closed. (1) chooseColumnScrollTarget now refuses a list-containing scroller. nextRevealStep has always refused a list-containing ANCHOR, but the chooser of the container that is actually SCROLLED did not - so on a layout where the list's own scroller scores highest, the profile walk would have moved the recruiter's list, the one thing Phase 7 forbids outright. Not a new rule: it is applicantPanel()'s own test reused, one row link being the panel's legitimate link to the application it shows and two or more being a list. describeScrollCandidate now reports rowLinks for every candidate. (2) The 60% text-share gate became a floor plus a score. It was applied by the adapter before a candidate ever reached the chooser, and on a layout that splits the panel - a pinned top card plus an independently scrolling detail region - the region alone falls under the bar, was refused, and the walk fell through to the general chooser where the page wins; the page does not move the column, so every section below the fold was silently lost, which is the exact failure this chooser exists to prevent. COLUMN_TEXT_FLOOR (0.25) still refuses a filter menu; the share is carried through and weighted at 20, deliberately to BREAK TIES rather than to decide the choice. The first version weighted it 40 and a shallow page shell carrying all the text beat the deep region actually doing the scrolling - the same wrong answer by a different route, caught by the new test. Today's inputs are provably unchanged: every candidate the working layout produces carries essentially all the text, and a candidate that reports no share is treated as carrying all of it, asserted directly. (3) The chooser may refuse a candidate; it may never leave the walk without one. On a layout where the only thing that scrolls holds both columns, refusing it everywhere would mean nothing scrolls at all - worse than the list moving - so the general chooser is offered the non-list candidates first and the unfiltered set is the last resort, which is the warning nextRevealStep already carries. (4) Whether the left list moved is now MEASURED rather than assumed. The guide asks for proof the list stayed still and that proof cannot be a unit test - there is no DOM in the runner - so it is split honestly: the refusals are proven pure, and revealPanelContent records the list's position before and after and reports listBefore/listAfter/listMoved, re-resolving the list rather than holding a reference because a virtualized list is rebuilt as it scrolls. A move beyond the same sub-pixel tolerance the walk already uses becomes a WARNING on the record - unlike a missing section, which produces zeros, because a missing section is a fact about the page and a list that moved during a profile read is a policy violation. Re-asserted that only sweepCurrentPage, growApplicantList and the run's own restore move the list, and that the panel's position is still restored in a finally. Click budget still seven. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}

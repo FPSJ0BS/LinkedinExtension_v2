@@ -208,12 +208,37 @@
       if (!/auto|scroll|overlay/i.test(String(candidate.overflowY ?? ""))) continue;
       // And it has to hold what is being read, or scrolling it moves nothing.
       if (!(candidate.carriesContent ?? candidate.containsList)) continue;
+      // **Never the recruiter's own applicant list.** The guide's Phase 7 states
+      // it outright — the left list may move only while the page's roster is
+      // being built, never during a profile read — and `nextRevealStep` has
+      // always refused a list-containing ANCHOR while this, the chooser of the
+      // container that is actually scrolled, did not. Not a new rule: it is
+      // `applicantPanel()`'s own test, reused rather than restated. One row link
+      // is the panel legitimately linking to the application it is showing; two
+      // or more is a list.
+      if ((Number(candidate.rowLinks) || 0) > 1) continue;
 
       // Depth is a bonus here, not a penalty: an outer qualifying container on
       // this surface is the page shell, which scrolls the header and leaves the
       // column exactly where it was.
       let score = Math.min(120, Math.max(0, Number(candidate.depth) || 0) * 2);
       score += Math.min(30, Math.round(range / 500));
+      // How much of what is being read this container actually holds. It used to
+      // be a hard 60% gate applied by the adapter before the candidate ever
+      // arrived here, which refuses the right container on a layout that splits
+      // the panel — a pinned top card plus an independently scrolling detail
+      // region — because the region alone falls under the bar. It falls through
+      // to the general chooser, the page wins, and the column never moves: the
+      // exact silent failure this chooser exists to prevent. A share is a score,
+      // and a candidate that does not report one scores as it always did.
+      //
+      // Weighted to BREAK TIES rather than to decide the choice. At 40 it
+      // outweighed depth entirely and a shallow page shell carrying all the text
+      // beat the deep region actually doing the scrolling — which is the same
+      // wrong answer by a different route. At 20 the innermost real column still
+      // wins, and two candidates that both carry the whole read (which is every
+      // candidate today) are separated by depth and range exactly as before.
+      score += Math.round(Math.min(1, Math.max(0, Number(candidate.share ?? 1))) * 20);
       if (score > bestScore) {
         bestScore = score;
         best = candidate;

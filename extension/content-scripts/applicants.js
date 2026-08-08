@@ -594,7 +594,7 @@
     return depth;
   }
 
-  function describeScrollCandidate(element, root, isScrollingElement = false, carriesContent = null) {
+  function describeScrollCandidate(element, root, isScrollingElement = false, carriesContent = null, share = null) {
     if (!(element instanceof Element)) return null;
     const style = getComputedStyle(element);
     const isRoot = isScrollingElement || element === document.documentElement || element === document.body;
@@ -611,12 +611,31 @@
       // A descendant scroller holds no ancestor, so `containsList` cannot speak
       // for it; the caller says whether it carries the content being read.
       carriesContent: carriesContent === null ? holdsRoot : Boolean(carriesContent),
+      // How much of the root's text this container actually holds, 0..1. A score
+      // rather than a gate as of 3.9.0 — see `chooseColumnScrollTarget`. Only
+      // measured for a descendant, where it is the question; an ancestor holds
+      // all of it by definition.
+      share: share === null ? 1 : Math.min(1, Math.max(0, Number(share) || 0)),
+      // How many applicant-list rows are inside it. The chooser refuses more
+      // than one outright: the recruiter's list must not move while a profile is
+      // being read, and this is `applicantPanel()`'s own test reused.
+      rowLinks: rowLinksIn(element),
       depth: elementDepth(element)
     };
   }
 
-  /** Does this element carry enough of the root's text to be its scroll box? */
+  /**
+   * Does this element carry enough of the root's text to be its scroll box?
+   *
+   * `COLUMN_TEXT_SHARE` was the whole answer through 3.8.1 — a hard 60% gate.
+   * It is now the share a container is EXPECTED to carry, used for reference,
+   * while `COLUMN_TEXT_FLOOR` is what actually refuses: enough to exclude a
+   * filter menu or a dropdown, low enough to admit the scrolling half of a
+   * panel whose other half is a pinned top card. The choice between the
+   * survivors is `chooseColumnScrollTarget`'s, by score.
+   */
   const COLUMN_TEXT_SHARE = 0.6;
+  const COLUMN_TEXT_FLOOR = 0.25;
 
   /**
    * The document, every ancestor of the panel, the panel itself — and any
@@ -634,10 +653,10 @@
   function scrollCandidates(root) {
     const seen = new Set();
     const output = [];
-    const add = (element, isScrollingElement = false, carriesContent = null) => {
+    const add = (element, isScrollingElement = false, carriesContent = null, share = null) => {
       if (!(element instanceof Element) || seen.has(element)) return;
       seen.add(element);
-      const described = describeScrollCandidate(element, root, isScrollingElement, carriesContent);
+      const described = describeScrollCandidate(element, root, isScrollingElement, carriesContent, share);
       if (described) output.push(described);
     };
     add(document.scrollingElement || document.documentElement, true);
@@ -645,10 +664,18 @@
     add(document.body);
     for (let current = root; current; current = current.parentElement) add(current);
 
-    // Descendants, and only ones that are practically the whole of the root: a
-    // sub-panel that scrolls a filter or a menu carries a fraction of the text
-    // and is refused, exactly as the connections chooser refuses a container
-    // that does not hold the list.
+    // Descendants. A sub-panel that scrolls a filter or a menu carries a
+    // fraction of the root's text; the column that IS the read carries nearly
+    // all of it.
+    //
+    // 3.9.0 turned that from a hard 60% gate into a floor plus a score, and the
+    // reason is a layout this phase exists for: a panel split into a pinned top
+    // card and an independently scrolling detail region. The region alone falls
+    // under 60%, was refused here, and the walk fell through to the page — which
+    // does not move the column at all. A floor still refuses the filter menu; the
+    // share is carried through and `chooseColumnScrollTarget` weighs it, so the
+    // biggest real column still wins and today's inputs, which are essentially
+    // 1.0, score exactly as they did.
     const wanted = cleanText(root?.innerText || "").length;
     if (root && wanted) {
       for (const element of root.querySelectorAll("div,section,main,ul,ol,[role='list']")) {
@@ -656,8 +683,9 @@
         if (element.scrollHeight - element.clientHeight <= Applicants.COLUMN_SCROLL_EPSILON) continue;
         const style = getComputedStyle(element);
         if (!/auto|scroll|overlay/i.test(`${style.overflowY} ${style.overflow}`)) continue;
-        if (cleanText(element.innerText || "").length < wanted * COLUMN_TEXT_SHARE) continue;
-        add(element, false, true);
+        const share = cleanText(element.innerText || "").length / wanted;
+        if (share < COLUMN_TEXT_FLOOR) continue;
+        add(element, false, true, share);
       }
     }
     return output;
@@ -675,7 +703,16 @@
     const column = Applicants.chooseColumnScrollTarget?.(candidates);
     if (column) return column;
     if (!Connections?.chooseScrollTarget) return null;
-    return Connections.chooseScrollTarget(candidates);
+    // ⚠ THE CHOOSER MAY REFUSE A CANDIDATE; IT MAY NEVER LEAVE THE WALK WITHOUT
+    // ONE. `chooseColumnScrollTarget` now refuses a list-containing scroller,
+    // and the general chooser does not know about the list at all — so on a
+    // layout where the only thing that scrolls holds both columns, refusing it
+    // everywhere would mean nothing scrolls and every section below the fold is
+    // silently lost. The refusal is worth having where there is an alternative
+    // and is not worth a blank record where there is not; `nextRevealStep`
+    // carries the same warning for the same reason.
+    const general = Connections.chooseScrollTarget(candidates.filter((candidate) => (Number(candidate.rowLinks) || 0) <= 1));
+    return general || Connections.chooseScrollTarget(candidates);
   }
 
   function currentScrollTop(target) {
@@ -4002,9 +4039,21 @@
   async function revealPanelContent(panel, accumulator, diagnostics, key = "reveal") {
     const record = {
       passes: 0, added: 0, grewTo: 0, stepped: 0, toTail: 0,
-      movedBy: 0, reachedTail: false, stoppedBy: "running"
+      movedBy: 0, reachedTail: false, stoppedBy: "running",
+      // Where the recruiter's own list stood before this walk, and after it.
+      //
+      // The guide's Phase 7 asks for "proof that the left applicant list stayed
+      // still", and that proof cannot be a unit test: there is no DOM in the
+      // test runner, so the only place the question can be ASKED is here, at
+      // runtime, on the real page. Every refusal in the chooser and in
+      // `nextRevealStep` is a precaution; this is the measurement that says
+      // whether the precautions held, and a non-zero `listMoved` becomes a
+      // warning on the record rather than a silent violation.
+      listBefore: null, listAfter: null, listMoved: 0
     };
     diagnostics[key] = record;
+    const listBefore = applicantList();
+    record.listBefore = listBefore ? currentScrollTop(chooseScrollTarget(listBefore)) : null;
     let live = livePanel(panel);
     let size = cleanText(live?.innerText || "").length;
     let quiet = 0;
@@ -4129,6 +4178,22 @@
     // console line rather than another investigation.
     if (record.stoppedBy === "running") record.stoppedBy = "incomplete";
     if (!reachedTail && record.stoppedBy === "settled") record.stoppedBy = "no-movement";
+
+    // Did the recruiter's own list move while this applicant was being read?
+    // Re-resolved rather than held, because a virtualized list is torn out and
+    // rebuilt as it scrolls and a held reference would answer for a dead node.
+    const listAfter = applicantList();
+    if (listAfter && record.listBefore !== null) {
+      record.listAfter = currentScrollTop(chooseScrollTarget(listAfter));
+      record.listMoved = Math.abs((record.listAfter || 0) - record.listBefore);
+      // This one warns, unlike a section that was not found. A missing section
+      // is a fact about the page; a list that moved during a profile read is a
+      // policy violation, and it is the thing the guide's Phase 7 asks to be
+      // shown rather than assumed.
+      if (record.listMoved > REVEAL_MOVED_PX) {
+        accumulator?.addWarning?.(`the applicant list moved ${Math.round(record.listMoved)}px while the profile was being read`);
+      }
+    }
     return live;
   }
 

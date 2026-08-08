@@ -5993,3 +5993,182 @@ test("Phase 6: the header window ends at the first section on SCREEN, not the fi
 
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
 });
+
+
+// ------ Phase 7 of the multiple-LinkedIn-UI support guide: scroll containers
+//
+// "Find the active applicant panel, find its real scrollable container, confirm
+// it is not the left applicant list, scroll downward until all lazy-loaded
+// sections appear. The left applicant list may scroll only while building the
+// page roster. It must not move during right-side profile extraction."
+//
+// Most of this was already true — `revealPanelContent` uses `scrollIntoView`,
+// which is deliberately blind to which container scrolls, so a column this code
+// fails to recognise still moves. Three real gaps are closed here, and the
+// third one is answered honestly: it cannot be a unit test.
+
+test("Phase 7: the container that scrolls is never the recruiter's applicant list", () => {
+  // `nextRevealStep` has always refused a list-containing ANCHOR. The chooser of
+  // the container that is actually scrolled did not, so on a layout where the
+  // list's own scroller scores highest the profile walk would have moved the
+  // recruiter's list — the one thing the guide's Phase 7 forbids outright.
+  //
+  // Not a new rule: it is `applicantPanel()`'s own test, reused. One row link is
+  // the panel legitimately linking to the application it shows; two or more is a
+  // list.
+  const list = {
+    id: "ul#6", depth: 6, scrollHeight: 40000, clientHeight: 800,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 25, share: 1
+  };
+  const panel = {
+    id: "div#5", depth: 5, scrollHeight: 4000, clientHeight: 800,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 1, share: 1
+  };
+
+  // The list wins on depth AND on range, and is still refused.
+  const chosen = Applicants.chooseColumnScrollTarget([list, panel]);
+  assert.equal(chosen.id, "div#5", "the deeper, taller container is refused because it holds the list");
+
+  assert.equal(Applicants.chooseColumnScrollTarget([list]), null,
+    "and when the list is the only candidate, the column chooser answers with nothing");
+
+  // One row link is the panel's own link to the application it is showing.
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...panel, rowLinks: 1 }]).id, "div#5");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...panel, rowLinks: 0 }]).id, "div#5");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...panel, rowLinks: 2 }]), null, "two is a list");
+
+  // A candidate that does not report the count at all behaves exactly as it did
+  // before this change, so nothing that already worked is refused.
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...panel, rowLinks: undefined }]).id, "div#5");
+});
+
+test("Phase 7: a panel split into a pinned card and a scrolling region still scrolls", () => {
+  // THE GAP: `carriesContent` was decided by a hard 60% text-share gate applied
+  // before the candidate ever reached the chooser. On a layout that splits the
+  // panel — a pinned top card plus an independently scrolling detail region —
+  // the region alone falls under that bar, was refused, and the walk fell
+  // through to the general chooser, where the page wins. The page does not move
+  // the column, so every section below the fold was silently lost: the exact
+  // failure this chooser exists to prevent.
+  //
+  // A share is now a score rather than a gate.
+  const region = {
+    id: "div#8", depth: 8, scrollHeight: 6000, clientHeight: 700,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 0, share: 0.45
+  };
+  const shell = {
+    id: "div#3", depth: 3, scrollHeight: 1200, clientHeight: 700,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 0, share: 1
+  };
+  assert.equal(Applicants.chooseColumnScrollTarget([shell, region]).id, "div#8",
+    "the deeper region that carries less than the old gate allowed still wins");
+
+  // ...but a filter menu that carries almost nothing does not beat the column,
+  // even though it is deeper.
+  const menu = {
+    id: "div#12", depth: 12, scrollHeight: 3000, clientHeight: 300,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 0, share: 0.3
+  };
+  const column = {
+    id: "div#6", depth: 6, scrollHeight: 6000, clientHeight: 800,
+    overflowY: "auto auto", carriesContent: true, rowLinks: 0, share: 1
+  };
+  assert.equal(Applicants.chooseColumnScrollTarget([menu, column]).id, "div#6",
+    "a deep container holding a fraction of the text does not outscore the column");
+  // The share is weighted to BREAK TIES rather than to decide the choice. At 40
+  // it outweighed depth entirely and a shallow page shell carrying all the text
+  // beat the deep region actually doing the scrolling — the same wrong answer by
+  // a different route, and the reason the first version of this test failed.
+  // Anything below the adapter's own floor never reaches the chooser at all.
+  assert.ok(menu.share > 0.25, "and anything below the adapter's floor is never offered here");
+
+  // TODAY'S INPUTS ARE UNCHANGED. Every candidate the current layout produces
+  // carries essentially all the text, and a candidate that reports no share at
+  // all is treated as carrying all of it — so the working layout's choice is
+  // provably the same one it was.
+  const before = [
+    { id: "div#4", depth: 4, scrollHeight: 5000, clientHeight: 800, overflowY: "auto auto", carriesContent: true },
+    { id: "div#7", depth: 7, scrollHeight: 5000, clientHeight: 800, overflowY: "auto auto", carriesContent: true }
+  ];
+  const after = before.map((candidate) => ({ ...candidate, share: 1, rowLinks: 0 }));
+  assert.equal(Applicants.chooseColumnScrollTarget(before).id, Applicants.chooseColumnScrollTarget(after).id,
+    "a candidate with no share reported chooses exactly as one carrying all of it");
+  assert.equal(Applicants.chooseColumnScrollTarget(before).id, "div#7", "and the innermost still wins");
+
+  // The refusals that were already there are all still there.
+  const base = { depth: 5, scrollHeight: 5000, clientHeight: 800, overflowY: "auto auto", carriesContent: true, rowLinks: 0, share: 1 };
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...base, id: "d", isScrollingElement: true }]), null, "never the page");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...base, id: "d", isDocumentRoot: true }]), null, "never the document root");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...base, id: "d", scrollHeight: 805 }]), null, "never something that cannot move");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...base, id: "d", overflowY: "visible visible" }]), null, "never a non-scroller");
+  assert.equal(Applicants.chooseColumnScrollTarget([{ ...base, id: "d", carriesContent: false }]), null, "never something that holds nothing");
+});
+
+test("Phase 7: the chooser may refuse a candidate, but it may never leave the walk without one", async () => {
+  // The warning `nextRevealStep` carries, applied to the chooser. On a layout
+  // where the ONLY thing that scrolls holds both columns, refusing it everywhere
+  // would mean nothing scrolls and every section below the fold is lost — which
+  // is a worse outcome than the list moving. The refusal is worth having where
+  // there is an alternative and is not worth a blank record where there is not.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const chooser = source.slice(source.indexOf("function chooseScrollTarget"), source.indexOf("function currentScrollTop"));
+  assert.ok(chooser.length > 300, "the chooser must be found, not an empty slice");
+
+  assert.ok(
+    chooser.indexOf("Applicants.chooseColumnScrollTarget") < chooser.indexOf("Connections.chooseScrollTarget"),
+    "the column policy is still asked before the general chooser"
+  );
+  assert.match(chooser, /candidates\.filter\(\(candidate\) => \(Number\(candidate\.rowLinks\) \|\| 0\) <= 1\)/,
+    "the general chooser is offered the non-list candidates first");
+  assert.match(chooser, /return general \|\| Connections\.chooseScrollTarget\(candidates\);/,
+    "and the unfiltered set is the last resort, so the walk always has a target");
+
+  // The count reaches the chooser at all.
+  const describe = source.slice(source.indexOf("function describeScrollCandidate"), source.indexOf("const COLUMN_TEXT_SHARE"));
+  assert.match(describe, /rowLinks: rowLinksIn\(element\)/, "every candidate reports how many rows it holds");
+  assert.match(describe, /share: share === null \? 1/, "and how much of the read it carries");
+});
+
+test("Phase 7: whether the left list moved is measured on the page, because it cannot be measured here", async () => {
+  // The guide asks for "proof that the left applicant list stayed still". That
+  // proof cannot be a unit test — there is no DOM in this runner — so it is
+  // split honestly: the chooser's refusal is proven above, and whether the
+  // refusals HELD is measured at runtime, on the real page, and reported.
+  //
+  // A missing section produces zeros rather than warnings, because a missing
+  // section is a fact about the page. A list that moved during a profile read is
+  // a policy violation, so this one warns.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const reveal = source.slice(source.indexOf("async function revealPanelContent"), source.indexOf("async function scanApplicantPanel"));
+  assert.ok(reveal.length > 800, "the reveal walk must be found, not an empty slice");
+
+  assert.match(reveal, /listBefore: null, listAfter: null, listMoved: 0/, "the walk reports where the list stood");
+  assert.match(reveal, /const listBefore = applicantList\(\);/, "measured before it starts");
+  assert.match(reveal, /const listAfter = applicantList\(\);/, "and re-resolved afterwards, never held");
+  assert.match(reveal, /accumulator\?\.addWarning\?\.\(`the applicant list moved/, "and a move is a warning on the record");
+  assert.match(reveal, /record\.listMoved > REVEAL_MOVED_PX/,
+    "bounded by the same sub-pixel tolerance the walk uses for everything else");
+
+  // And the discipline that was already there is still there: the left list is
+  // moved by the roster builders and the run's own restore, and by nothing else.
+  const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
+    .map((match) => ({ name: match[1], at: match.index }));
+  const ownerOf = (offset) => {
+    let owner = "";
+    for (const declaration of declarations) {
+      if (declaration.at < offset) owner = declaration.name;
+      else break;
+    }
+    return owner;
+  };
+  const movers = new Set();
+  const listScroll = /scrollPanelTo\([^;]*(?:chooseScrollTarget\((?:list|applicantList\(\)|paged|\(await waitForApplicantList)|listStartY)/g;
+  for (const match of source.matchAll(listScroll)) movers.add(ownerOf(match.index));
+  assert.deepEqual([...movers].sort(), ["extractAllApplicants", "growApplicantList", "sweepCurrentPage"],
+    "only the roster builders and the run's own restore may move the applicant list");
+
+  // The panel's own position is still restored on every path, failure included.
+  const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
+  assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "and the click budget is still seven");
+});

@@ -19,6 +19,7 @@ each one its own Time Machine task with its own `npm run check`. The baseline be
 | `npm run check` after TASK-0157 (Phase 4, layout detection) | typecheck, build, **500 passed / 0 failed**, docs:check, validate |
 | `npm run check` after TASK-0158 (Phase 5, evidence-driven fallbacks) | typecheck, build, **505 passed / 0 failed**, docs:check, validate |
 | `npm run check` after TASK-0159 (Phase 6, section boundaries) | typecheck, build, **509 passed / 0 failed**, docs:check, validate |
+| `npm run check` after TASK-0160 (Phase 7, scroll containers) | typecheck, build, **513 passed / 0 failed**, docs:check, validate |
 
 ## Automated verification - 3.7.8 the section that was never read, every page, and a resume that saves itself
 
