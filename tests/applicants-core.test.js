@@ -2605,8 +2605,17 @@ test("no two sections are handed the same cards", async () => {
   // one candidate, `others` is empty, the upward walk never breaks — and the
   // root it returns is the whole detail column.
   const boundaries = source.slice(source.indexOf("function sectionBoundaries"), source.indexOf("function ownSectionNodes"));
-  assert.match(boundaries, /const wanted = new Set\(SECTION_PATTERNS\.map\(\(entry\) => entry\.key\)\)/,
+  // 3.9.0 widened the boundary set with the four sections that BOUND without
+  // ever being read — a top card, a contact block, application details,
+  // additional information. It is still every section rather than only the ones
+  // a pass still wants, and it is now four more than that: the guide's "never
+  // merge Contact or Resume text into profile sections" needs the contact block
+  // to be a boundary, and nothing collects it, so it can only ever narrow a root
+  // that had already swallowed it.
+  assert.match(boundaries, /const wanted = new Set\(\[\.\.\.Applicants\.SECTION_KEYS, \.\.\.Applicants\.AUXILIARY_SECTION_KEYS\]\)/,
     "the boundary set is every section, never only the ones a pass still wants");
+  assert.match(boundaries, /Applicants\.anySectionKeyFor\(entry\.text\)/,
+    "and a title that only bounds is resolved by the table that only bounds");
   assert.match(boundaries, /\[\.\.\.headingsIn\(root\), \.\.\.sectionLabelsIn\(root, wanted\)\]/,
     "headings AND labels — a title found either way ends a section either way");
 
@@ -2631,11 +2640,22 @@ test("no two sections are handed the same cards", async () => {
   // LINEARLY when the markup offered no blocks, and a flat string has none of
   // the structure the narrowing works on. That is where the screening question
   // became a job title with the ideal answer beneath it as the employer.
+  // 3.9.0 moved the cut itself into the pure core, where it can be exercised
+  // against real lines rather than asserted as a regex — see "the cut that keeps
+  // a school out of Experience is finally testable". The adapter now calls it,
+  // and the rule it encodes is unchanged, so it is asserted here by CALLING it.
   const lines = source.slice(source.indexOf("function ownSectionLines"), source.indexOf("function categoryBefore"));
-  assert.match(lines, /return Boolean\(key\) && key !== section\.key;/,
-    "the cut is at a DIFFERENT section's title");
-  assert.ok(!/isSectionTitleLine/.test(lines),
-    "and at nothing else — cutting on any noise line would end the section at its first verified card");
+  assert.match(lines, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
+  assert.deepEqual(
+    Applicants.cutToOwnSection(["Experience", "Legal Assistant", "Screening question responses", "Do you have 3 years?"], "experience"),
+    ["Experience", "Legal Assistant"],
+    "the cut is at a DIFFERENT section's title"
+  );
+  assert.deepEqual(
+    Applicants.cutToOwnSection(["Experience", "Legal Assistant", "Experience verified", "Show more"], "experience"),
+    ["Experience", "Legal Assistant", "Experience verified", "Show more"],
+    "and at nothing else — cutting on any noise line would end the section at its first verified card"
+  );
   for (const reader of ["readQualifications", "readScreeningResponses", "readExperience", "readEducation", "readSkills"]) {
     const body = source.slice(source.indexOf(`function ${reader}(`), source.indexOf(`function ${reader}(`) + 2600);
     assert.match(body, /ownSectionLines\(section\)/, `${reader}'s text fallback has to stop at the next section`);
@@ -2788,7 +2808,10 @@ test("an empty column is explicable from the page it was read on", async () => {
   assert.match(scan, /key: heading\.key \|\| ""/, "every heading the page rendered, matched or not");
   assert.match(scan, /foundIn: section\.source \|\| "panel"/, "where each section was actually found");
   assert.match(scan, /blocks: blocksIn\(section\)\.length/, "and how many blocks came out of it");
-  assert.match(scan, /missing: SECTION_PATTERNS/, "and which sections nothing named");
+  // ...and which sections nothing named. Asked of the keys a READER consumes
+  // since 3.9.0, so a section that only bounds is never reported as missing.
+  assert.match(scan, /missing: REQUIRED_SECTION_KEYS\.filter/, "and which sections nothing named");
+  assert.match(scan, /auxiliary/, "plus the ones that bound the others and are read by nothing");
 
   // Once per applicant, not once per snapshot — it reads innerText page-wide and
   // a scan takes dozens of snapshots.
@@ -5796,4 +5819,177 @@ test("Phase 5: the labelled reader refuses the posting's own title and company",
   const header = source.slice(source.indexOf("function readApplicantHeader"), source.indexOf("function readQualifications"));
   assert.match(header, /parseApplicantHeader\(\{ text: lines\.join\("\\n"\), name: chosen\.name \|\| "" \}\)/,
     "the resolved name goes in with the window, so a name rendered twice is not a headline");
+});
+
+
+// ------ Phase 6 of the multiple-LinkedIn-UI support guide: section boundaries
+//
+// "Build a section map from headings and local containers. Do not assume section
+// order is fixed. Never save company names inside Education, never save school
+// details inside Experience, never classify a section only by its page position,
+// never merge Contact or Resume text into profile sections."
+//
+// Three changes, and the third is a latent defect this phase's own widening
+// would otherwise have triggered.
+
+test("Phase 6: the cut that keeps a school out of Experience is finally testable", () => {
+  // `ownSectionLines` is the single function keeping one section's text out of
+  // another's whenever the markup offered no blocks — every reader falls back to
+  // reading its section linearly, and a flat string has none of the structure
+  // `narrowSharedSections` works on. It lived in the DOM adapter, where nothing
+  // could exercise it. This is the same function, in the core.
+  const spanning = [
+    "Experience",
+    "Legal Assistant",
+    "Bhatia and Khatri Law Office • 2024 - Present",
+    "Experience verified",
+    "Drafted and reviewed commercial contracts",
+    "Education",
+    "CHANDIGARH UNIVERSITY",
+    "Bachelor of Laws - LLB",
+    "Skills",
+    "Contract Drafting"
+  ];
+
+  assert.deepEqual(Applicants.cutToOwnSection(spanning, "experience"), [
+    "Experience", "Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present",
+    "Experience verified", "Drafted and reviewed commercial contracts"
+  ], "Experience ends where Education begins, and not one line later");
+
+  assert.deepEqual(Applicants.cutToOwnSection(spanning, "education"), [
+    "Education", "CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB"
+  ], "and Education begins at its own title and ends at Skills");
+
+  // "Experience verified" and "Show more" are lines the parsers' own noise
+  // filter drops one at a time. Treating either as a boundary would truncate the
+  // section at its first verified card — which is the regression this comment
+  // has guarded since 3.7.22.
+  assert.ok(Applicants.cutToOwnSection(spanning, "experience").includes("Experience verified"),
+    "a verified badge does not end the section it sits inside");
+  assert.deepEqual(
+    Applicants.cutToOwnSection(["Experience", "Legal Assistant", "Show more", "Paralegal"], "experience"),
+    ["Experience", "Legal Assistant", "Show more", "Paralegal"],
+    "and neither does an expander"
+  );
+
+  // Neither does an AUXILIARY title, and that is the whole reason they are a
+  // separate table: a stray "Additional information" inside a card would
+  // otherwise truncate the section at it.
+  assert.deepEqual(
+    Applicants.cutToOwnSection(["Experience", "Legal Assistant", "Additional information", "Paralegal"], "experience"),
+    ["Experience", "Legal Assistant", "Additional information", "Paralegal"],
+    "a bounding-only title never cuts a line range"
+  );
+
+  // A section whose own title never appears is read from the top rather than
+  // discarded, and a call with no key is a no-op.
+  assert.deepEqual(Applicants.cutToOwnSection(["Legal Assistant", "Education", "CHANDIGARH"], "experience"),
+    ["Legal Assistant"], "a section with no visible title still ends at the next one");
+  assert.deepEqual(Applicants.cutToOwnSection(["a", "b"], ""), ["a", "b"]);
+  assert.deepEqual(Applicants.cutToOwnSection([], "experience"), []);
+  // Tolerant of a raw string, exactly as every other parser in this file is.
+  assert.deepEqual(Applicants.cutToOwnSection("Experience\nLegal Assistant\nEducation\nCHANDIGARH", "experience"),
+    ["Experience", "Legal Assistant"]);
+});
+
+test("Phase 6: a section that bounds is not a section that is read", () => {
+  // The guide asks for topCard, contact, applicationDetails and
+  // additionalInformation in the section map. None of them is read by anything
+  // — there is no readTopCard and there never will be, because the top card's
+  // fields are the header's — so putting them in SECTION_PATTERNS would
+  // schedule page-wide searches for sections nothing consumes AND make them
+  // line-level boundaries, which is the one thing they must not be.
+  for (const [wording, key] of [
+    ["Top card", "topCard"], ["Profile summary", "topCard"], ["Candidate summary", "topCard"],
+    ["Contact info", "contact"], ["Contact information", "contact"], ["Contact details", "contact"],
+    ["Application details", "applicationDetails"], ["Application information", "applicationDetails"],
+    ["Additional information", "additionalInformation"], ["Supplementary information", "additionalInformation"]
+  ]) {
+    assert.equal(Applicants.anySectionKeyFor(wording), key, `"${wording}" bounds the ${key} section`);
+    assert.equal(Applicants.sectionKeyFor(wording), "", `...and "${wording}" is never collected as one`);
+  }
+
+  // The three lists stay separate, and that separation is the safety property.
+  for (const key of Applicants.AUXILIARY_SECTION_KEYS) {
+    assert.ok(!Applicants.SECTION_KEYS.includes(key), `${key} is not a readable section`);
+    assert.ok(!Applicants.REQUIRED_SECTION_KEYS.includes(key), `${key} never schedules a pass`);
+  }
+  // A readable key still answers to the wider lookup, so one call covers both.
+  for (const key of Applicants.SECTION_KEYS) {
+    assert.ok(!Applicants.AUXILIARY_SECTION_KEYS.includes(key), `${key} is not merely a boundary`);
+  }
+  assert.equal(Applicants.anySectionKeyFor("Experience"), "experience");
+  assert.equal(Applicants.anySectionKeyFor("Legal Assistant"), "", "and content is neither");
+
+  // Contact and Resume text may not reach a profile section — the guide states
+  // it outright, and this is the half that makes it true of the LINE cut: a
+  // resume title IS a readable key, so it cuts, while a contact title bounds an
+  // element root without ever truncating a card.
+  assert.equal(Applicants.sectionKeyFor("Resume"), "resume", "a resume heading ends the section above it");
+  assert.deepEqual(
+    Applicants.cutToOwnSection(["Experience", "Legal Assistant", "Resume", "Nihal_Sharma.pdf"], "experience"),
+    ["Experience", "Legal Assistant"],
+    "so resume text can never be read as an experience card"
+  );
+});
+
+test("Phase 6: Experience and Education still refuse each other, over the widened table", () => {
+  // The asymmetric cross-refusal, re-asserted after Phase 5 widened the section
+  // wordings and this phase widened the boundaries. A wrong entry is worse than
+  // an empty one, in both directions.
+  assert.equal(Applicants.parseExperienceBlock(["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB", "2019 - 2024"]), null,
+    "a school is never a job");
+  assert.equal(Applicants.parseEducationBlock(["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present"]), null,
+    "and a job is never a school");
+  assert.equal(Applicants.parseExperienceBlock(["Do you have 3 years of experience?", "Yes"]), null,
+    "and a screening question is neither");
+
+  // A real card of each still parses, so the refusals are not simply refusing
+  // everything.
+  const job = Applicants.parseExperienceBlock(["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present", "Drafted contracts"]);
+  assert.equal(job.title, "Legal Assistant");
+  assert.equal(job.company, "Bhatia and Khatri Law Office");
+  assert.equal(job.current, true);
+  const school = Applicants.parseEducationBlock(["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB", "2019 - 2024"]);
+  assert.equal(school.institution, "CHANDIGARH UNIVERSITY");
+  assert.equal(school.degree, "Bachelor of Laws - LLB");
+
+  // And a section title of ANY of the new wordings is refused as content, which
+  // is what stops "Work history" being stored as somebody's employer.
+  for (const title of ["Work history", "Employment", "Academics", "Skills and expertise", "Resume/CV", "Contact information", "Additional information"]) {
+    assert.ok(Applicants.isSectionTitleLine(title), `"${title}" is a section title, never a field`);
+  }
+});
+
+test("Phase 6: the header window ends at the first section on SCREEN, not the first one found", async () => {
+  // A latent defect, fixed in the same commit as the change that would have
+  // triggered it. `readApplicantHeader` took `Object.values(sections)[0]` — key
+  // INSERTION order — as "the first section below the header". `collectSections`
+  // runs six passes, so a section found only page-wide is inserted after every
+  // panel section regardless of where it is rendered; it has worked so far only
+  // because the panel pass happens to insert in heading order.
+  //
+  // Under a layout that renders its sections in another order, or once a top
+  // card is recognised at all, "first" could be a section ABOVE the name and the
+  // header window would collapse to nothing.
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+
+  const header = source.slice(source.indexOf("function readApplicantHeader"), source.indexOf("function readQualifications"));
+  assert.ok(header.length > 400, "the header reader must be found, not an empty slice");
+  assert.match(header, /const first = firstSectionElement\(sections\);/, "the window ends at the earliest section on screen");
+  assert.ok(!/Object\.values\(sections\)\[0\]/.test(source), "insertion order is never asked again");
+
+  const finder = source.slice(source.indexOf("function firstSectionElement"), source.indexOf("function readApplicantHeader"));
+  assert.ok(finder.length > 200, "the finder must be found, not an empty slice");
+  assert.match(finder, /compareDocumentPosition/, "document order is asked of the document");
+  assert.match(finder, /for \(const key of REQUIRED_SECTION_KEYS\)/,
+    "and only of sections a reader consumes, so a bounding title cannot end the window before it begins");
+  assert.match(finder, /node\.isConnected/, "a detached section is not on screen");
+
+  // The line cut in the adapter is now the core's, so there is one copy.
+  const own = source.slice(source.indexOf("function ownSectionLines"), source.indexOf("function categoryBefore"));
+  assert.match(own, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
+  assert.ok(!/const cut = rest\.findIndex/.test(source), "and no longer carries its own copy");
+
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
 });

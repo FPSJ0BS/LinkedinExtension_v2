@@ -1209,15 +1209,29 @@
    * owns it.
    */
   function sectionBoundaries(roots) {
-    const wanted = new Set(SECTION_PATTERNS.map((entry) => entry.key));
+    const wanted = new Set([...Applicants.SECTION_KEYS, ...Applicants.AUXILIARY_SECTION_KEYS]);
     const found = [];
     const seen = new Set();
     for (const root of roots) {
       if (!root) continue;
+      // 3.9.0: the auxiliary titles bound too — a top card, a contact block, an
+      // application-details panel and an additional-information block. None of
+      // them is collected by anything and none of them may be: this widening
+      // exists solely so that a root which had ALREADY swallowed one is cut back
+      // to its own range, which is the guide's "never merge Contact or Resume
+      // text into profile sections". `narrowSharedSections` only ever narrows,
+      // and only a root that was already wrong, so the blast radius is exactly
+      // the roots this is meant to fix.
+      //
+      // `anySectionKeyFor` rather than `sectionKeyFor`, and only here: the
+      // LINE-level cut in `cutToOwnSection` deliberately does not know these,
+      // because a stray "Additional information" inside an experience card would
+      // truncate the section at it.
       for (const entry of [...headingsIn(root), ...sectionLabelsIn(root, wanted)]) {
-        if (!entry.key || seen.has(entry.element)) continue;
+        const key = entry.key || Applicants.anySectionKeyFor(entry.text);
+        if (!key || seen.has(entry.element)) continue;
         seen.add(entry.element);
-        found.push(entry);
+        found.push({ ...entry, key });
       }
     }
     return found;
@@ -1480,12 +1494,21 @@
    */
   function recordSectionScan(map, panel, page, diagnostics) {
     const seen = [];
-    for (const heading of headingsIn(panel)) {
-      seen.push({ where: "panel", text: heading.text, key: heading.key || "" });
-    }
+    const auxiliary = [];
+    // A heading's `key` is still only ever a READABLE key — an empty one is the
+    // designated "a wording SECTION_PATTERNS does not know yet" signal and it
+    // must stay that. The auxiliary title it may also be is reported beside it,
+    // as `bounds`, so a live report can say "this heading is a contact block, it
+    // bounds the sections around it, and nothing reads it".
+    const note = (where, heading) => {
+      const bounds = heading.key ? "" : Applicants.anySectionKeyFor(heading.text);
+      seen.push({ where, text: heading.text, key: heading.key || "", bounds: bounds || "" });
+      if (bounds) auxiliary.push({ where, text: heading.text, key: bounds });
+    };
+    for (const heading of headingsIn(panel)) note("panel", heading);
     for (const heading of headingsIn(page)) {
       if (panel && panel.contains(heading.element)) continue;
-      seen.push({ where: "page", text: heading.text, key: heading.key || "" });
+      note("page", heading);
     }
     diagnostics.sectionScan = {
       headingSelector: HEADING_SELECTOR,
@@ -1509,7 +1532,10 @@
         // well as from the console.
         html: sectionMarkup(section)
       })),
-      missing: SECTION_PATTERNS.map((entry) => entry.key).filter((key) => !map[key])
+      missing: REQUIRED_SECTION_KEYS.filter((key) => !map[key]),
+      // Sections that are on screen, bound the ones around them, and are read by
+      // nothing. Reported so a live run can say what a layout actually renders.
+      auxiliary
     };
   }
 
@@ -1687,16 +1713,10 @@
    * would truncate the section at its first verified card.
    */
   function ownSectionLines(section) {
-    const lines = toLines(section?.element?.innerText || "");
-    if (!section?.key || !lines.length) return lines;
-    const own = lines.findIndex((line) => sectionKeyFor(line) === section.key);
-    const rest = own > 0 ? lines.slice(own) : lines;
-    const cut = rest.findIndex((line, index) => {
-      if (index === 0) return false;
-      const key = sectionKeyFor(line);
-      return Boolean(key) && key !== section.key;
-    });
-    return cut < 0 ? rest : rest.slice(0, cut);
+    // The cut itself lives in the core as of 3.9.0 — it is the one function
+    // keeping school data out of Experience when the markup offers no blocks,
+    // and it was untestable here.
+    return Applicants.cutToOwnSection(toLines(section?.element?.innerText || ""), section?.key || "");
   }
 
   /** The category heading in force at this element, for the qualifications card. */
@@ -1895,6 +1915,30 @@
     return Applicants.chooseApplicantName(candidates, Applicants.nameFromExplanations(explanations));
   }
 
+  /**
+   * The earliest READABLE section on screen, in document order.
+   *
+   * Only the keys a reader consumes, so an auxiliary title — a top card above
+   * the name, say — can never end the header window before it has begun.
+   * `section.title` is the heading element itself and `section.element` the root
+   * it resolved to; the title is preferred because it is where the section
+   * visibly starts.
+   */
+  function firstSectionElement(sections) {
+    let earliest = null;
+    for (const key of REQUIRED_SECTION_KEYS) {
+      const node = sections?.[key]?.title || sections?.[key]?.element || null;
+      if (!(node instanceof Element) || !node.isConnected) continue;
+      if (!earliest) {
+        earliest = node;
+        continue;
+      }
+      // DOCUMENT_POSITION_PRECEDING === 2: `node` comes before `earliest`.
+      if (earliest.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING) earliest = node;
+    }
+    return earliest;
+  }
+
   function readApplicantHeader(panel, sections, accumulator, diagnostics = {}) {
     // The name FIRST, and that ordering is the fix.
     //
@@ -1921,7 +1965,17 @@
 
     // The header is everything from the applicant's own name down to the first
     // recognised section heading.
-    const first = Object.values(sections)[0]?.element || null;
+    //
+    // "First" means first ON SCREEN, and it used to mean first INSERTED, which
+    // is not the same thing and has been a latent defect all along.
+    // `collectSections` runs six passes — panel, page, panel-label, page-label,
+    // and two subheading passes — so a section found only page-wide is inserted
+    // after every panel section regardless of where it is rendered. It has
+    // worked so far only because the panel pass happens to insert in heading
+    // order. Ask instead which of them the document puts first, which is what
+    // the code always meant and what the guide's "read sections by meaning, not
+    // by index / do not assume section order is fixed" requires.
+    const first = firstSectionElement(sections);
     const all = toLines(panel.innerText || "");
     // The LAST occurrence before the sections: the list column precedes the
     // detail column in document order, so the last one is the panel's own

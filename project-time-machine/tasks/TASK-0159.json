@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0159",
+  "name": "Phase 6: section boundaries",
+  "request": "Phase 6: section boundaries",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:42:41.812Z",
+  "completedAt": "2026-08-08T11:46:56.529Z",
+  "startCommit": "3be4045810142125289c269cb00526f60d0cca21",
+  "gitRef": "task/TASK-0159",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 509 passed / 0 failed (was 505), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 6 of the multiple-LinkedIn-UI support guide: section boundaries, with the line-level cut finally testable and one latent defect fixed in the same commit as the change that would have triggered it. (1) cutToOwnSection moved into the pure core. It is the single function keeping one section's text out of another's whenever the markup offers no blocks - every reader falls back to reading its section linearly, and a flat string has none of the structure narrowSharedSections works on, so a root still spanning a neighbour hands the fallback the next section whole. That is where 'Screening question responses' became a job title with the question beneath it as the employer. It lived in the DOM adapter where nothing could exercise it; it is now asserted against real spanning line ranges in both directions, including that 'Experience verified' and 'Show more' still do NOT cut (the 3.7.22 regression) and that a raw string is coerced like every other parser's input. (2) AUXILIARY_SECTION_PATTERNS - topCard, contact, applicationDetails, additionalInformation - as a deliberately SEPARATE table with deliberately narrower powers. The guide asks for them in the section map and forbids merging Contact or Resume text into a profile section, but nothing reads any of them and nothing ever will, because the top card's fields are the header's. Put in SECTION_PATTERNS they would be scheduled for by REQUIRED_SECTION_KEYS - page-wide searching for a section nothing consumes - and, worse, would become LINE-level boundaries, where a stray 'Additional information' inside an experience card would truncate the section at it. So they do exactly two things: bound an element-level root that had ALREADY swallowed a foreign section, via sectionBoundaries and narrowSharedSections, which only ever narrows and only a root that was already wrong; and name themselves in diagnostics.sectionScan.auxiliary so a live run can report what a layout renders. anySectionKeyFor answers both tables; sectionKeyFor still answers only the readable one, and cutToOwnSection still asks only sectionKeyFor. Asserted that no auxiliary key appears in SECTION_KEYS or REQUIRED_SECTION_KEYS and vice versa. (3) firstSectionElement, the latent defect. readApplicantHeader took Object.values(sections)[0] - key INSERTION order - as 'the first section below the header'. collectSections runs six passes (panel, page, panel-label, page-label, two subheading passes), so a section found only page-wide is inserted after every panel section regardless of where it is rendered; it has worked so far only because the panel pass happens to insert in heading order. Under a layout that orders its sections differently the window could have ended above the name and collapsed to nothing. It now asks the document, via compareDocumentPosition, and only about REQUIRED_SECTION_KEYS, so a bounding title can never end the window before it begins - which is the guide's 'read sections by meaning, not by index' and 'do not assume section order is fixed'. Also re-asserted the Experience/Education cross-refusal over Phase 5's widened wordings, and that a resume heading DOES cut a line range while a contact heading does not, which is the guide's Contact/Resume separation stated precisely. Three existing tests changed: two because the knowledge they asserted as source text is now callable, one because the boundary set genuinely widened. Click budget still seven. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHECKS.md."
+}

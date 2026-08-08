@@ -694,6 +694,74 @@
   }
 
   /**
+   * Sections that BOUND the readable ones without being read themselves.
+   *
+   * The guide's Phase 6 asks for a section map including a top card, contact,
+   * application details and additional information, and forbids merging Contact
+   * or Resume text into a profile section. None of these four is read by
+   * anything — there is no `readTopCard` and there never will be, because the
+   * top card's fields are the header's — but a root that swallowed one was
+   * handing its text to a reader that had no business with it.
+   *
+   * **Deliberately a SEPARATE table, and deliberately narrower in what it may
+   * do.** Put in `SECTION_PATTERNS` these four would (a) be scheduled for by
+   * `REQUIRED_SECTION_KEYS`, which is page-wide searching for a section nothing
+   * reads, and (b) become boundaries for `cutToOwnSection`, the LINE-level cut
+   * every reader's text fallback runs through — where a stray "Additional
+   * information" inside an experience card would truncate the section at it.
+   * So they are used for two things only: cutting an element-level root that had
+   * already swallowed a foreign section, and naming themselves in the section
+   * scan so a live run can report what is on screen.
+   */
+  const AUXILIARY_SECTION_PATTERNS = Object.freeze([
+    { key: "topCard", pattern: /^(?:top card|profile summary|candidate summary|applicant summary)$/i },
+    { key: "contact", pattern: /^contact (?:info(?:rmation)?|details)$/i },
+    { key: "applicationDetails", pattern: /^application (?:details|information)$/i },
+    { key: "additionalInformation", pattern: /^(?:additional|supplementary) information$/i }
+  ]);
+
+  const AUXILIARY_SECTION_KEYS = Object.freeze(AUXILIARY_SECTION_PATTERNS.map((entry) => entry.key));
+
+  /** Which section this heading names, readable or merely bounding. */
+  function anySectionKeyFor(text) {
+    const key = sectionKeyFor(text);
+    if (key) return key;
+    const value = normalizeSectionTitle(text);
+    return AUXILIARY_SECTION_PATTERNS.find((entry) => entry.pattern.test(value))?.key || "";
+  }
+
+  /**
+   * The lines of a section's text that are its own.
+   *
+   * Lifted out of the adapter in 3.9.0 so it can be tested, and it is the single
+   * function keeping school data out of Experience whenever the markup offered
+   * no blocks: every reader falls back to reading its section's text linearly,
+   * and a flat string has none of the structure `narrowSharedSections` works on,
+   * so a root still spanning a neighbour hands the fallback the next section
+   * whole. That is where "Screening question responses" became a job title and
+   * the question beneath it the employer.
+   *
+   * Cut at the first line naming a **different readable** section, and at
+   * nothing else. Not at an auxiliary one — a stray "Additional information"
+   * inside a card would truncate the section at its first such line — and not at
+   * "Experience verified" or "Show more", which are lines the parsers' own noise
+   * filter drops one at a time and which would otherwise end the section at its
+   * first verified card.
+   */
+  function cutToOwnSection(lines = [], key = "") {
+    const list = Array.isArray(lines) ? lines : toLines(lines);
+    if (!key || !list.length) return list;
+    const own = list.findIndex((line) => sectionKeyFor(line) === key);
+    const rest = own > 0 ? list.slice(own) : list;
+    const cut = rest.findIndex((line, index) => {
+      if (index === 0) return false;
+      const found = sectionKeyFor(line);
+      return Boolean(found) && found !== key;
+    });
+    return cut < 0 ? rest : rest.slice(0, cut);
+  }
+
+  /**
    * Lines that are chrome rather than any field of a card.
    *
    * The section names of the applicant's OTHER sections are in here on purpose:
@@ -3136,6 +3204,8 @@
     normalizeDateRange, totalExperienceFrom, parseEducationBlock, educationKey,
     // which section a heading names — the adapter's table, here so it is testable
     SECTION_PATTERNS, SECTION_KEYS, REQUIRED_SECTION_KEYS, normalizeSectionTitle, sectionKeyFor,
+    // ...and the ones that only bound a section, never supply one
+    AUXILIARY_SECTION_PATTERNS, AUXILIARY_SECTION_KEYS, anySectionKeyFor, cutToOwnSection,
     // telling the two apart when the markup does not
     SECTION_TITLE_NOISE_PATTERN, isSectionTitleLine,
     SPELLED_DEGREE_PATTERN, DEGREE_PATTERN, INSTITUTION_PATTERN,
