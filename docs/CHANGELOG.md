@@ -1,5 +1,39 @@
 # CHANGELOG.md
 
+## 3.7.26 — looking for the next row no longer drags the list back to the top
+
+**Reported: "make it move to every profile just by moving to the next profile without needing to
+scroll — currently it is scrolling every time on the list side and it goes back to the top every
+time."** Both halves are one line, which ran for every caller of `sweepCurrentPage`.
+
+Its two callers want opposite things:
+
+- A **settle** genuinely needs the top. Its whole job is the rows *above* wherever the list was left,
+  and it runs **once per page**.
+- A **search** — *"the row this page owes me next is not mounted, go and find it"* — wants the
+  opposite. The walk goes **down** the page in order, so the owed row is almost always the next one
+  down. Hauling the list to the top to look for it moves the recruiter's list the entire height of the
+  page, re-mounts rows the run has already finished with, and then has to walk all the way back down
+  to where it started.
+
+So a search now sweeps **from where the list is**, and a row that is already mounted costs no scroll
+at all. It falls back to a walk from the top only when the downward pass finds nothing — which is the
+case that fallback was written for, a row recycled out of the DOM *above* the current position, and
+which is now paid for only when it actually happens. A search that reaches the bottom without its row
+returns saying so and **moves nothing on the way out**, because the caller's own fallback is that
+walk from the top and doing it here would be the same movement twice.
+
+Nothing about what a sweep *concludes* changes: the same passes, the same `LIST_PAGE_PASSES` bound per
+walk, the same "growth means rows never seen before" rule, the same roster merge, and the caller still
+re-checks for itself before retiring a row. The settle is untouched — still from the top, still handed
+back at the top, still once per page, still resetting the roster it is about to define (3.7.24). The
+worst case for a search is that walk twice, each independently bounded, and it terminates on exactly
+the same rule.
+
+Locked by three additions to *"the page is settled before anybody on it is opened, and the pager waits
+for it"*. Files: `extension/content-scripts/applicants.js`, `tests/applicants-core.test.js`,
+`docs/CHANGELOG.md`.
+
 ## 3.7.25 — contact and resume before the walk, and the walk ends at the bottom
 
 **Requested outright: "before scrolling profile save contact and resume and then scroll to bottom,

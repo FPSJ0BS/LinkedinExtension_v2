@@ -4622,12 +4622,65 @@
      * sweep asked to find one owed row (`wanted`) must keep the membership this
      * page already established, which is the thing it is searching within.
      */
-    if (typeof wanted !== "function") roster.reset();
-    // The top, because the rows this is here to find are the ones above wherever
-    // the list happens to be sitting. A run resumed on a half-scrolled list, or
-    // one LinkedIn scrolled to the open applicant, has them all behind it.
-    scrollPanelTo(0, chooseScrollTarget(list));
-    await waitForDomQuiet(320, 2000);
+    const seeking = typeof wanted === "function";
+    if (!seeking) roster.reset();
+
+    /**
+     * A SEARCH STARTS WHERE THE LIST IS. Only a settle starts at the top.
+     *
+     * **THE REPORT: "make it move to every profile just by moving to the next
+     * profile without needing to scroll — currently it is scrolling every time on
+     * the list side and it goes back to the top every time."** Both halves are
+     * this one line, which used to run for every caller.
+     *
+     * The two callers want opposite things. A **settle** genuinely needs the top:
+     * its whole job is the rows *above* wherever the list was left, and it runs
+     * once per page. A **search** — "the row this page owes me next is not
+     * mounted, go and find it" — wants the opposite. The walk goes **down** the
+     * page in order, so the row it is owed is almost always the next one down;
+     * dragging the list to the top to look for it moves the recruiter's list the
+     * whole height of the page, re-mounts the rows the run has already finished
+     * with, and then has to walk all the way back down to where it started.
+     *
+     * So a search sweeps from where the list is, and only falls back to a walk
+     * from the top when that finds nothing — which is the case it was written
+     * for, a row recycled out of the DOM *above* the current position, and which
+     * is now paid for only when it actually happens. Nothing about what the sweep
+     * concludes changes: the same passes, the same bound, the same roster merge,
+     * and the caller still re-checks for itself before retiring a row.
+     */
+    if (seeking) {
+      // Already there: no scroll of any kind, which is the common case this
+      // whole change exists to make free.
+      if (wanted()) return true;
+      if (await sweepPageFrom(false, roster, walk, wanted)) return true;
+    }
+    return sweepPageFrom(true, roster, walk, wanted);
+  }
+
+  /**
+   * One walk of the page, either from the top or onward from where the list is.
+   *
+   * The worst case for a search is this walk twice — down from here, then down
+   * from the top — and it is bounded by `LIST_PAGE_PASSES` each time, so it still
+   * terminates on exactly the same rule. It is only reached when a row genuinely
+   * is not below the current position.
+   */
+  async function sweepPageFrom(fromTop, roster, walk, wanted) {
+    const seeking = typeof wanted === "function";
+    if (fromTop) {
+      const list = await waitForApplicantList();
+      if (!list) {
+        walk.stoppedBy = "no-list";
+        return false;
+      }
+      // The top, because the rows a settle is here to find are the ones above
+      // wherever the list happens to be sitting. A run resumed on a half-scrolled
+      // list, or one LinkedIn scrolled to the open applicant, has them all behind
+      // it.
+      scrollPanelTo(0, chooseScrollTarget(list));
+      await waitForDomQuiet(320, 2000);
+    }
 
     let quiet = 0;
     for (let pass = 0; pass < LIST_PAGE_PASSES; pass += 1) {
@@ -4647,7 +4700,7 @@
       walk.passes += 1;
       // Found what the caller came for. The list is deliberately left where it
       // is, because where it is, is where that row is mounted.
-      if (typeof wanted === "function" && wanted()) return true;
+      if (seeking && wanted()) return true;
 
       const max = maxScrollPosition(target);
       const position = currentScrollTop(target);
@@ -4657,6 +4710,12 @@
       // the rest of the page over the network, and a slice still in flight looks
       // exactly like a page that has ended.
       if (atBottom && quiet >= LIST_QUIET_PASSES) {
+        // A SEARCH that reached the bottom without its row says so and moves
+        // nothing. The caller's fallback is a walk from the top, so hauling the
+        // list up here would be that same movement done twice — and if this was
+        // already the walk from the top, the row is genuinely not on the page and
+        // the caller retires it.
+        if (seeking) return false;
         // Settled — and handed back at the TOP, because the first applicant of
         // this page is the next one the run opens. Leaving it at the bottom
         // would start the page at its last row and then need a sweep back up

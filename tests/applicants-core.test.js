@@ -3206,7 +3206,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   // added a window sharing no row with them, which anchored on nothing and was
   // appended AFTER them. The page order became "the middle, then the top", so
   // roster.next() handed back a middle row and the first name was reached last.
-  assert.match(sweep, /if \(typeof wanted !== "function"\) roster\.reset\(\);/,
+  assert.match(sweep, /const seeking = typeof wanted === "function";\s*\n\s*if \(!seeking\) roster\.reset\(\);/,
     "a settle DEFINES the page's order, so it may not inherit one guessed from an arbitrary scroll position");
   assert.ok(
     sweep.indexOf("roster.reset()") < sweep.indexOf("scrollPanelTo(0, chooseScrollTarget(list))"),
@@ -3222,6 +3222,28 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   // words the check greps for, exactly as the row-label check has to.
   assert.ok(!/processed/.test(withoutComments(sweep)),
     "settling a page must not touch the run's own ledger of finished rows");
+
+  // THE REPORT: "make it move to every profile just by moving to the next profile
+  // without needing to scroll — currently it is scrolling every time on the list
+  // side and it goes back to the top every time."
+  //
+  // The two callers want opposite things and used to share one line. A SETTLE
+  // genuinely needs the top: its job is the rows ABOVE wherever the list was
+  // left, and it runs once per page. A SEARCH — "the row this page owes me next
+  // is not mounted, go and find it" — wants the opposite, because the walk goes
+  // DOWN the page in order, so the owed row is almost always the next one down.
+  // Hauling the list to the top to find it moves the recruiter's list the whole
+  // height of the page and then has to walk back down to where it started.
+  assert.match(sweep, /if \(seeking\) \{\s*\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(wanted\(\)\) return true;\s*\n\s*if \(await sweepPageFrom\(false, roster, walk, wanted\)\) return true;\s*\n\s*\}/,
+    "a search looks from where the list is, and a row already mounted costs no scroll at all");
+  assert.match(sweep, /return sweepPageFrom\(true, roster, walk, wanted\);/,
+    "and only falls back to a walk from the top, which is the case it was written for");
+  assert.match(sweep, /if \(seeking\) return false;/,
+    "a search that reached the bottom without its row moves nothing on the way out");
+  // The settle is unchanged: still from the top, still handed back at the top,
+  // still once per page.
+  assert.match(sweep, /if \(fromTop\) \{[\s\S]{0,600}?scrollPanelTo\(0, chooseScrollTarget\(list\)\)/,
+    "the walk from the top still starts at the top");
 
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
   assert.match(run, /if \(!pageSettled\) \{\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);\s*\n\s*pageSettled = true;/,
