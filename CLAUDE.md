@@ -132,9 +132,9 @@ commands are unrecoverable.
 
 1. Popup, dashboard, and import UI stay React components under [src/react/](src/react/). Never add
    root-level DOM-mutation UI scripts (`popup.js`, `dashboard.js`).
-2. Content-script extraction stays framework-free. Never import React into [content.js](content.js),
-   [connections.js](connections.js), or `src/*-core.js`.
-3. React loads locally from [vendor/](vendor/), never a CDN — MV3 CSP is `script-src 'self'`.
+2. Content-script extraction stays framework-free. Never import React into [content.js](extension/content-scripts/content.js),
+   [connections.js](extension/content-scripts/connections.js), or `src/*-core.js`.
+3. React loads locally from [vendor/](extension/vendor/), never a CDN — MV3 CSP is `script-src 'self'`.
 4. Chrome loads [dist/](dist/), never the repo root.
 5. Host permissions stay LinkedIn-only; permissions stay minimal. **LinkedIn's own media CDN
    counts as LinkedIn** (amended in 3.7.9): `media.licdn.com` and `static.licdn.com` are listed
@@ -180,7 +180,7 @@ commands are unrecoverable.
       control has to be **proven to be inside it** (`inOpenToWorkCard: card.contains(element)`),
       exactly as pagination has to be proven inside the connections list. It opens the member's own
       job-preferences panel, reads it, and dismisses it. At most once per profile.
-   **Hiring / applicants pages — exactly four, added in 3.7.0** ([applicants.js](applicants.js)),
+   **Hiring / applicants pages — exactly four, added in 3.7.0** ([applicants.js](extension/content-scripts/applicants.js)),
    every one of them gated by `classifyApplicantControl({ purpose, inContainer })`
    ([applicants-core.js](src/applicants-core.js)):
    d. The applicant's **contact disclosure** (`purpose: "contact"`), proven inside the applicant
@@ -473,24 +473,25 @@ Fresh clone: `npm install && npm run check`, then load `dist/` at `chrome://exte
 (Developer mode → Load unpacked).
 
 Another device: `npm run package`, then send `releases/profile-vault-react-<version>.zip`. It carries
-[INSTALL.md](INSTALL.md) and unzips to an `extension/` folder to Load unpacked. Chrome refuses to
+[INSTALL.md](docs/INSTALL.md) and unzips to an `extension/` folder to Load unpacked. Chrome refuses to
 install an extension from a file — a `.crx` has been blocked outside the Web Store since Chrome 33 —
 so unpacked is the only route, and **nothing about the extension differs in a packaged copy**: no
 added file, no manifest key, no permission. `scripts/zip.mjs` writes the archive format by hand
 because this project has no build dependencies and shipping a zip is not a reason to acquire one.
 
-After editing `src/**` or `content.js`/`connections.js`/`applicants.js`: `npm run build`, reload the
-extension, and reload the LinkedIn tab.
+After editing `src/**` or `extension/content-scripts/**`: `npm run build`, reload the extension, and
+reload the LinkedIn tab.
 
 ## Layout
 
 ```
-manifest.json   content.js (profile extraction)   connections.js (discovery)
-                applicants.js (recruiter hiring pages)
-popup.html  dashboard.html  import.html  applicants.html  + matching .css
-theme.css       The shared visual layer — tokens, reset, type, buttons, fields,
-                notices, pills, tables, drawer. Loaded FIRST by all four pages;
-                each page's own .css holds only what is unique to it.
+extension/
+  manifest.json
+  content-scripts/  content.js (profile extraction), connections.js (discovery),
+                    applicants.js (recruiter hiring pages)
+  pages/            popup.html, dashboard.html, import.html, applicants.html
+  styles/           theme.css (shared visual layer) + one stylesheet per page
+  icons/  vendor/   Extension icons and the local React runtime
 src/
   extraction-core.js    Pure profile parsing — NO DOM at load
   connections-core.js   Pure URLs, control policy, totals, challenges — NO DOM at load
@@ -500,8 +501,8 @@ src/
   queue-db.js  db.js  applicant-db.js  csv.js  profile-utils.js  messages.ts
   background.ts         Service worker — import orchestrator + applicant relay
   react/  popup.tsx  dashboard.tsx  import-dashboard.tsx  types.ts
+docs/     Supporting project guides, history, status and verification records
 scripts/  tests/ (*.test.js + fixtures/*.html, browser-only)
-vendor/   React 16.0.0 + ReactDOM 16.0.1 — the actual runtime
 dist/     Build output — the folder Chrome loads
 ```
 
@@ -511,7 +512,7 @@ dist/     Build output — the folder Chrome loads
 `const React: any = (globalThis as any).React;`. HTML pages load `vendor/*.min.js` as classic scripts,
 then the compiled entry as `type="module"`. **Never write `import React from "react"`** — there is no
 bundler. The `react`/`react-dom` entries in [package.json](package.json) are *not* the runtime;
-to change versions, replace the files in [vendor/](vendor/).
+to change versions, replace the files in [extension/vendor/](extension/vendor/).
 
 **React 16.0.0 is old.** No hooks (16.8), no `createContext`/`forwardRef` (16.3), no
 `memo`/`lazy`/`Suspense` (16.6), no Fragments or `<>` (16.2), no `createRoot` (18). Use class
@@ -528,11 +529,11 @@ rather than growing a second copy — and still loads when that core is absent.
 **Service worker lives at `dist/src/background.js`** (not the dist root) so its relative ESM imports
 of `./queue-db.js`, `./db.js` and `./applicant-db.js` resolve.
 
-**Build ID `2026-08-03-react-v3.7.8` must match in 5 places:** [content.js](content.js),
-[connections.js](connections.js), [background.ts](src/background.ts),
+**Build ID `2026-08-03-react-v3.7.8` must match in 5 places:** [content.js](extension/content-scripts/content.js),
+[connections.js](extension/content-scripts/connections.js), [background.ts](src/background.ts),
 [popup.tsx](src/react/popup.tsx) (`EXPECTED_BUILD_ID`), and [build.mjs](scripts/build.mjs). The popup
 and the service worker both refuse a content script whose `PV_PING` build ID differs, then re-inject.
-[applicants.js](applicants.js) carries the same id and answers `PV_APPLICANT_PING`, so the two
+[applicants.js](extension/content-scripts/applicants.js) carries the same id and answers `PV_APPLICANT_PING`, so the two
 surfaces are never mistaken for one another and re-injected on top of a live run.
 
 **Messages** are declared in [src/messages.ts](src/messages.ts). Profile page: `PV_PING`,
@@ -577,7 +578,7 @@ sibling metadata spans into one line when the separator span does not render, pr
 and `isSkillValue()` ([extraction-core.js](src/extraction-core.js)) are applied at parse time, at
 grouping time, **and** inside `createProfileAccumulator()`, so no path can store an employment type or
 a duration as a company or a role title. Skills come from the card's heading (`entityHeadingText()` in
-[content.js](content.js)), never the container's `innerText` — that is what saved `Endorse` and
+[content.js](extension/content-scripts/content.js)), never the container's `innerText` — that is what saved `Endorse` and
 `Associate Software Engineer at TechMatrix Consulting Endorse` as skills.
 
 **The record, in table order** (`PROFILE_FIELDS` in [profile-utils.js](src/profile-utils.js)):
@@ -762,7 +763,7 @@ on disk.
   `fetchedResumeDocumentUrl` can never see a document request again. Every applicant after that is
   `no-document-url` → `link_only`: a link, a file name, and no file, silently, because `link_only`
   is a legitimate outcome for an applicant whose resume genuinely has no address.
-  `watchResumeRequests()` ([applicants.js](applicants.js)) is a `PerformanceObserver`, which is not
+  `watchResumeRequests()` ([applicants.js](extension/content-scripts/applicants.js)) is a `PerformanceObserver`, which is not
   subject to that buffer at all — entries are delivered as they are created — so it cannot stop
   working however long the run goes on. It is still an *observation of what the page did*, and
   `isResumeDocumentUrl()` still decides, so it can no more return a route than the sweep can.
@@ -1016,7 +1017,7 @@ instant it is asked. That answers neither question it was being used for.
   that point, because `growApplicantList` only ever scrolls **down**. The pager was then pressed with
   part of the page never opened, and nothing anywhere noticed.
 
-So the page is settled before anybody on it is opened. `sweepCurrentPage()` ([applicants.js](applicants.js))
+So the page is settled before anybody on it is opened. `sweepCurrentPage()` ([applicants.js](extension/content-scripts/applicants.js))
 scrolls the page from the **top** to a confirmed bottom, feeding `Applicants.createApplicantRoster()`
 ([applicants-core.js](src/applicants-core.js)) on every pass, and hands the list back at its top so
 the page starts at its first row. After it, the roster **is** the page: `roster.next(processed)` is
@@ -1088,7 +1089,7 @@ for two readers to disagree about where a section was.
 `current_role`, `current_company` and the resume were still empty on every row. Every position-based
 walk in this codebase depends on having named the one container that scrolls, and getting it wrong is
 **silent** — the walk runs, the position never moves, the first read is already the bottom.
-**`revealPanelContent()`** ([applicants.js](applicants.js)) does not need to know: it drags the bottom
+**`revealPanelContent()`** ([applicants.js](extension/content-scripts/applicants.js)) does not need to know: it drags the bottom
 of the panel into view with `scrollIntoView`, and the browser scrolls every scrollable ancestor the
 element needs. Bounded by `REVEAL_MAX_PASSES` (40) and `REVEAL_QUIET_PASSES` (3) on the same
 "growth means new content, never a scroll that happened" rule discovery uses, stoppable at every pass,
@@ -1343,7 +1344,7 @@ does **not** use `runImport`, which is shared with Start Collecting and Collect 
 `window.close()` does not tear the document down synchronously.
 
 **Contact details are accumulated, not read once.** `collectRenderedContacts()` and
-`collectFeaturedDocuments()` ([content.js](content.js)) run on **every** snapshot of the scan and feed
+`collectFeaturedDocuments()` ([content.js](extension/content-scripts/content.js)) run on **every** snapshot of the scan and feed
 `addContactPanel()` on the merge-only accumulator, so an address that hydrates late — or a top card
 that is recycled out of the DOM as the scan passes it — is still captured. `emails`/`phones`/`cvLinks`
 counts are part of `signature()`, so a contact detail arriving late **restarts** the quiet count
@@ -1592,7 +1593,7 @@ confirm coverage.
 growth / paginate / done, and `Core.nextScanStep()` ([extraction-core.js](src/extraction-core.js))
 walks a profile page. Neither touches the DOM, so both are tested against simulated pages in
 [tests/connections-discovery.test.js](tests/connections-discovery.test.js). Keep new discovery logic
-there rather than in [connections.js](connections.js) or [content.js](content.js) — there is no jsdom
+there rather than in [connections.js](extension/content-scripts/connections.js) or [content.js](extension/content-scripts/content.js) — there is no jsdom
 in this repo, so DOM-resident logic cannot be tested at all.
 
 Three traps that caused the "only 10 connections" bug and must not come back:
@@ -1647,7 +1648,7 @@ modal opened mid-scan would stop the lazy walk dead, so a test asserts the order
 | Object URLs revoked on a fixed 15 s timer; slow save dialogs can fail | [csv.js](src/csv.js) |
 | `chrome.storage.local` build keys are written but never read | [background.ts](src/background.ts) |
 | `tests/fixtures/*.html` are **not** run by `npm test` — manual browser pages only | [tests/fixtures/](tests/fixtures/) |
-| Pagination labels and the connections-total selector are **assumptions** until checked live | [connections.js](connections.js) |
+| Pagination labels and the connections-total selector are **assumptions** until checked live | [connections.js](extension/content-scripts/connections.js) |
 
 **Live-layout limitation:** LinkedIn changes its DOM per account. Passing fixtures and unit tests does
 **not** prove live correctness — loading `dist/` in Chrome is a user-browser step (phase 30). Never
@@ -1655,17 +1656,17 @@ claim live success without it.
 
 ## Companion docs
 
-Keep in sync: [WORKFLOW.md](WORKFLOW.md) (how a change is investigated, made, checked and saved —
-the working method these rules produce), [AGENTS.md](AGENTS.md), [TECH_STACK.md](TECH_STACK.md) (with
-[package.json](package.json)), [MEMORY.md](MEMORY.md), [CHECKS.md](CHECKS.md) (**real results only**),
-[PHASES.md](PHASES.md), [PROJECT_STATUS.md](PROJECT_STATUS.md), [CHANGELOG.md](CHANGELOG.md),
-[SKILLS.md](SKILLS.md), [README.md](README.md), [INSTALL.md](INSTALL.md) (what ships inside the
+Keep in sync: [WORKFLOW.md](docs/WORKFLOW.md) (how a change is investigated, made, checked and saved —
+the working method these rules produce), [AGENTS.md](AGENTS.md), [TECH_STACK.md](docs/TECH_STACK.md) (with
+[package.json](package.json)), [MEMORY.md](docs/MEMORY.md), [CHECKS.md](docs/CHECKS.md) (**real results only**),
+[PHASES.md](docs/PHASES.md), [PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [CHANGELOG.md](docs/CHANGELOG.md),
+[SKILLS.md](docs/SKILLS.md), [README.md](README.md), [INSTALL.md](docs/INSTALL.md) (what ships inside the
 installer — it must account for every host permission the manifest asks for, and a test in
 [tests/packaging.test.js](tests/packaging.test.js) fails when a new one is added without explaining
 it there).
 
 **Not binding, and deliberately outside that list:**
-[COMPLETE_EXTRACTION_SPEC.md](COMPLETE_EXTRACTION_SPEC.md) — the proposed target state, in which a
+[COMPLETE_EXTRACTION_SPEC.md](docs/COMPLETE_EXTRACTION_SPEC.md) — the proposed target state, in which a
 value is read from the record the page already holds rather than only from what it painted. It
 proposes amending the "only visibly rendered" preamble and rules 6, 9, 10, 11 and 12a. **Every rule
 above stays in force exactly as written until such an amendment lands in its own task**; the spec

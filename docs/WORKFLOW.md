@@ -1,8 +1,8 @@
 # WORKFLOW.md — how work is done on this project
 
 How every change to Profile Vault is investigated, made, checked and saved. The binding rules live in
-[CLAUDE.md](CLAUDE.md) ("READ FIRST") and
-[project-time-machine/docs/AGENTS.md](project-time-machine/docs/AGENTS.md); this file is the working
+[CLAUDE.md](../CLAUDE.md) ("READ FIRST") and
+[project-time-machine/docs/AGENTS.md](../project-time-machine/docs/AGENTS.md); this file is the working
 method those rules produce, written out so it can be followed or audited without reading either.
 
 ---
@@ -263,7 +263,7 @@ attached to the change forever rather than scrolling away in a conversation.
 
 ## Companion docs
 
-[CLAUDE.md](CLAUDE.md) · [AGENTS.md](AGENTS.md) · [CHECKS.md](CHECKS.md) ·
+[CLAUDE.md](../CLAUDE.md) · [AGENTS.md](../AGENTS.md) · [CHECKS.md](CHECKS.md) ·
 [CHANGELOG.md](CHANGELOG.md) · [MEMORY.md](MEMORY.md) · [TECH_STACK.md](TECH_STACK.md) ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) · [PHASES.md](PHASES.md) · [SKILLS.md](SKILLS.md) ·
-[README.md](README.md)
+[README.md](../README.md)

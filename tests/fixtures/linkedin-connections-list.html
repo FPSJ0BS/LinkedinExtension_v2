@@ -77,7 +77,7 @@
   history.replaceState({}, '', '/mynetwork/invite-connect/connections/');
 </script>
 <script src="../../src/connections-core.js"></script>
-<script src="../../connections.js"></script>
+<script src="../../extension/content-scripts/connections.js"></script>
 <script>
   // Discovery is resumable: each call runs one pass from the supplied cursor.
   messageHandler({ type: "PV_DISCOVER_CONNECTIONS", options: { cursorY: 0 } }, {}, (first) => {

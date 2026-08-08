@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const extensionDir = path.join(root, "extension");
 const buildDir = path.join(root, ".build");
 const distDir = path.join(root, "dist");
 
@@ -22,26 +23,26 @@ await mkdir(distDir, { recursive: true });
 // of ./queue-db.js, ./db.js and ./messages.js resolve at runtime.
 await cp(path.join(buildDir, "src"), path.join(distDir, "src"), { recursive: true });
 
-for (const file of [
-  "manifest.json",
-  "popup.html",
-  "dashboard.html",
-  "import.html",
-  "applicants.html",
-  // The shared visual layer, loaded first by all four pages.
-  "theme.css",
-  "popup.css",
-  "dashboard.css",
-  "import.css",
-  "applicants.css",
-  "content.js",
-  "connections.js",
-  "applicants.js"
+for (const [source, destination] of [
+  ["manifest.json", "manifest.json"],
+  ["pages/popup.html", "popup.html"],
+  ["pages/dashboard.html", "dashboard.html"],
+  ["pages/import.html", "import.html"],
+  ["pages/applicants.html", "applicants.html"],
+  // The shared visual layer is still emitted first for all four pages.
+  ["styles/theme.css", "theme.css"],
+  ["styles/popup.css", "popup.css"],
+  ["styles/dashboard.css", "dashboard.css"],
+  ["styles/import.css", "import.css"],
+  ["styles/applicants.css", "applicants.css"],
+  ["content-scripts/content.js", "content.js"],
+  ["content-scripts/connections.js", "connections.js"],
+  ["content-scripts/applicants.js", "applicants.js"]
 ]) {
-  await cp(path.join(root, file), path.join(distDir, file));
+  await cp(path.join(extensionDir, source), path.join(distDir, destination));
 }
-await cp(path.join(root, "icons"), path.join(distDir, "icons"), { recursive: true });
-await cp(path.join(root, "vendor"), path.join(distDir, "vendor"), { recursive: true });
+await cp(path.join(extensionDir, "icons"), path.join(distDir, "icons"), { recursive: true });
+await cp(path.join(extensionDir, "vendor"), path.join(distDir, "vendor"), { recursive: true });
 
 const buildMeta = {
   version: "3.7.8",

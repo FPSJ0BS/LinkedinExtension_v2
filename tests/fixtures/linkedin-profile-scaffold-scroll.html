@@ -107,7 +107,7 @@
 </script>
 <script src="../../src/extraction-core.js"></script>
 <script src="../../src/connections-core.js"></script>
-<script src="../../content.js"></script>
+<script src="../../extension/content-scripts/content.js"></script>
 <script>
   messageHandler({ type: "PV_EXTRACT", options: { lazyScroll: true } }, {}, (response) => {
     document.body.dataset.result = btoa(unescape(encodeURIComponent(JSON.stringify(response))));

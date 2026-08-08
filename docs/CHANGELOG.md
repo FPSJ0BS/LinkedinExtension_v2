@@ -100,9 +100,9 @@ not done. A bottom pass costs about seven steps at worst (two quiet reads, a pag
 resets the count, then five more), and the test asserts the *relationship*, not the number.
 
 Nothing else moved. `HANDOVER_PENDING_ROWS` (25), the drain loop, its bounds, the state machine, the
-two-tab rule and the pacing are all unchanged. Files: [src/background.ts](src/background.ts),
-[tests/collector-workflow.test.js](tests/collector-workflow.test.js) (two new tests),
-[CLAUDE.md](CLAUDE.md).
+two-tab rule and the pacing are all unchanged. Files: [src/background.ts](../src/background.ts),
+[tests/collector-workflow.test.js](../tests/collector-workflow.test.js) (two new tests),
+[CLAUDE.md](../CLAUDE.md).
 
 ## 3.7.19 — the list and the profiles are collected together, not one after the other
 
@@ -265,7 +265,7 @@ application that was *asked for*, so a scan that read the wrong panel writes the
 the right key. That is not a duplicate key, and no store-side reconciliation can see it. The fix has
 to be that the wrong panel is never read.
 
-`panelAlreadyShowing()` ([applicants.js](applicants.js)) makes the address bar a **hint** — a row it
+`panelAlreadyShowing()` ([applicants.js](../extension/content-scripts/applicants.js)) makes the address bar a **hint** — a row it
 does not even claim is certainly not open, so the question is worth asking at all — and the panel the
 **answer**. The claim is accepted only once `describeApplicantArrival` says the panel itself is
 showing this applicant, through the same verdict the click path waits on. A panel positively showing
@@ -343,7 +343,7 @@ every one of them is inside `waitFor`, inside `waitForDomQuiet`, or is one of th
 `wait(LIST_PROFILE_PACE_MS)` call sites. No extraction rule, no click, no record field, no message,
 no control.
 
-**The waste it removes.** Every quiet window in [applicants.js](applicants.js) is a guess about a
+**The waste it removes.** Every quiet window in [applicants.js](../extension/content-scripts/applicants.js) is a guess about a
 page nobody measured, and it has to be a pessimistic one, because it is chosen once — in the source —
 for a panel that might be halfway through hydrating. So a recruiter whose machine and connection
 render an applicant instantly pays the struggling machine's 320 ms on every pass, of every walk, of
@@ -800,7 +800,7 @@ missing. Built once, after the walk, because it reads `innerText` page-wide.
 
 `resume_file`, `resume_status`, `resume_link`, `resume_viewer`, `resume_saved_as` — five cells
 answering one question, and a table nobody can read across. **This is a deliberate removal**, stated
-in [applicant-csv.js](src/applicant-csv.js)'s header, and from here the usual rule resumes: append
+in [applicant-csv.js](../src/applicant-csv.js)'s header, and from here the usual rule resumes: append
 columns, never reorder.
 
 - **`resume_link` is where to click.** The document address when the page rendered one, the LinkedIn
@@ -841,7 +841,7 @@ holds the standing instruction (`PV_APPLICANT_AUTO_RUN`).
   toolbar, because it is the one thing that happens without a button being pressed.
 
 Version and build id `2026-08-02-react-v3.7.6` in all five places plus the manifest and
-[package.json](package.json).
+[package.json](../package.json).
 
 ## 3.7.5 — An applicant command takes you to the page
 
@@ -932,7 +932,7 @@ and the file link was never visible next to it.
 
 `resume_viewer` and `resume_saved_as` were moved **up** from the detail block into
 `APPLICANT_TABLE_COLUMNS`. That is a **deliberate reorder** of the applicant export, stated as one in
-[applicant-csv.js](src/applicant-csv.js), and the only one planned: "did we get the CV" and "where do
+[applicant-csv.js](../src/applicant-csv.js), and the only one planned: "did we get the CV" and "where do
 I click to read it" are different questions, and the answer to the second exists on almost every
 applicant even when the first is empty. From here the usual rule applies again — append columns, never
 reorder.
@@ -1468,7 +1468,7 @@ LinkedIn from here.
   `document.visibilityState`, listen for `visibilitychange`, and abort with `hidden: true` (and
   `atBottom: false`) instead of concluding anything. The worker pauses with `paused_visibility`,
   saves nothing partial, and resumes by itself on the next heartbeat once the page is renderable.
-- **Deterministic state machine** (`COLLECTION_STATE` in [import-queue-core.js](src/import-queue-core.js)):
+- **Deterministic state machine** (`COLLECTION_STATE` in [import-queue-core.js](../src/import-queue-core.js)):
   idle → navigating_to_connections → discovering → reconciling → ready_to_extract → extracting →
   completed / completed_with_gap, plus paused_visibility, paused_challenge, stopped and failed.
   `transitionCollection()` refuses illegal and repeat moves, so a service-worker wake-up cannot start
@@ -1479,7 +1479,7 @@ LinkedIn from here.
 - **Bounded discovery.** `MAX_FRUITLESS_PAGINATION` (3) retires a control that keeps revealing
   nothing; `MAX_FRUITLESS_DISCOVERY` (3) bounds the drain loop; a pagination click is no longer
   counted as growth.
-- **Parser field boundaries** in [extraction-core.js](src/extraction-core.js): `stripEntityMeta()`,
+- **Parser field boundaries** in [extraction-core.js](../src/extraction-core.js): `stripEntityMeta()`,
   `sanitizeCompanyName()`, `sanitizeRoleTitle()`, `isEmploymentMeta()`, `isSkillValue()`. Applied at
   parse time, at grouping time, and again inside the accumulator, so employment metadata cannot
   become a company or a role title by any path. Skills are read from the card's heading
@@ -1595,12 +1595,12 @@ planners, pagination policy — was already correct and never got the chance to 
 ### Fixed
 
 - **Scroll-container detection is now a pure, tested function.** `Core.chooseScrollTarget()`
-  ([connections-core.js](src/connections-core.js)) scores candidate descriptors and requires a real
+  ([connections-core.js](../src/connections-core.js)) scores candidate descriptors and requires a real
   scroll range, a scrolling overflow, and that the container *actually holds the content being read* —
   which disqualifies the filter-panel decoy outright. `document.scrollingElement` wins ties; the
   outermost qualifying container beats an inner one.
-- **Both content scripts feed it ancestors.** `scrollCandidates()` in [connections.js](connections.js)
-  and [content.js](content.js) offers the document, every ancestor of the list/profile root, and the
+- **Both content scripts feed it ancestors.** `scrollCandidates()` in [connections.js](../extension/content-scripts/connections.js)
+  and [content.js](../extension/content-scripts/content.js) offers the document, every ancestor of the list/profile root, and the
   root itself. Scrollable descendants are a last resort, only when nothing above qualifies.
 - **Position, bottom, and stepping all read the same element.** `currentScrollTop()` /`maxScrollTop()`
   no longer take `Math.max` across two different scrollers, which produced a cursor belonging to
@@ -1613,7 +1613,7 @@ planners, pagination policy — was already correct and never got the chance to 
 
 ### Added
 
-- **`Core.createProfileAccumulator()`** in [extraction-core.js](src/extraction-core.js): the pure,
+- **`Core.createProfileAccumulator()`** in [extraction-core.js](../src/extraction-core.js): the pure,
   merge-only profile accumulator, keyed exactly as required — experience by canonical company URL +
   normalized title + date range, education by institution + degree + dates, skills by lowercase name,
   certifications by name + issuer + issue date. One education card per institution
@@ -1624,7 +1624,7 @@ planners, pagination policy — was already correct and never got the chance to 
 - **Live diagnostics.** Both content scripts build a diagnostics report (detected containers, scroll
   metrics, per-scan card/link/new-URL counts, mutations, quiet scans, pagination control, advertised
   total, stop reason; plus section headings and per-entity deltas on the profile side). **Download
-  Diagnostics** on [import.html](import.html) saves it as JSON via `PV_IMPORT_DIAGNOSTICS`.
+  Diagnostics** on [import.html](../extension/pages/import.html) saves it as JSON via `PV_IMPORT_DIAGNOSTICS`.
 - `tests/lazy-dom-regression.test.js` (35 tests) and two sanitized fixtures reproducing the live
   scaffold layout: `linkedin-connections-virtualized-35.html`, `linkedin-profile-scaffold-scroll.html`.
 

@@ -14,8 +14,9 @@ binding version of these rules is the **READ FIRST** section at the top of
 
 **Amended in 3.5.0, 3.6.0 and 3.7.0, and easy to get wrong from memory:**
 
-- There are **three surfaces**, not two: profile pages (`content.js`), the connections list
-  (`connections.js`), and — since 3.7.0 — the recruiter hiring pages (`applicants.js`, matching
+- There are **three surfaces**, not two: profile pages (`extension/content-scripts/content.js`), the
+  connections list (`extension/content-scripts/connections.js`), and — since 3.7.0 — the recruiter
+  hiring pages (`extension/content-scripts/applicants.js`, matching
   `linkedin.com/hiring/*` and `/talent/*`). The applicant record is a **separate record in a separate
   store** and is never a saved profile.
 - The run uses **two reused tabs of the user's own window**, not a separate collector window. Every
@@ -54,12 +55,14 @@ dashboard, accessibility, and status messaging. Must not reintroduce root-level 
 scripts, and must not use React hooks — the vendored runtime is React 16.0.0.
 
 ## DOM extraction specialist
-Works only on evidence-backed LinkedIn extraction issues in `content.js` and `src/extraction-core.js`.
+Works only on evidence-backed LinkedIn extraction issues in `extension/content-scripts/content.js`
+and `src/extraction-core.js`.
 Creates a failing sanitized fixture before selector changes and prevents sidebar/accessibility
 contamination. Does not place extraction logic inside React components.
 
 ## Connections import specialist
-Owns `connections.js`, `src/connections-core.js`, `src/import-queue-core.js`, `src/queue-db.js`, and
+Owns `extension/content-scripts/connections.js`, `src/connections-core.js`,
+`src/import-queue-core.js`, `src/queue-db.js`, and
 the orchestration half of `src/background.ts`. Responsible for resumable multi-pass discovery, canonicalization
 and deduplication, allowlisted pagination, one-at-a-time processing in a single reusable tab,
 pause/resume/stop semantics, batch caps and cooldowns, bounded retries with backoff, and challenge
@@ -67,8 +70,9 @@ detection. Must never click a non-allowlisted control, run profiles in parallel,
 or attempt to work around a challenge or restriction.
 
 ## Applicant collector specialist
-Owns `applicants.js`, `src/applicants-core.js`, `src/applicant-db.js`, `src/applicant-csv.js`, the
-applicants page, and the applicant half of `src/background.ts`. Responsible for the hiring URL
+Owns `extension/content-scripts/applicants.js`, `src/applicants-core.js`, `src/applicant-db.js`,
+`src/applicant-csv.js`, the applicants page, and the applicant half of `src/background.ts`.
+Responsible for the hiring URL
 context, the four gated controls, the qualification and screening verdicts recorded exactly as the
 platform displayed them, resume handling and its duplicate guard, and the merge-only accumulator.
 Must never invent a value where the panel showed none, never click an ATS action (Shortlist, Move to,

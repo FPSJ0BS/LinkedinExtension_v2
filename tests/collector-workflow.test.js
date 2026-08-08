@@ -214,7 +214,7 @@ test("with no advertised total the report still explains what was collected", ()
 });
 
 test("the connections script tallies every rendered card through the tested ledger", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /Core\.createCardLedger\(\)/, "card counting must use the tested pure ledger");
   assert.match(source, /Core\.reconcileDiscovery\(/, "the pass must report reconciled counts");
   assert.match(source, /function tallyCards/, "every card must be tallied, not just the working ones");
@@ -225,7 +225,7 @@ test("the connections script tallies every rendered card through the tested ledg
 });
 
 test("both content scripts answer the session check without touching a credential", async () => {
-  for (const file of ["connections.js", "content.js"]) {
+  for (const file of ["extension/content-scripts/connections.js", "extension/content-scripts/content.js"]) {
     const source = await readFile(resolve(root, file), "utf8");
     assert.match(source, /message\?\.type === "PV_CHECK_LOGIN"/, `${file} must answer the session check`);
     assert.match(source, /classifyAuthState\(/, `${file} must use the tested classifier`);
@@ -239,7 +239,11 @@ test("the 67-card reconciliation fixture exists for the manual browser check", a
   assert.match(html, /id="scaffold"/, "the fixture must reproduce the wrapper-scrolling layout");
   assert.match(html, /people-filter/, "the decoy scrollable panel must be present");
   assert.match(html, /LinkedIn Member/, "the restricted card must be rendered");
-  assert.match(html, /src="\.\.\/\.\.\/connections\.js"/, "the fixture must exercise the real content script");
+  assert.match(
+    html,
+    /src="\.\.\/\.\.\/extension\/content-scripts\/connections\.js"/,
+    "the fixture must exercise the real content script"
+  );
 });
 
 // ===========================================================================

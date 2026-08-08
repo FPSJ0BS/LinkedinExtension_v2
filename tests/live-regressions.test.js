@@ -334,7 +334,7 @@ test("a visibility pause resumes by itself once the page is visible again", () =
 });
 
 test("a hidden page is never treated as fully discovered or extracted", async () => {
-  for (const file of ["connections.js", "content.js"]) {
+  for (const file of ["extension/content-scripts/connections.js", "extension/content-scripts/content.js"]) {
     const source = await readFile(resolve(root, file), "utf8");
     assert.match(source, /document\.visibilityState === "visible"/, `${file} must check page visibility`);
     assert.match(source, /addEventListener\("visibilitychange"/, `${file} must react to the page being hidden`);
@@ -342,13 +342,13 @@ test("a hidden page is never treated as fully discovered or extracted", async ()
   }
 
   // Discovery reports a hidden page as an interruption, never as the list's end.
-  const connections = await readFile(resolve(root, "connections.js"), "utf8");
+  const connections = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(connections, /hidden: true,\s*\n\s*visibilityState/, "a hidden pass must be flagged");
   const hiddenReturns = [...connections.matchAll(/hidden: true[\s\S]{0,320}?atBottom: false/g)];
   assert.ok(hiddenReturns.length >= 2, "every hidden exit must report atBottom: false so it cannot read as finished");
 
   // Extraction aborts before a profile is ever assembled.
-  const content = await readFile(resolve(root, "content.js"), "utf8");
+  const content = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   assert.match(content, /function hiddenPageError/, "a hidden page must abort the scan");
   const scanAbort = content.indexOf("if (!isPageVisible() || state.wentHidden) throw hiddenPageError();");
   const profileBuild = content.indexOf("const profile = {");

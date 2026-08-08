@@ -1,6 +1,6 @@
 # COMPLETE_EXTRACTION_SPEC.md — collect the record the page holds, not only the part it painted
 
-**Status: proposal. Not binding.** [CLAUDE.md](CLAUDE.md) is still the binding
+**Status: proposal. Not binding.** [CLAUDE.md](../CLAUDE.md) is still the binding
 rulebook, including the sentence that says this extension extracts *only visibly
 rendered* data. Nothing in this document is in force until the rules it names in
 "Rules that must be amended" are actually amended, each in its own task. This
@@ -49,7 +49,7 @@ That is not four bad parsers. It is one architecture. Today a value must survive
 1. its section must be *found* (heading wording, root bounding, panel resolution),
 2. it must be *revealed* (the right scroller, enough passes, the right ancestor),
 3. it must be *expanded* (an expander found, allowed, clicked, within budget),
-4. it must be *visible* (`isVisible`, [applicants.js:220](applicants.js#L220) — 25 read sites gate on it),
+4. it must be *visible* (`isVisible`, [applicants.js:220](../extension/content-scripts/applicants.js#L220) — 25 read sites gate on it),
 5. it must be read as `innerText`, which returns nothing for a `display:none` subtree.
 
 Five chances to lose a value the page already had in hand. The parser is the one
@@ -61,7 +61,7 @@ Machinery that exists **solely** to make something visible enough to read —
 none of it is parsing:
 
 - `isVisible()` and `isExcludedContext()`; 25 gated read sites in
-  [applicants.js](applicants.js) alone.
+  [applicants.js](../extension/content-scripts/applicants.js) alone.
 - `revealPanelContent()` with `REVEAL_MAX_PASSES` (40) and `REVEAL_QUIET_PASSES` (3).
 - `chooseColumnScrollTarget()`, `chooseScrollTarget()`, `scrollCandidates()`,
   `maxScrollPosition()`, `viewportOf()`, `livePanel()`, plus the scroll-position
@@ -100,8 +100,8 @@ which observes *that* a request happened, never its body).
 
 **Nothing in the codebase parses an embedded payload today.** A grep for
 `application/ld+json`, `JSON.parse` of a page node, or a hydration global across
-[content.js](content.js), [connections.js](connections.js),
-[applicants.js](applicants.js) and [src/](src/) returns nothing in the extraction
+[content.js](../extension/content-scripts/content.js), [connections.js](../extension/content-scripts/connections.js),
+[applicants.js](../extension/content-scripts/applicants.js) and [src/](../src/) returns nothing in the extraction
 path. Rank 1 is not a refinement of what exists; it does not exist.
 
 ### 3.2 The layers, in the order they should ship
@@ -210,7 +210,7 @@ Each is its own task. None is assumed by this document.
 | **12a** (a hidden collector page is never a finished one) | Narrows to: *a hidden page may not be **walked**, and a walk's completion signal is never valid while hidden.* A payload read is exempt, because it has no completion-by-quiescence semantics. The pause/resume machinery stays for the DOM path. |
 | **16 / applicant CSV** | Only if §8's open decision 1 is answered "add fields". Otherwise untouched — **append columns; never reorder** still holds. |
 | **17, 18, 19** (verification) | Unchanged. |
-| [manifest.json](manifest.json) description, [README.md](README.md) | Reworded to match the amended preamble, in the same task as the preamble. |
+| [manifest.json](../extension/manifest.json) description, [README.md](../README.md) | Reworded to match the amended preamble, in the same task as the preamble. |
 
 ---
 
@@ -330,11 +330,11 @@ One task per layer, each independently reversible, in this order:
 | Task | Scope | Ships when |
 |---|---|---|
 | Amend the preamble, rule 6's clarifying sentence, manifest and README | docs + manifest text only | first, so the code that follows is not in violation of its own rulebook |
-| **L0** — split `isVisible()` into `isReadable()` / `isClickable()` | [applicants.js](applicants.js), then [content.js](content.js) | after the amendment |
-| **L1** — `textContent`-based section reads; demote the expander pass | [applicants.js](applicants.js), `buildSectionMap()` | after L0 |
-| **L2** — payload source + per-source provenance verdicts + `source` on every stored field | [src/applicants-core.js](src/applicants-core.js) (pure), adapter in [applicants.js](applicants.js) | after L1, and after open decision 1 |
+| **L0** — split `isVisible()` into `isReadable()` / `isClickable()` | [applicants.js](../extension/content-scripts/applicants.js), then [content.js](../extension/content-scripts/content.js) | after the amendment |
+| **L1** — `textContent`-based section reads; demote the expander pass | [applicants.js](../extension/content-scripts/applicants.js), `buildSectionMap()` | after L0 |
+| **L2** — payload source + per-source provenance verdicts + `source` on every stored field | [src/applicants-core.js](../src/applicants-core.js) (pure), adapter in [applicants.js](../extension/content-scripts/applicants.js) | after L1, and after open decision 1 |
 | **L3** — fetched-response source, with the mandatory `since` floor and entity match | as L2 | only if open decision 2 says yes |
-| **L4** — list completeness from the payload; retire the pager walk | [applicants.js](applicants.js), rule 9h | last, and only after L2/L3 are live-verified |
+| **L4** — list completeness from the payload; retire the pager walk | [applicants.js](../extension/content-scripts/applicants.js), rule 9h | last, and only after L2/L3 are live-verified |
 
 Each task runs `npm run check` and records the real result in
 [CHECKS.md](CHECKS.md). No live claim without a live run (rule 17).
@@ -344,7 +344,7 @@ Each task runs `npm run check` and records the real result in
 ## 11. Companion documents
 
 This is a target-state proposal. The binding documents remain
-[CLAUDE.md](CLAUDE.md) (rules), [WORKFLOW.md](WORKFLOW.md) (method),
+[CLAUDE.md](../CLAUDE.md) (rules), [WORKFLOW.md](WORKFLOW.md) (method),
 [CHECKS.md](CHECKS.md) (real results only), [PHASES.md](PHASES.md),
 [PROJECT_STATUS.md](PROJECT_STATUS.md) and [CHANGELOG.md](CHANGELOG.md). When a
 layer here is accepted, the amendment lands in CLAUDE.md **in its own task** and

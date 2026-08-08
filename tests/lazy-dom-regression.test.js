@@ -820,7 +820,7 @@ test("discovery diagnostics can distinguish every candidate failure mode", () =>
 });
 
 test("the content scripts expose the diagnostics the requirement lists", async () => {
-  const connections = await readFile(resolve(root, "connections.js"), "utf8");
+  const connections = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   for (const field of [
     "resultsContainer", "scrollContainer", "scrollTop", "clientHeight", "scrollHeight",
     "visibleCards", "linksInScan", "newUrls", "totalUrls", "mutations",
@@ -829,7 +829,7 @@ test("the content scripts expose the diagnostics the requirement lists", async (
     assert.ok(connections.includes(field), `connections.js diagnostics must report ${field}`);
   }
 
-  const profile = await readFile(resolve(root, "content.js"), "utf8");
+  const profile = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   for (const field of [
     "profileRoot", "scrollContainer", "scrollStep", "sectionHeadings",
     "newExperience", "newEducation", "newSkills", "newCertifications",
@@ -844,7 +844,7 @@ test("the content scripts expose the diagnostics the requirement lists", async (
 // ===========================================================================
 
 test("the connections script drives the detected scroll container, not window.scrollY", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /Core\.chooseScrollTarget\(/, "the scroll container must come from the tested chooser");
   assert.match(source, /scrollCandidates/, "candidates must include ancestors, not just descendants");
   assert.ok(!/function innerScroller/.test(source), "the descendant-only heuristic must be gone");
@@ -856,7 +856,7 @@ test("the connections script drives the detected scroll container, not window.sc
 });
 
 test("the connections script streams new connections out during the pass", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /chrome\.runtime\.sendMessage/, "found connections must be reported before the pass ends");
   assert.match(source, /PV_IMPORT_DISCOVERY_PROGRESS/, "progress goes to the worker, which owns IndexedDB");
 
@@ -866,7 +866,7 @@ test("the connections script streams new connections out during the pass", async
 });
 
 test("the profile script drives the detected scroll container too", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   assert.match(source, /chooseScrollTarget\(/, "the profile scroll container must be detected, not assumed");
   assert.match(source, /createProfileAccumulator\(/, "sections must merge into the tested accumulator");
   assert.match(source, /Core\.nextScanStep\(/, "the scan must use the tested planner");
@@ -904,7 +904,7 @@ test("the sanitized live-layout fixtures exist for the manual browser check", as
 });
 
 test("the profile script clicks only its two gated controls and rejects non-profile context", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   // Exactly three clicks exist in the whole content script: the member's own
   // Contact info overlay, the Open to work card's own Show details, and the one
   // dismiss that closes whichever was opened. Anything else appearing here is a

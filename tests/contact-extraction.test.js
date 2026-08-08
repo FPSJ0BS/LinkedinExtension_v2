@@ -213,11 +213,11 @@ test("a panel the extension opened itself yields every address and number in it"
 });
 
 test("both content scripts mark their own opened panel as trusted", async () => {
-  const profile = await readFile(resolve(root, "content.js"), "utf8");
+  const profile = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const dialog = profile.slice(profile.indexOf("function readContactDialog"));
   assert.match(dialog.slice(0, dialog.indexOf("\n  }")), /trusted: true/, "the Contact info overlay is our own panel");
 
-  const applicants = await readFile(resolve(root, "applicants.js"), "utf8");
+  const applicants = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.match(applicants, /Core\.parseContactPanel\(\{ text, links, trusted: true \}\)/, "so is the applicant disclosure");
   assert.ok(!/already-visible/.test(applicants), "and it is opened on every applicant");
 });
@@ -818,7 +818,7 @@ test("a contact detail arriving late stops the scan settling too early", () => {
 // ===========================================================================
 
 test("profile extraction reads contact details on every snapshot, not once", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   assert.match(source, /collectRenderedContacts\(main, collector\)/, "contacts must be read every scan");
   assert.match(source, /collectFeaturedDocuments\(main, collector\)/, "so must CV documents");
   assert.match(source, /Core\.parseContactPanel\(/, "the panel parser must be the tested one");
@@ -827,7 +827,7 @@ test("profile extraction reads contact details on every snapshot, not once", asy
 });
 
 test("the rendered page is never swept for phone numbers, and never for other people", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const start = source.indexOf("function collectRenderedContacts");
   const body = source.slice(start, source.indexOf("\n  }", start));
   assert.match(body, /allow: \["email"\]/, "only an address may come from the rendered page's text");
@@ -894,7 +894,7 @@ test("the saved-profiles page repairs stored records and offers the shared-value
 });
 
 test("the contact overlay is opened after the page has settled, on every profile", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
 
   const start = source.indexOf("async function openContactInfoAndCollect");
   assert.ok(start > 0, "the overlay step must be its own function");
@@ -957,7 +957,7 @@ test("the contact overlay is opened after the page has settled, on every profile
 });
 
 test("profile extraction still clicks nothing else at all", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const clicks = source.match(/\.click\(\)/g) || [];
   // Three sites, and no more: the Contact info control, the Open to work card's
   // own Show details, and the one shared dismiss that closes either overlay.
@@ -968,7 +968,7 @@ test("profile extraction still clicks nothing else at all", async () => {
 });
 
 test("nothing is built until the page has been walked to the bottom and settled", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const extract = source.slice(source.indexOf("async function extractProfile"));
   const scanAt = extract.indexOf("await performLazyScrollAndCollect(main, collector, diagnostics)");
   const buildAt = extract.indexOf("const profile = {");
@@ -1131,7 +1131,7 @@ test("only the Open to work card's own Show details may be clicked", () => {
 });
 
 test("the open-to-work step is gated, waited for, and closed again", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const start = source.indexOf("async function openToWorkDetails");
   assert.ok(start > 0, "the open-to-work step must be its own function");
   const body = source.slice(start, source.indexOf("\n  function visibleBodyText", start));
@@ -1158,7 +1158,7 @@ test("the open-to-work step is gated, waited for, and closed again", async () =>
 });
 
 test("the extension still never touches a credential", async () => {
-  for (const file of ["content.js", "connections.js", "src/background.ts", "src/collector-tabs-core.js"]) {
+  for (const file of ["extension/content-scripts/content.js", "extension/content-scripts/connections.js", "src/background.ts", "src/collector-tabs-core.js"]) {
     const source = await readFile(resolve(root, file), "utf8");
     assert.ok(!/document\.cookie/.test(source), `${file} must never read cookies`);
     assert.ok(!/chrome\.cookies/.test(source), `${file} must never use the cookies API`);

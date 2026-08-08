@@ -231,8 +231,8 @@ verification) is **still open**, and it matters more than usual for this release
 was written against two screenshots and has never been run against a live recruiter account from
 here. See [CHECKS.md](CHECKS.md) for exactly what was and was not run.
 
-**A third surface.** `linkedin.com/hiring/*` and `/talent/*`. [applicants.js](applicants.js) is the
-framework-free adapter and [src/applicants-core.js](src/applicants-core.js) is the pure half; the
+**A third surface.** `linkedin.com/hiring/*` and `/talent/*`. [applicants.js](../extension/content-scripts/applicants.js) is the
+framework-free adapter and [src/applicants-core.js](../src/applicants-core.js) is the pure half; the
 record lives in its own IndexedDB store (schema v5) and is never a saved profile. An applicant is a
 person **on a job** — the same person applying to two jobs is two records. It opens no tab and
 navigates nowhere: it reads what the recruiter already has open.
@@ -341,7 +341,7 @@ Reported requirement, and what was done about each:
 
 | Requirement | Fix |
 |---|---|
-| One click must check login, redirect to Connections, discover everything, then extract | `startCollectingWorkflow()` in [background.ts](src/background.ts) does exactly that, in that order, detached from the message that started it so the popup and import page can close. A test asserts the ordering. |
+| One click must check login, redirect to Connections, discover everything, then extract | `startCollectingWorkflow()` in [background.ts](../src/background.ts) does exactly that, in that order, detached from the message that started it so the popup and import page can close. A test asserts the ordering. |
 | Never open multiple processing tabs | **Root cause:** `resolveConnectionsTab()` called `chrome.tabs.create()` for a connections tab unrelated to the stored import tab, so a run used two tabs. Now `ensureCollectorTab()` is the single creation site (one `chrome.windows.create`), and `chrome.tabs.create` no longer appears in the worker at all. |
 | Detect login; open LinkedIn's login page; never store credentials | `classifyAuthState()` (pure) reports Signed in / Login required / Checkpoint detected / Unknown; `Sign in to LinkedIn` only navigates to `https://www.linkedin.com/login`. A test greps every UI and content file for password inputs, `document.cookie`, and `chrome.cookies`. |
 | Explain 67 reported vs 66 collected | `createCardLedger()` + `reconcileDiscovery()` account for every rendered card as usable, duplicate link, or no-usable-link (restricted/deleted). Shown on the importer page; an unexplained remainder is stated explicitly. |

@@ -1,0 +1,315 @@
+{
+  "schema": 2,
+  "id": "TASK-0135",
+  "name": "Organize source and documentation folders",
+  "request": "Organize source and documentation folders",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T05:54:35.656Z",
+  "completedAt": "2026-08-08T06:03:27.958Z",
+  "startCommit": "1d951a3d41408de993946b89f22cfc2fd7020e41",
+  "gitRef": "task/TASK-0135",
+  "files": [
+    {
+      "change": "modified",
+      "path": "AGENTS.md"
+    },
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "renamed",
+      "path": "docs/CHANGELOG.md",
+      "from": "CHANGELOG.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/CHECKS.md",
+      "from": "CHECKS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/COMPLETE_EXTRACTION_SPEC.md",
+      "from": "COMPLETE_EXTRACTION_SPEC.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/INSTALL.md",
+      "from": "INSTALL.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/MEMORY.md",
+      "from": "MEMORY.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/PHASES.md",
+      "from": "PHASES.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/PROJECT_STATUS.md",
+      "from": "PROJECT_STATUS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "docs/README.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/SKILLS.md",
+      "from": "SKILLS.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/TECH_STACK.md",
+      "from": "TECH_STACK.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/VERIFICATION.md",
+      "from": "VERIFICATION.txt",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "docs/WORKFLOW.md",
+      "from": "WORKFLOW.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/content-scripts/applicants.js",
+      "from": "applicants.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/content-scripts/connections.js",
+      "from": "connections.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/content-scripts/content.js",
+      "from": "content.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/icons/icon128.png",
+      "from": "icons/icon128.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/icons/icon16.png",
+      "from": "icons/icon16.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/icons/icon32.png",
+      "from": "icons/icon32.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/icons/icon48.png",
+      "from": "icons/icon48.png",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/manifest.json",
+      "from": "manifest.json",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/pages/applicants.html",
+      "from": "applicants.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/pages/dashboard.html",
+      "from": "dashboard.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/pages/import.html",
+      "from": "import.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/pages/popup.html",
+      "from": "popup.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/styles/applicants.css",
+      "from": "applicants.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/styles/dashboard.css",
+      "from": "dashboard.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/styles/import.css",
+      "from": "import.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/styles/popup.css",
+      "from": "popup.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/styles/theme.css",
+      "from": "theme.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/vendor/react-dom.production.min.js",
+      "from": "vendor/react-dom.production.min.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "renamed",
+      "path": "extension/vendor/react.production.min.js",
+      "from": "vendor/react.production.min.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "added",
+      "path": "scripts/check-doc-links.mjs",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "scripts/package.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicant-csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/collector-workflow.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-challenge-captcha.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-connections-67.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-connections-list.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-connections-pagination.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-connections-virtualized-35.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-current-generic-div.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-profile-scaffold-scroll.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/fixtures/linkedin-virtualized-sections.html"
+    },
+    {
+      "change": "modified",
+      "path": "tests/import-integration.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/lazy-dom-regression.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/live-regressions.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/manifest.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/packaging.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/universal-stop.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 450 tests, docs link check, and build validation",
+    "node scripts/package.mjs passed: packaged 38 extension files",
+    "git diff --check passed",
+    "Verified 19 moved extension source and asset files are byte-identical"
+  ],
+  "result": "Grouped extension content scripts, pages, styles, icons, runtime assets and manifest under extension; moved supporting project documents under docs with an index and corrected links; updated build, packaging, fixtures and tests while preserving the emitted dist layout; added automated local Markdown link validation."
+}

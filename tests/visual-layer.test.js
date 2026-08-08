@@ -22,7 +22,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const read = (file) => readFile(resolve(root, file), "utf8");
+const sourcePath = (file) => file.endsWith(".css")
+  ? resolve(root, "extension", "styles", file)
+  : file.endsWith(".html")
+    ? resolve(root, "extension", "pages", file)
+    : resolve(root, file);
+const read = (file) => readFile(sourcePath(file), "utf8");
 
 const SHEETS = ["theme.css", "popup.css", "dashboard.css", "import.css", "applicants.css"];
 

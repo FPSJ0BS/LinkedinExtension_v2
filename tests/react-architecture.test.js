@@ -248,10 +248,10 @@ test("the connections import dashboard is a React TypeScript entry point", async
 });
 
 test("local React runtime is bundled for Manifest V3 CSP", async () => {
-  await access(resolve(root, "vendor/react.production.min.js"));
-  await access(resolve(root, "vendor/react-dom.production.min.js"));
+  await access(resolve(root, "extension/vendor/react.production.min.js"));
+  await access(resolve(root, "extension/vendor/react-dom.production.min.js"));
   for (const file of ["popup.html", "dashboard.html", "import.html"]) {
-    const html = await readFile(resolve(root, file), "utf8");
+    const html = await readFile(resolve(root, "extension/pages", file), "utf8");
     assert.match(html, /vendor\/react\.production\.min\.js/);
     assert.match(html, /vendor\/react-dom\.production\.min\.js/);
     assert.ok(!/src=["']https?:\/\//i.test(html), `${file} must not load a remote script`);

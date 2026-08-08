@@ -813,7 +813,7 @@ test("only a record carrying something counts as collected", () => {
 // held to their click budget.
 
 test("the applicants adapter clicks only its gated controls", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const clicks = source.match(/\.click\(\)/g) || [];
   // Six gated opens — contact, resume, a collapsed section, the next row, the
   // list's own next-page control (3.7.8, rule 9h) and the opened viewer's own
@@ -840,7 +840,7 @@ test("the applicants adapter clicks only its gated controls", async () => {
 });
 
 test("the applicants adapter stays framework-free and restores the scroll position", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.ok(!/\bReact\b/.test(withoutComments(source)), "no React in a content script");
   assert.match(source, /finally \{[\s\S]*?scrollPanelTo\(originalY, target\)/, "the panel must be handed back where it was");
   assert.match(source, /Applicants\.chooseColumnScrollTarget\?\.\(candidates\)/, "the column policy must pick the container");
@@ -900,7 +900,7 @@ test("the column that scrolls is the panel's own, never the page around it", () 
 });
 
 test("the panel is re-resolved and the whole column is walked, not one screenful", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // A detached node keeps answering `innerText` with what it held when it was
   // unmounted, so a scan that held one reference re-read its first screenful.
@@ -924,7 +924,7 @@ test("the panel is re-resolved and the whole column is walked, not one screenful
 });
 
 test("a scroll box inside the panel is offered as well as every ancestor", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const candidates = source.slice(source.indexOf("function scrollCandidates"), source.indexOf("/**\n   * The container that actually moves"));
 
   // Which side of the scroller `applicantPanel()` lands on is markup's choice.
@@ -936,7 +936,7 @@ test("a scroll box inside the panel is offered as well as every ancestor", async
 });
 
 test("the panel is walked to the bottom before any overlay is opened", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const extract = source.slice(source.indexOf("async function extractApplicant"));
   const scanAt = extract.indexOf("await scanApplicantPanel(");
   const contactAt = extract.indexOf("await openContactAndCollect(");
@@ -956,7 +956,7 @@ test("the panel is walked to the bottom before any overlay is opened", async () 
 });
 
 test("every loop in the applicants adapter can be stopped", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.match(source, /function assertRunnable\(/, "one place decides whether work may continue");
   assert.match(source, /if \(state\.aborted\) throw stoppedError\(\)/, "and Stop is the first thing it checks");
   assert.match(source, /PV_STOP_ALL/, "the universal Stop must reach this surface");
@@ -966,7 +966,7 @@ test("every loop in the applicants adapter can be stopped", async () => {
 });
 
 test("each finished applicant is persisted immediately, not at the end of the run", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.match(source, /type: "PV_APPLICANT_SAVE", record/, "records must stream to the worker as they finish");
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   assert.match(worker, /APPLICANT_MESSAGES\.SAVE/, "the worker must accept the streamed record");
@@ -981,7 +981,7 @@ test("the resume is fetched by the worker, only from LinkedIn, and only once", a
   assert.match(download, /await resumeAlreadyDownloaded\(url\)/, "an already-saved resume must not download twice");
   assert.match(download, /saveAs: false/, "a 600-applicant run must not ask 600 questions");
   assert.match(download, /conflictAction: "uniquify"/, "and two applicants' files must not collide");
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.ok(!/chrome\.downloads/.test(withoutComments(source)),
     "a content script has no downloads API and must not pretend to");
 
@@ -1072,7 +1072,7 @@ test("the worker names the file after the person and reports the file it wrote",
 });
 
 test("the resume is downloaded, not previewed, whenever the page already has the address", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
 
   // Rule 9e: a link needs no click at all. The recruiter asked for the file, so
@@ -1104,7 +1104,7 @@ test("the resume is downloaded, not previewed, whenever the page already has the
 });
 
 test("the detail panel can never be a container that holds the applicant list", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const panel = source.slice(source.indexOf("function mountedApplicantPanel()"), source.indexOf("/**\n   * The applicant list column"));
 
   // The live defect: a wrapper around both columns satisfies "two sections", so
@@ -1130,7 +1130,7 @@ test("the detail panel can never be a container that holds the applicant list", 
 });
 
 test("the applicant's name is chosen by policy, corroborated by the platform's own prose", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const finder = source.slice(source.indexOf("function findApplicantName"), source.indexOf("function readApplicantHeader"));
 
   // Every claim to the name, in order of how far the markup can be trusted.
@@ -1163,7 +1163,7 @@ test("the applicant's name is chosen by policy, corroborated by the platform's o
 });
 
 test("the next applicant is only scanned once the panel is showing them", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
 
   // The live defect: waiting for the address to change and the DOM to go quiet
@@ -1241,7 +1241,7 @@ test("the next applicant is only scanned once the panel is showing them", async 
 });
 
 test("a run that stopped short on the job it is still showing continues itself", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // THE GAP. Every restart path on this surface answers "did we ARRIVE
   // somewhere" — a route change, a tab return, a reload. None of them fires
@@ -1292,7 +1292,7 @@ test("a run that stopped short on the job it is still showing continues itself",
 });
 
 test("the list pass opens every applicant across every page and takes what the panel renders", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const ui = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
 
   // The record: the name and the two ids, and deliberately nothing else. The row
@@ -1490,7 +1490,7 @@ test("the list pass opens every applicant across every page and takes what the p
 });
 
 test("a record may only be built from the applicant that was asked for", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const ARRIVAL = Applicants.PANEL_ARRIVAL;
 
   // THE DEFECT, from the recruiter's own table: three different people in the
@@ -1613,7 +1613,7 @@ test("a record may only be built from the applicant that was asked for", async (
 });
 
 test("the resume viewer is opened, scrolled and read rather than only linked", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
 
   // The viewer is the FALLBACK, not the method (3.7.7) — it is opened only when
@@ -1713,7 +1713,7 @@ test("a LinkedIn page is never stored or downloaded as a resume", () => {
 });
 
 test("the adapter and the worker both refuse a page route as a resume", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"));
   assert.match(step, /const linkedUrl = Applicants\.isResumeDocumentUrl\(controlHref\) \? controlHref : ""/,
     "the control's href is only the file when it is one");
@@ -1742,7 +1742,7 @@ test("the adapter and the worker both refuse a page route as a resume", async ()
 });
 
 test("the applicant list is grown when the run needs a row, never walked up front", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const loader = source.slice(source.indexOf("async function loadEveryApplicantRow"), source.indexOf("async function extractAllApplicants"));
   assert.ok(loader.length > 200, "loading the list must be its own step");
 
@@ -1870,7 +1870,7 @@ test("the applicant list is grown when the run needs a row, never walked up fron
 });
 
 test("the run walks the list by identity, so a position can never address the wrong person", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const run = source.slice(source.indexOf("async function extractAllApplicants"), source.indexOf("// -------------------------------------------------- coming back to a job"));
 
   // THE REPORT: "it is not working for all the list of applicants ... it stops
@@ -2007,7 +2007,7 @@ test("a control in the list header can never retire the open applicant's row", a
   // pattern deliberately needs a second word before it calls something a control.
   assert.equal(Applicants.isApplicantRowLabel("Edit"), true, "a bare verb may still be a person");
 
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const link = source.slice(source.indexOf("function isApplicantRowLink"), source.indexOf("function rowLinksIn"));
   assert.match(link, /Applicants\.isApplicantRowLabel\(cleanText\(anchor\.textContent\)\)/,
     "the adapter delegates to the one policy rather than growing a second list of controls");
@@ -2038,7 +2038,7 @@ test("a control in the list header can never retire the open applicant's row", a
 });
 
 test("the bottom of the panel is reached without knowing which container scrolls", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // Every position-based walk in this codebase depends on having correctly
   // identified the one container that scrolls, and getting it wrong is silent:
@@ -2126,7 +2126,7 @@ test("the bottom of the panel is reached without knowing which container scrolls
 });
 
 test("a section outside the resolved panel is still the open applicant's", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const map = source.slice(source.indexOf("function collectSections"), source.indexOf("/** Visible entity blocks"));
 
   // `applicantPanel()` picks the smallest container carrying the most section
@@ -2161,7 +2161,7 @@ test("a section outside the resolved panel is still the open applicant's", async
 });
 
 test("a section root has to carry the section, and a useless one never blocks a better one", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // THE DEFECT, reported four times. LinkedIn renders the applicant's section
   // title in its own header row — the word plus a collapse chevron — with the
@@ -2201,7 +2201,7 @@ test("a section root has to carry the section, and a useless one never blocks a 
 });
 
 test("every nested scroller is revealed, not only the one the walk chose", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const regions = source.slice(source.indexOf("function scrollableRegions"), source.indexOf("async function revealRegion"));
 
   // `scrollCandidates` refuses a descendant carrying less than COLUMN_TEXT_SHARE
@@ -2236,7 +2236,7 @@ test("every nested scroller is revealed, not only the one the walk chose", async
 });
 
 test("a section that produced nothing prints the markup it was read from", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // Asked for explicitly after the fourth report: a heading and a block count
   // say a section was FOUND, and it was. The question that needed answering was
@@ -2251,7 +2251,7 @@ test("a section that produced nothing prints the markup it was read from", async
 });
 
 test("a section title is still a section title with a count, a qualifier or a colon after it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // The live report: current_role, current_company and total_experience empty on
   // every row. All three are derived from the Experience section and nothing
@@ -2287,7 +2287,7 @@ test("a section title is still a section title with a count, a qualifier or a co
 });
 
 test("the qualifications card is found even when only its subheadings name it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // `Qualifications` is what LinkedIn labels the must-have / preferred verdict
   // card, and the pattern gets the same widening Experience got in 3.7.6.
@@ -2321,7 +2321,7 @@ test("the qualifications card is found even when only its subheadings name it", 
 });
 
 test("an empty column is explicable from the page it was read on", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // Rule 19 in spirit: "current_role is empty" is not actionable, and a live
   // page is the only place the answer exists. So the extraction records what it
@@ -2351,7 +2351,7 @@ test("an empty column is explicable from the page it was read on", async () => {
 });
 
 test("the resume document is found wherever the viewer rendered it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const finder = source.slice(source.indexOf("function findResumeDocumentUrl"), source.indexOf("/** The viewer LinkedIn mounted"));
 
   // Every applicant came back `link_only` with no file and no link: the search
@@ -2380,7 +2380,7 @@ test("the resume document is found wherever the viewer rendered it", async () =>
 });
 
 test("a viewer that never writes the address down is still read, from what it fetched", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const finder = source.slice(source.indexOf("function fetchedResumeDocumentUrl"), source.indexOf("/** The viewer LinkedIn mounted"));
 
   // The remaining way to open a viewer and save no file: LinkedIn's document
@@ -2436,7 +2436,7 @@ test("a viewer that never writes the address down is still read, from what it fe
 
 test("a resume that did not land is never recorded as saved", async () => {
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // The defect: `downloadedFilePath` returned the REQUESTED path when Chrome
   // reported the download interrupted, and the caller still answered
@@ -2472,7 +2472,7 @@ test("a resume that did not land is never recorded as saved", async () => {
 });
 
 test("a stopped run can be started again without reloading the page", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // The live defect: `wentHidden` is latched the instant the recruiter switches
   // tab — which is how they reach the extension's own Applicants page — and was
@@ -2524,7 +2524,7 @@ test("a stopped run can be started again without reloading the page", async () =
 });
 
 test("a run resumes over the applicants it has not collected yet", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
 
   // The live complaint: a run stopped half way went back to the first applicant
@@ -2607,7 +2607,7 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 });
 
 test("coming back to an unfinished job run resumes it, but a completed run stays finished", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
 
   // A navigation destroys the content script and everything it knew, so coming
@@ -2706,7 +2706,7 @@ test("the worker lifecycle admits one newest execution and never reopens a compl
   assert.equal(Applicants.claimAutoRun(finished.entry, { now, tabId: 41 }).armed, false,
     "reload, route return and tab return must all leave a completed run finished");
 
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   assert.match(source, /PV_APPLICANT_RUN_LIFECYCLE/, "the adapter must report its terminal lifecycle");
   assert.match(source, /runEveryApplicant\(verdict\.options \|\| \{\}, verdict\.tracking \|\| null\)/,
     "an automatic continuation must carry the worker's attempt token");
@@ -2860,7 +2860,7 @@ test("the walk follows the page's own order, and a page is finished before the p
 });
 
 test("the page is settled before anybody on it is opened, and the pager waits for it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // "Make sure it is working in a sequence, collecting all applicants before
   // moving to next page." Both clauses are one step: the page the run has just
@@ -2967,7 +2967,7 @@ test("an applicant is opened, read and saved exactly once, and 'already open' is
   });
   assert.equal(other.state, Applicants.PANEL_ARRIVAL.OTHER, "a different id is a different applicant");
 
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // 4. So the address bar is a HINT and the panel is the ANSWER.
   const ask = source.slice(
@@ -3066,7 +3066,7 @@ test("returning to a job's applicant list is an arrival; opening a row is not", 
 });
 
 test("an arrival survives a lost race, a back button and a bfcache restore", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // ROOT CAUSE 1. 3.7.6 wrote `lastKey` before it tried to start, and starting
   // is async and fire-and-forget with several silent bails — so one lost race
@@ -3124,7 +3124,7 @@ test("an arrival survives a lost race, a back button and a bfcache restore", asy
 });
 
 test("coming back to the tab restarts the run, and the page says so", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // THE GAP. Every watcher on this page asks "did we ARRIVE somewhere new", and
   // `applicantsViewKey` is built so that opening a row does not count. A tab
@@ -3203,7 +3203,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
 });
 
 test("the run collects every page of the applicant list, not only the first", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // Through 3.7.7 the walk scrolled and nothing else, so "the scroll container
   // reached its bottom and stopped growing" WAS "the list has ended" — and the
@@ -3267,7 +3267,7 @@ test("the run collects every page of the applicant list, not only the first", as
  * rule in CLAUDE.md changes first, in its own task, and this test changes with it.
  */
 test("PERMANENT: the opened resume is downloaded by pressing Download, and its link is kept", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
 
   // 1. The control exists as a named, gated step — not an inline click.
@@ -3342,7 +3342,7 @@ test("PERMANENT: the opened resume is downloaded by pressing Download, and its l
  * guard: that guard IS the feature.
  */
 test("PERMANENT: the resume is downloaded without opening it whenever the address is already known", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
 
   // The address is looked for BEFORE anything is opened: the control's own href
@@ -3400,7 +3400,7 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
  * profile is still loading.
  */
 test("PERMANENT: one click per applicant, wait for the right panel, scroll only that column", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // 1. The page is never navigated or reloaded: the run changes applicants by
   //    clicking, and LinkedIn swaps the right panel underneath.
@@ -3515,7 +3515,7 @@ test("PERMANENT: only a walk that reached the list end may complete a run", asyn
   assert.equal(claimAutoRun({ ...base, state: AUTO_RUN_STATE.INTERRUPTED }, { tabId: 7 }).armed, true,
     "an interrupted one does, which is what a reload picks up");
 
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const loop = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
 
   assert.match(loop, /if \(Applicants\.isConclusiveListStop\(stoppedBy\)\) \{\s*\n\s*state\.run\.state = Applicants\.RUN_STATE\.COMPLETED;/,
@@ -3574,7 +3574,7 @@ test("a Next pager is still the pager when its label carries a chevron", () => {
 });
 
 test("the panel Download probe observes and never presses", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const probe = source.slice(source.indexOf("function probePanelDownloadControls"), source.indexOf("const DISMISS_SELECTOR"));
 
   // The safety property, and the whole reason this can exist without amending
@@ -3601,7 +3601,7 @@ test("the panel Download probe observes and never presses", async () => {
 });
 
 test("a page that hides while the list grows pauses the run, it does not kill it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const run = source.slice(source.indexOf("const processed = new Set();"), source.indexOf("// Retire EVERY already-saved row"));
 
   // THE DEFECT. `growApplicantList` calls `assertRunnable()` every pass, which
@@ -3635,7 +3635,7 @@ test("a page that hides while the list grows pauses the run, it does not kill it
 });
 
 test("a tab switch cannot restart the same walk forever", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const note = source.slice(source.indexOf("function noteReturnToTab"), source.indexOf("// ------------------------------------------------------------- messaging"));
 
   // THE LOOP. `ranKey` is set only when a run reaches COMPLETED, so an
@@ -3665,7 +3665,7 @@ test("a tab switch cannot restart the same walk forever", async () => {
 
 test("the resume link is saved first and downloading cannot stop the applicant run", async () => {
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const step = source.slice(source.indexOf("async function collectResume"), source.indexOf("// ------------------------------------------------------------- the scan"));
 
   // The verified document link becomes part of the record before any worker
@@ -3745,7 +3745,7 @@ test("the popup closes itself once the whole-job command has actually started", 
 });
 
 test("the hiring surface is a content script entry scoped to LinkedIn hiring pages", async () => {
-  const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(resolve(root, "extension/manifest.json"), "utf8"));
   const entry = manifest.content_scripts.find((script) => (script.js || []).includes("applicants.js"));
   assert.ok(entry, "a content script entry for applicants.js must exist");
   assert.deepEqual(entry.js, [
@@ -3772,7 +3772,7 @@ test("the hiring surface is a content script entry scoped to LinkedIn hiring pag
 });
 
 test("Collect Every Applicant is gone, and it took nothing else with it", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const popup = await readFile(resolve(root, "src/react/popup.tsx"), "utf8");
   const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
@@ -3855,7 +3855,7 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
 // ends, the ceiling that is never scaled, and the floors this must not touch.
 
 test("the quiet window follows the page, within bounds it can never leave", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   const quiet = source.slice(source.indexOf("function quietWindow"), source.indexOf("function waitForDomQuiet"));
   assert.match(quiet, /TEMPO_SCALE\[tempo\.level\]/, "the window is scaled by the tempo the page earned");
@@ -3896,7 +3896,7 @@ test("the quiet window follows the page, within bounds it can never leave", asyn
 });
 
 test("adapting the pace changes what a wait costs, never what a walk concludes", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // The floors that decide whether enough of an applicant was READ are untouched
   // by any of this. A shorter window can only take a read a moment early, and an
@@ -3957,7 +3957,7 @@ test("adapting the pace changes what a wait costs, never what a walk concludes",
 // slow pace band. So opening a single resume made the rest of the job slower, on
 // evidence about a PDF renderer rather than about the page.
 test("a repainting viewer cannot testify about the page, and one resume cannot slow the rest of the run", async () => {
-  const source = await readFile(resolve(root, "applicants.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // 1. The opt-out exists, defaults to ON, and withholds only the VERDICT.
   const domQuiet = source.slice(source.indexOf("function waitForDomQuiet"), source.indexOf("// ---------------------------------------------------------------- the DOM"));

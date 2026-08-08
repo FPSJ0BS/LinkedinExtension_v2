@@ -210,7 +210,7 @@ test("the service worker never runs profiles in parallel or bypasses a challenge
 });
 
 test("the connections content script clicks only classifier-approved pagination", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   const clicks = source.match(/\.click\(\)/g) || [];
   assert.equal(clicks.length, 1, "there must be exactly one click site, inside pagination handling");
   assert.match(source, /control\.element\.click\(\)/, "the only click must go through the validated control");
@@ -221,7 +221,7 @@ test("the connections content script clicks only classifier-approved pagination"
 });
 
 test("discovery waits for real content growth instead of trusting DOM quiet", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /function waitForGrowth/, "a growth wait is required for lazy loading");
   assert.match(source, /profileLinkCount\(\) > baselineLinks/, "growth must be measured by rendered profile links");
   assert.match(source, /documentHeight\(\) > baselineHeight/, "growth must also consider page height");
@@ -237,7 +237,7 @@ test("discovery waits for real content growth instead of trusting DOM quiet", as
 });
 
 test("reaching the bottom is not treated as the end of the list", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /Core\.planDiscoveryStep\(/, "the bottom policy must go through the tested planner");
   assert.ok(
     !/atBottom = target <= window\.scrollY/.test(source),
@@ -250,7 +250,7 @@ test("reaching the bottom is not treated as the end of the list", async () => {
 });
 
 test("discovery drives both the window and an inner scroll container", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /function currentScrollTop/, "the cursor must be read from whichever element scrolls");
   assert.match(source, /target\.element\.scrollTop/, "the detected container must supply the cursor");
   assert.match(source, /function maxScrollTop/, "the bottom must be computed from that same container");
@@ -262,7 +262,7 @@ test("discovery drives both the window and an inner scroll container", async () 
 });
 
 test("the connections script reads every card through the tested collector", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /Core\.collectEntriesFromLinks\(/, "card reading must go through the tested helper");
   assert.match(source, /Core\.createEntryCollector\(/, "a pass must accumulate across every read");
   assert.match(source, /const strict = anchors\.filter\(isVisible\)/, "rendered cards must be preferred");
@@ -272,7 +272,7 @@ test("the connections script reads every card through the tested collector", asy
 });
 
 test("the profile is only built after the page scan has finished", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const scanAt = source.indexOf("await performLazyScrollAndCollect(main, collector, diagnostics)");
   const buildAt = source.indexOf("const profile = {");
   assert.ok(scanAt > 0 && buildAt > scanAt, "the normalized profile must be assembled after the full-page scan");
@@ -287,7 +287,7 @@ test("the profile is only built after the page scan has finished", async () => {
 });
 
 test("profile extraction allows time for lazily rendered sections", async () => {
-  const source = await readFile(resolve(root, "content.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
   const waits = [...source.matchAll(/waitForDomQuiet\((\d+),\s*(\d+)\)/g)].map((match) => Number(match[2]));
   assert.ok(waits.length > 0, "the lazy-scroll pass must wait between steps");
   assert.ok(Math.max(...waits) >= 2000, "at least one wait must allow a slow section to render");
@@ -306,7 +306,7 @@ test("the importer lets a profile settle before reading it", async () => {
 });
 
 test("the discovery pass is resumable from a persisted cursor", async () => {
-  const source = await readFile(resolve(root, "connections.js"), "utf8");
+  const source = await readFile(resolve(root, "extension/content-scripts/connections.js"), "utf8");
   assert.match(source, /options\.cursorY/, "a pass must start from the caller's cursor");
   assert.match(source, /scrollListTo\(startY, target\)/, "a pass must resume where the last one stopped");
   assert.match(source, /cursorY = currentScrollTop\(target\)/, "a pass must report the cursor back");
@@ -327,14 +327,14 @@ test("the heartbeat only ever resumes normal processing", async () => {
 });
 
 test("the alarms permission is declared because the heartbeat needs it", async () => {
-  const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(resolve(root, "extension/manifest.json"), "utf8"));
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const usesAlarms = /chrome\.alarms\./.test(worker);
   assert.equal(usesAlarms, manifest.permissions.includes("alarms"), "alarms must be declared if and only if it is used");
 });
 
 test("unlimitedStorage is not requested without a demonstrated quota problem", async () => {
-  const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(resolve(root, "extension/manifest.json"), "utf8"));
   assert.ok(!manifest.permissions.includes("unlimitedStorage"), "no storage-quota failure has been demonstrated");
 });
 

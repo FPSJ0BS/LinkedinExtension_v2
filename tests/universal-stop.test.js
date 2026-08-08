@@ -14,7 +14,12 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const read = (file) => readFile(resolve(root, file), "utf8");
+const sourcePath = (file) => ["content.js", "connections.js", "applicants.js"].includes(file)
+  ? resolve(root, "extension", "content-scripts", file)
+  : file.endsWith(".css")
+    ? resolve(root, "extension", "styles", file)
+    : resolve(root, file);
+const read = (file) => readFile(sourcePath(file), "utf8");
 
 test("STOP_ALL is one shared literal, not a string repeated per caller", async () => {
   const messages = await read("src/messages.ts");

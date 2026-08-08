@@ -8,11 +8,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function sourcePathForManifestFile(file) {
   if (file === "src/background.js") return resolve(root, "src", "background.ts");
-  return resolve(root, file);
+  if (file.startsWith("src/")) return resolve(root, file);
+  if (file.startsWith("icons/")) return resolve(root, "extension", file);
+  if (file.endsWith(".html")) return resolve(root, "extension", "pages", file);
+  return resolve(root, "extension", "content-scripts", file);
 }
 
 async function loadManifest() {
-  return JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
+  return JSON.parse(await readFile(resolve(root, "extension", "manifest.json"), "utf8"));
 }
 
 test("manifest references existing extension source files", async () => {

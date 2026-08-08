@@ -77,7 +77,7 @@ const archiveName = `${stem}.zip`;
 const files = (await walk(distDir)).sort();
 if (files.length === 0) throw new Error("dist/ is empty. Run `npm run build`.");
 
-const install = await readFile(path.join(root, "INSTALL.md"));
+const install = await readFile(path.join(root, "docs", "INSTALL.md"));
 
 const entries = [{ name: `${stem}/INSTALL.md`, data: install }];
 for (const file of files) {

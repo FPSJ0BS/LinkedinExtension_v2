@@ -163,7 +163,7 @@ output back and compares it against `dist/` before writing it.
 
 ⚠ Keep the unzipped folder where you put it. Chrome loads the extension from that folder every time
 it starts, and ties the saved data to that folder's path — so moving or deleting it later loses the
-extension, or the vault. [INSTALL.md](INSTALL.md) covers updating in place, moving your saved
+extension, or the vault. [INSTALL.md](docs/INSTALL.md) covers updating in place, moving your saved
 profiles across, and what each thing that can go wrong means.
 
 ### From a clone
@@ -278,12 +278,14 @@ Project rules for contributors and coding agents are in [CLAUDE.md](CLAUDE.md).
 - `src/react/applicants-dashboard.tsx` — React job-applicants table and details drawer
 - `src/react/components/` — company/role and institution cards
 - `src/background.ts` — TypeScript service worker, import orchestrator and applicant relay
-- `src/extraction-core.js` + `content.js` — profile extraction and content-script lifecycle
-- `src/connections-core.js` + `connections.js` — discovery, pagination policy, challenge detection
-- `src/applicants-core.js` + `applicants.js` — recruiter hiring pages: job, applicant, qualifications,
+- `src/extraction-core.js` + `extension/content-scripts/content.js` — profile extraction and content-script lifecycle
+- `src/connections-core.js` + `extension/content-scripts/connections.js` — discovery, pagination policy, challenge detection
+- `src/applicants-core.js` + `extension/content-scripts/applicants.js` — recruiter hiring pages: job, applicant, qualifications,
   screening answers, contact disclosure and resume
 - `src/import-queue-core.js` + `src/queue-db.js` — import queue state machine and persistence
 - `src/applicant-db.js` + `src/applicant-csv.js` — applicant storage and export
+- `extension/pages/`, `extension/styles/`, `extension/icons/`, `extension/vendor/` — extension pages and static assets
+- `docs/` — installation, workflow, status, verification and project-history documents
 
 ## Coverage and limits
 

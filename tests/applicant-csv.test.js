@@ -466,7 +466,7 @@ test("the applicants page offers every control the surface needs", async () => {
 });
 
 test("the applicants page is reachable and loads React locally", async () => {
-  const html = await readFile(resolve(root, "applicants.html"), "utf8");
+  const html = await readFile(resolve(root, "extension/pages/applicants.html"), "utf8");
   assert.match(html, /vendor\/react\.production\.min\.js/);
   assert.match(html, /vendor\/react-dom\.production\.min\.js/);
   assert.match(html, /src\/react\/applicants-dashboard\.js/);

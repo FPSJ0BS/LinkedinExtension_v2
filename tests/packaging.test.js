@@ -139,7 +139,7 @@ test("an installer can only be cut from a tree that passed its checks", async ()
 });
 
 test("the installer carries instructions that survive the trip", async () => {
-  const install = await read("INSTALL.md");
+  const install = await read("docs/INSTALL.md");
 
   // The five steps that actually install it. Chrome has no other route for an
   // extension distributed outside the Web Store.
@@ -170,7 +170,7 @@ test("the installer carries instructions that survive the trip", async () => {
 
   // Every host the manifest asks for is explained, because an unexplained
   // permission prompt is what makes someone abandon the install.
-  const manifest = JSON.parse(await read("manifest.json"));
+  const manifest = JSON.parse(await read("extension/manifest.json"));
   for (const host of manifest.host_permissions) {
     const bare = host.replace("https://", "").replace("/*", "").replace(/^www\./, "");
     assert.ok(install.includes(bare), `INSTALL.md must account for host access to ${bare}`);
