@@ -229,6 +229,33 @@ class ApplicantsApp extends React.Component {
   };
 
   /**
+   * The open applicant's LAYOUT, with nobody's details in it.
+   *
+   * What to press when a column reads wrong on a screen this extension has not
+   * seen before. It reads the panel that is already open and reports what the
+   * readers would see — every heading and the key it resolved to, the header
+   * window, the lines each section handed its parser, which labels the page
+   * renders, and the KIND of each link. Read-only: no click, no scroll, nothing
+   * saved.
+   *
+   * Every name becomes `Person A` / `Company A` / `University A`, consistently
+   * within one capture so the corroboration the name reader depends on is still
+   * exercised; every address, phone number, token and credential is taken out;
+   * the wordings stay, because the wordings are the thing being reported.
+   */
+  captureUi = async () => {
+    try {
+      const response = await send(APPLICANT_MESSAGES.CAPTURE_UI, { name: "applicant-ui" });
+      if (response?.ok === false) throw new Error(response.error || "The applicant UI could not be captured.");
+      if (!response?.capture) throw new Error("Nothing to capture. Open an applicant in your LinkedIn tab first.");
+      downloadJson(response.capture, "profile-vault-applicant-ui");
+      this.setMessage("Captured. The file names no one — send it with a note about which column read wrong.", "success");
+    } catch (error) {
+      this.setMessage(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
+  /**
    * Every applicant on this job, one at a time, across every page.
    *
    * **The whole-job command, and since 3.7.13 the only one.** Collect Every
@@ -391,6 +418,18 @@ class ApplicantsApp extends React.Component {
           */}
           <button className="secondary" type="button" onClick={this.downloadDiagnostics}>
             Download Diagnostics
+          </button>
+          {/*
+            And the one to send when a layout reads wrong. Read-only — no click,
+            no scroll, nothing saved — and every name replaced by a stable
+            pseudonym, every address reduced to what KIND of destination it had,
+            every number, token and credential taken out. What survives is the
+            wordings, which are the whole point: a heading this extension does
+            not recognise is what empties a column, and this is how one becomes a
+            fixture.
+          */}
+          <button className="secondary" type="button" onClick={this.captureUi}>
+            Capture Current Applicant UI
           </button>
           <button className="secondary" type="button" onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") })}>
             Saved Profiles

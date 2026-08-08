@@ -3211,6 +3211,182 @@
     return { action: "collect", reason: "next-applicant", index: state.index };
   }
 
+  // ------------------------------------------------ capturing an unknown layout
+  //
+  // The guide's Phases 8 and 9: when a layout cannot be read safely, report it
+  // rather than returning empty fields — and capture only what is needed to
+  // support it, never a cookie, a token, a credential or unrelated storage.
+  //
+  // The capture is a RE-SHAPING of what the extraction already read, not a
+  // second extraction: the section scan, the header window, the line arrays each
+  // reader consumed. That is deliberate — a capture path that gathered its own
+  // data could diverge from the read path, and then it would describe a page
+  // nobody's record came from.
+
+  /** Bumped when the shape changes, so an old capture is still readable. */
+  const CAPTURE_SCHEMA_VERSION = 1;
+
+  /** Never stored. Only which KIND of destination a link had. */
+  const CAPTURE_LINK_RELATIONS = Object.freeze(["mailto", "tel", "profile", "application", "media", "external", "internal"]);
+
+  const CAPTURE_EMAIL_PLACEHOLDER = "redacted@example.com";
+  const CAPTURE_PHONE_PLACEHOLDER = "+00 000 000 0000";
+
+  /**
+   * Names, companies and schools, replaced consistently.
+   *
+   * **The same name must be the same pseudonym everywhere in one capture**, or
+   * the capture stops exercising the thing it exists to exercise: the name
+   * reader's whole job is deciding which of five candidates the platform's own
+   * prose agrees with, and randomising them would make every candidate disagree.
+   * One map per capture, handed to every field.
+   */
+  function createCapturePseudonyms() {
+    const assigned = new Map();
+    const counts = { person: 0, company: 0, school: 0 };
+    const letter = (index) => {
+      let name = "";
+      let value = index;
+      do {
+        name = String.fromCharCode(65 + (value % 26)) + name;
+        value = Math.floor(value / 26) - 1;
+      } while (value >= 0);
+      return name;
+    };
+    return {
+      for(value, kind = "person") {
+        const text = cleanText(value);
+        if (!text) return "";
+        const key = `${kind}:${text.toLowerCase()}`;
+        if (assigned.has(key)) return assigned.get(key);
+        const label = kind === "company" ? "Company" : kind === "school" ? "University" : "Person";
+        const pseudonym = `${label} ${letter(counts[kind] ?? 0)}`;
+        counts[kind] = (counts[kind] ?? 0) + 1;
+        assigned.set(key, pseudonym);
+        return pseudonym;
+      },
+      size: () => assigned.size
+    };
+  }
+
+  /**
+   * A link's KIND, which is the only thing a capture keeps about it.
+   *
+   * Addresses are never stored. One rule rather than a blocklist, because a
+   * blocklist leaks the next parameter nobody thought of: a LinkedIn hiring
+   * address carries `applicationId` and `jobId`, a media address carries a
+   * signed token, and both carry whatever tracking LinkedIn adds next week.
+   */
+  function captureLinkRelation(href) {
+    const text = cleanText(href);
+    if (!text) return "";
+    if (/^mailto:/i.test(text)) return "mailto";
+    if (/^tel:/i.test(text)) return "tel";
+    if (/applicationId=|\/applicants?\/\d/i.test(text)) return "application";
+    if (/\/in\//i.test(text)) return "profile";
+    if (isResumeDocumentUrl(text)) return "media";
+    if (/^https?:\/\/(?:[a-z0-9-]+\.)*linkedin\.com\//i.test(text) || /^[/#]/.test(text)) return "internal";
+    if (/^https?:\/\//i.test(text)) return "external";
+    return "";
+  }
+
+  /**
+   * Text with every identifier taken out and every WORDING left in.
+   *
+   * The wordings are the entire point: headings, section titles, field labels,
+   * date ranges and degrees are what a layout is recognised by, and a capture
+   * that redacted them would describe nothing. What goes is what identifies a
+   * person or authorises a request.
+   */
+  function sanitizeCaptureText(value, pseudonyms = null) {
+    let text = cleanText(value);
+    if (!text) return "";
+    const core = CORE();
+    if (core?.EMAIL_PATTERN) text = text.replace(new RegExp(core.EMAIL_PATTERN.source, "gi"), CAPTURE_EMAIL_PLACEHOLDER);
+    // A bare address, whatever it points at. Before the credential rule, because
+    // a URL is where a token most often hides.
+    text = text.replace(/\b(?:https?:\/\/|www\.)\S+/gi, "https://redacted.example");
+    // Anything shaped like a credential, and everything after it to the end of
+    // the line — a token is not one word. `Basic YWJj` and `ajax:1234` are two
+    // tokens whose second half survived a one-word rule.
+    text = text.replace(/\b(?:bearer|token|csrf|jsessionid|session|cookie|authorization|apikey|api[-_]?key)\b.*/gi, "[redacted]");
+    // Any run long enough to be a number somebody could be reached on. Broader
+    // than the phone reader on purpose: this one may over-redact, and the reader
+    // may not (rule 2 in both directions).
+    //
+    // ...but a DATE RANGE is not a phone number, and dates are exactly what this
+    // capture exists to preserve — "2019 - 2024" under a degree is how a fixture
+    // proves an education card parsed. Caught by the test that asserted the
+    // wordings survive; `DATE_RANGE_PATTERN` is the reader's own rule, reused.
+    text = text.replace(/\+?\d[\d\s().-]{6,}\d/g, (match) =>
+      DATE_RANGE_PATTERN.test(match) ? match : CAPTURE_PHONE_PLACEHOLDER);
+    if (pseudonyms) {
+      for (const [name, kind] of pseudonyms.names || []) {
+        const clean = cleanText(name);
+        if (!clean || clean.length < 3) continue;
+        text = text.split(clean).join(pseudonyms.map.for(clean, kind));
+      }
+    }
+    return text;
+  }
+
+  /**
+   * A capture of one applicant's layout, with nothing in it that names them.
+   *
+   * Pure: it takes the shapes the adapter already built and returns the payload
+   * that is written to disk. Everything excluded is excluded by CONSTRUCTION —
+   * a cookie, a token, a credential or a browser store cannot appear here
+   * because nothing in this function has any way to reach one, and the adapter's
+   * own source is asserted not to read them either.
+   */
+  function buildApplicantCapture(input = {}) {
+    const map = createCapturePseudonyms();
+    const names = [];
+    for (const name of input.names || []) names.push([name, "person"]);
+    for (const name of input.companies || []) names.push([name, "company"]);
+    for (const name of input.schools || []) names.push([name, "school"]);
+    const pseudonyms = { map, names };
+    const clean = (value) => sanitizeCaptureText(value, pseudonyms);
+    const cleanLines = (lines) => (Array.isArray(lines) ? lines : toLines(lines)).map(clean).filter(Boolean);
+
+    const scan = input.sectionScan || {};
+    return {
+      capture: {
+        schemaVersion: CAPTURE_SCHEMA_VERSION,
+        name: cleanText(input.name) || "applicant-ui",
+        buildId: cleanText(input.buildId),
+        capturedAt: cleanText(input.capturedAt),
+        layout: cleanText(input.layout) || "generic",
+        // Never the address bar: it carries the job and application ids.
+        surface: "hiring-applicants"
+      },
+      signals: input.signals ? { ...input.signals, unmatchedHeadings: (input.signals.unmatchedHeadings || []).map(clean) } : {},
+      sectionScan: {
+        headings: (scan.headings || []).map((heading) => ({
+          where: heading.where, text: clean(heading.text), key: heading.key || "", bounds: heading.bounds || ""
+        })),
+        resolved: (scan.resolved || []).map((section) => ({
+          key: section.key, heading: clean(section.heading), foundIn: section.foundIn,
+          narrowedFrom: section.narrowedFrom || "", blocks: section.blocks
+        })),
+        missing: scan.missing || [],
+        auxiliary: (scan.auxiliary || []).map((entry) => ({ where: entry.where, text: clean(entry.text), key: entry.key }))
+      },
+      headerText: cleanLines(input.headerText || []),
+      nameCandidates: (input.nameCandidates || []).map((entry) => ({
+        value: clean(entry?.value), source: entry?.source || "", evidence: entry?.evidence || ""
+      })),
+      labelled: (input.labelled || []).map((entry) => ({ label: entry?.label || "", value: clean(entry?.value) })),
+      blocks: Object.fromEntries(
+        Object.entries(input.blocks || {}).map(([key, list]) => [key, (list || []).map(cleanLines)])
+      ),
+      // Kinds only. Not one address survives this.
+      links: (input.links || []).map((href) => ({ rel: captureLinkRelation(href) })).filter((link) => link.rel),
+      readers: input.readers || {},
+      pseudonyms: map.size()
+    };
+  }
+
   const api = {
     // pages
     HIRING_PATH_PATTERN, isHiringPage, isApplicantsPage, parseHiringContext, applicantsViewKey,
@@ -3260,6 +3436,9 @@
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
+    // capturing a layout nobody has seen, with nobody's details in it
+    CAPTURE_SCHEMA_VERSION, CAPTURE_LINK_RELATIONS, createCapturePseudonyms,
+    captureLinkRelation, sanitizeCaptureText, buildApplicantCapture,
     // shared helpers the adapter needs and must not re-implement
     cleanText, uniqueText, toLines
   };

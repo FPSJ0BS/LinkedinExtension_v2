@@ -2299,6 +2299,23 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     return { ok: true, buildId: BUILD_ID, generatedAt: nowIso(), applicant };
   }
 
+  if (type === APPLICANT_MESSAGES.CAPTURE_UI) {
+    // Read-only, so unlike every other applicant command this one does NOT
+    // reveal or focus the tab: rule 15 says focus is taken only on a direct user
+    // command that needs the page in front of them, and this one does not touch
+    // the page at all. The content script is ensured because a capture is most
+    // wanted on a layout the extension has never successfully read.
+    const tab = await resolveApplicantTab();
+    await ensureContentScript(tab.id, APPLICANT_SCRIPTS, APPLICANT_MESSAGES.PING);
+    const response = await sendTabMessage(
+      tab.id,
+      { type: APPLICANT_MESSAGES.CAPTURE_UI, name: String((message as any)?.name || "") },
+      APPLICANT_EXTRACT_TIMEOUT_MS
+    );
+    if (!response?.ok) throw new Error(response?.error || "The applicant UI could not be captured.");
+    return { ok: true, buildId: BUILD_ID, generatedAt: nowIso(), capture: response.capture };
+  }
+
   if (type === APPLICANT_MESSAGES.STATUS) {
     const applicants = await getAllApplicants();
     let page: any = null;

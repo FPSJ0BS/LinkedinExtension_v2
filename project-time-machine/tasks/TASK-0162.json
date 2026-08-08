@@ -1,0 +1,46 @@
+{
+  "schema": 2,
+  "id": "TASK-0162",
+  "name": "Phase 9: Capture Current Applicant UI",
+  "request": "Phase 9: Capture Current Applicant UI",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:58:13.279Z",
+  "completedAt": "2026-08-08T12:03:12.751Z",
+  "startCommit": "50b577ac030a348e6a5ade8dd291454d4429d020",
+  "gitRef": "task/TASK-0162",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 520 passed / 0 failed (was 516), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 9 of the multiple-LinkedIn-UI support guide: Capture Current Applicant UI - read-only, and it names nobody. THE SAFETY ARGUMENT IS STRUCTURAL, not a promise: captureApplicantUi presses nothing, scrolls nothing and saves nothing, it reads into a THROWAWAY accumulator so the run's own record is undisturbed, and it is a RE-SHAPING of what the extraction already reads rather than a second extraction - the same buildSectionMap, the same blocksIn, the same toLines, and the header window taken verbatim from the accumulator's own raw record. A capture path that gathered its own data could diverge from the read path and would then describe a page nobody's record came from. Every identifier is removed by buildApplicantCapture, which is pure and lives in the core. What goes: addresses (redacted first, because a URL is where a token most often hides), phone-shaped digit runs, email addresses, and anything shaped like a credential together with everything after it to the end of the line. What stays, and it is the entire point: headings, section titles, field labels, degrees, date ranges and skills, because those are the wordings a layout is recognised by and a capture that redacted them would describe nothing. Names become stable pseudonyms - Person A, Company A, University A - through ONE map per capture, so the same name is the same pseudonym everywhere; randomising them would stop the fixture exercising the corroboration the name reader is built on. A link is never stored as an address, only as its KIND (mailto, tel, profile, application, media, internal, external) - one rule rather than a blocklist, because a blocklist leaks the next parameter nobody thought of, and this one kills applicationId, jobId, signed media tokens and whatever tracking arrives next in a single stroke. TWO REAL BUGS were found by the new tests and fixed. (a) '2019 - 2024' was being redacted as a phone number - a date range under a degree is precisely what proves an education card parsed, so DATE_RANGE_PATTERN, the reader's own rule, now exempts it. (b) 'authorization: Basic YWJj' and 'csrf-token: ajax:1234567890' survived half-redacted, because a token is not one word; the rule now takes the rest of the line. Wiring: PV_APPLICANT_CAPTURE_UI, declared in messages.ts, handled in the content script AFTER the universal-Stop branch, relayed by the worker WITHOUT revealing or focusing the tab - rule 15 says focus is taken only on a command that needs the page in front of the user, and a read-only capture does not - and offered on the Applicants page as 'Capture Current Applicant UI', downloading JSON beside Download Diagnostics. Six assertions cover the exclusions one class at a time (bearer token, csrf, JSESSIONID, cookie, authorization, api key), plus absence-in-source checks that the capture never reads document.cookie, chrome.cookies, localStorage, sessionStorage, chrome.storage or an input value. Click budget still seven; Stop still matched before the branch that starts a run. Files: src/applicants-core.js, extension/content-scripts/applicants.js, src/background.ts, src/messages.ts, src/react/applicants-dashboard.tsx, tests/applicants-core.test.js, docs/CHECKS.md."
+}

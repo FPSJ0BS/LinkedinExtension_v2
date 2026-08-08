@@ -6224,7 +6224,7 @@ test("Phase 8: the report answers for the applicant the page is reading, not onl
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const branch = worker.slice(
     worker.indexOf("if (type === APPLICANT_MESSAGES.DIAGNOSTICS)"),
-    worker.indexOf("if (type === APPLICANT_MESSAGES.STATUS)")
+    worker.indexOf("if (type === APPLICANT_MESSAGES.CAPTURE_UI)")
   );
   assert.ok(branch.length > 300 && branch.length < 2000, "the branch must be found, and only it");
 
@@ -6258,4 +6258,183 @@ test("Phase 8: a diagnostics report is never a CSV column", async () => {
   const head = /<thead>([\s\S]*?)<\/thead>/.exec(page);
   assert.ok(head, "the table header must be found");
   assert.ok(!/diagnostic/i.test(head[1]), "and it must not have grown a diagnostics column");
+});
+
+
+// ------ Phase 9 of the multiple-LinkedIn-UI support guide: sanitized capture
+//
+// "Capture only information needed to support a new layout. Never capture
+// cookies, session tokens, passwords, credentials, unrelated page content or
+// unrelated browser storage."
+//
+// The exclusions are asserted one class at a time, because "we sanitized it" is
+// the kind of claim that is only worth what its tests are worth.
+
+test("Phase 9: a capture keeps every wording and no identifier", () => {
+  const pseudonyms = { map: Applicants.createCapturePseudonyms(), names: [["Nihal Sharma", "person"], ["Bhatia and Khatri", "company"]] };
+  const clean = (value) => Applicants.sanitizeCaptureText(value, pseudonyms);
+
+  // WHAT GOES. One class per assertion.
+  assert.match(clean("Reach me at nihal@example.com"), /redacted@example\.com/);
+  assert.ok(!clean("Reach me at nihal@example.com").includes("nihal@example.com"), "no address survives");
+  assert.match(clean("+91 90000 00000"), /\+00 000 000 0000/);
+  assert.ok(!/9000/.test(clean("Call +91 90000 00000")), "no number survives");
+  assert.ok(!/linkedin\.com/.test(clean("https://www.linkedin.com/in/nihal-sharma-123")), "no address survives");
+  for (const secret of [
+    "Bearer eyJhbGciOiJIUzI1NiJ9.abc.def",
+    "csrf-token: ajax:1234567890",
+    "JSESSIONID=\"ajax:987\"",
+    "Cookie: li_at=AQEDA",
+    "authorization: Basic YWJj",
+    "api_key=sk-live-abcdef"
+  ]) {
+    assert.match(clean(secret), /\[redacted\]/, `"${secret}" must be redacted`);
+    assert.ok(!/eyJ|ajax:|li_at=AQEDA|YWJj|sk-live/.test(clean(secret)), "and nothing of it may survive");
+  }
+
+  // WHAT STAYS, and it is the entire point of capturing anything: the wordings
+  // are what a layout is recognised by, and a capture that redacted them would
+  // describe nothing.
+  for (const wording of [
+    "Work history", "Employment history", "Academics", "Skills and expertise",
+    "Must-have qualifications", "Screening question responses", "Current company",
+    "Bachelor of Laws - LLB", "2019 - 2024", "Present", "Contract Drafting", "Top card"
+  ]) {
+    assert.equal(clean(wording), wording, `"${wording}" is a wording, and wordings are the report`);
+  }
+
+  // Names become stable pseudonyms — the SAME pseudonym everywhere, or the
+  // capture stops exercising the corroboration the name reader is built on.
+  const first = clean("Nihal Sharma is a Legal Assistant at Bhatia and Khatri");
+  const second = clean("Nihal Sharma has 6 years of experience");
+  assert.ok(!first.includes("Nihal Sharma"), "the name is replaced");
+  assert.match(first, /Person A/);
+  assert.match(second, /Person A/, "and replaced the same way the second time");
+  assert.match(first, /Company A/, "and so is the employer");
+});
+
+test("Phase 9: an address is never stored — only what kind of destination it had", () => {
+  // One rule rather than a blocklist, because a blocklist leaks the next
+  // parameter nobody thought of: a hiring address carries applicationId and
+  // jobId, a media address carries a signed token, and both carry whatever
+  // tracking LinkedIn adds next.
+  for (const [href, rel] of [
+    ["mailto:nihal@example.com", "mailto"],
+    ["tel:+919000000000", "tel"],
+    ["https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&jobId=4277798308", "application"],
+    ["https://www.linkedin.com/in/nihal-sharma-123", "profile"],
+    ["https://media.licdn.com/dms/document/abc/resume.pdf", "media"],
+    ["https://www.linkedin.com/jobs/view/123", "internal"],
+    ["/hiring/jobs", "internal"],
+    ["https://example.com/portfolio", "external"],
+    ["", ""],
+    ["javascript:void(0)", ""]
+  ]) {
+    assert.equal(Applicants.captureLinkRelation(href), rel, `"${href}" is a ${rel || "non"} link`);
+  }
+
+  const capture = Applicants.buildApplicantCapture({
+    links: [
+      "https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&jobId=4277798308",
+      "https://media.licdn.com/dms/document/abc/resume.pdf?token=SECRET",
+      "mailto:nihal@example.com"
+    ]
+  });
+  const serialized = JSON.stringify(capture);
+  assert.deepEqual(capture.links, [{ rel: "application" }, { rel: "media" }, { rel: "mailto" }]);
+  for (const leak of ["25550787924", "4277798308", "SECRET", "media.licdn.com", "nihal@example.com", "http"]) {
+    assert.ok(!serialized.includes(leak), `"${leak}" must not survive into a capture`);
+  }
+});
+
+test("Phase 9: a whole capture names nobody, and still says what the layout is", () => {
+  const capture = Applicants.buildApplicantCapture({
+    name: "alternative-ui",
+    buildId: "test",
+    capturedAt: "2026-08-08T00:00:00.000Z",
+    layout: "generic",
+    names: ["Nihal Sharma"],
+    companies: ["Bhatia and Khatri Law Office"],
+    schools: ["CHANDIGARH UNIVERSITY"],
+    signals: { sectionKeys: ["experience"], unmatchedHeadings: ["Nihal Sharma", "Work history"] },
+    sectionScan: {
+      headings: [
+        { where: "panel", text: "Nihal Sharma", key: "" },
+        { where: "panel", text: "Work history", key: "experience" },
+        { where: "panel", text: "Contact information", key: "", bounds: "contact" }
+      ],
+      resolved: [{ key: "experience", heading: "Work history", foundIn: "panel", blocks: 2 }],
+      missing: ["screening"],
+      auxiliary: [{ where: "panel", text: "Contact information", key: "contact" }]
+    },
+    headerText: ["Nihal Sharma", "Legal Assistant", "Noida, Uttar Pradesh, India", "nihal@example.com"],
+    nameCandidates: [{ value: "Nihal Sharma", source: "list-row", evidence: "text" }],
+    labelled: [{ label: "currentCompany", value: "Bhatia and Khatri Law Office" }],
+    blocks: {
+      experience: [["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present"]],
+      education: [["CHANDIGARH UNIVERSITY", "Bachelor of Laws - LLB", "2019 - 2024"]]
+    },
+    links: ["https://www.linkedin.com/in/nihal-sharma"],
+    readers: { currentCompany: { source: "panel-label", evidence: "labelled", confidence: 0.8 } }
+  });
+
+  const serialized = JSON.stringify(capture);
+  // Nobody is named.
+  for (const identity of ["Nihal Sharma", "Bhatia and Khatri", "CHANDIGARH", "nihal@example.com", "nihal-sharma"]) {
+    assert.ok(!serialized.includes(identity), `"${identity}" must not survive`);
+  }
+  // And the layout is still fully described.
+  assert.equal(capture.capture.schemaVersion, Applicants.CAPTURE_SCHEMA_VERSION);
+  assert.equal(capture.capture.surface, "hiring-applicants", "never the address bar, which carries the job and application ids");
+  assert.deepEqual(capture.sectionScan.missing, ["screening"]);
+  assert.equal(capture.sectionScan.headings[1].text, "Work history", "the wording that mattered is intact");
+  assert.equal(capture.sectionScan.headings[1].key, "experience");
+  assert.equal(capture.sectionScan.auxiliary[0].key, "contact", "and the section that only bounds is named");
+  assert.equal(capture.blocks.education[0][1], "Bachelor of Laws - LLB", "and the degree, which no name reader may take");
+  assert.equal(capture.blocks.experience[0][1].includes("2024 - Present"), true, "and the dates");
+  assert.equal(capture.readers.currentCompany.source, "panel-label", "and where each field came from");
+  assert.ok(capture.pseudonyms >= 3, "and it says how many identities it replaced");
+
+  // The pseudonyms are consistent ACROSS fields, which is what keeps the fixture
+  // able to exercise the name reader's corroboration.
+  assert.equal(capture.headerText[0], capture.nameCandidates[0].value, "the same person is the same pseudonym everywhere");
+});
+
+test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and reads no credential", async () => {
+  const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
+  const capture = source.slice(source.indexOf("function captureApplicantUi"), source.indexOf("state.handler = (message"));
+  assert.ok(capture.length > 600 && capture.length < 5000, "the capture must be found, and only it");
+
+  assert.ok(!/\.click\(\)/.test(capture), "it presses nothing");
+  assert.ok(!/scrollPanelTo|scrollIntoView|revealPanelContent|scanApplicantPanel/.test(capture), "it scrolls nothing");
+  assert.ok(!/sendMessage|PV_APPLICANT_SAVE/.test(capture), "it saves nothing");
+  // The exclusions the guide names, asserted as absences in the code rather than
+  // as a promise in a comment.
+  for (const store of ["document.cookie", "chrome.cookies", "localStorage", "sessionStorage", "chrome.storage", ".value"]) {
+    assert.ok(!capture.includes(store), `a capture must never read ${store}`);
+  }
+  assert.match(capture, /Applicants\.buildApplicantCapture\(/, "and every identifier is taken out by the pure, tested builder");
+  assert.match(capture, /createApplicantAccumulator\(\)/, "it reads into a throwaway accumulator");
+  assert.match(capture, /snapshot\.raw\?\.applicant_header/,
+    "and the header window is the one the extraction already read, not a second reading");
+
+  // Still seven clicks in the whole file.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+
+  // Stop is still matched before every other branch that does work.
+  const handler = source.slice(source.indexOf("state.handler = (message"), source.length);
+  assert.ok(
+    handler.indexOf('type === "PV_APPLICANT_STOP"') < handler.indexOf('type === "PV_APPLICANT_EXTRACT_ALL"'),
+    "Stop is still matched before the branch that starts a run"
+  );
+
+  // The worker relays it read-only: no reveal, no focus (rule 15).
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const branch = worker.slice(
+    worker.indexOf("if (type === APPLICANT_MESSAGES.CAPTURE_UI)"),
+    worker.indexOf("if (type === APPLICANT_MESSAGES.STATUS)")
+  );
+  assert.ok(branch.length > 300, "the relay must be found, not an empty slice");
+  assert.ok(!/revealApplicantTab/.test(branch), "a read-only command never steals focus");
+  assert.match(branch, /ensureContentScript/, "but it does make sure something is listening");
 });

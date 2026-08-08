@@ -6519,6 +6519,72 @@
     pumpAutoRun();
   }
 
+  /**
+   * What this layout looks like, with nobody's details in it.
+   *
+   * **Read-only, and that is the whole safety argument: zero clicks, zero
+   * scrolling, zero saving.** It looks at whatever panel is already open and
+   * reports what the readers would see. It cannot change the page, cannot change
+   * a record, and cannot start a run.
+   *
+   * It is also a RE-SHAPING of what the extraction already reads rather than a
+   * second extraction — the same `buildSectionMap`, the same `blocksIn`, the
+   * same `toLines` — because a capture path that gathered its own data could
+   * diverge from the read path, and would then describe a page nobody's record
+   * came from.
+   *
+   * Every identifier is taken out by `buildApplicantCapture`, which is pure and
+   * tested. Nothing here reads a cookie, a token, `localStorage`,
+   * `sessionStorage`, `chrome.storage` or an `<input>` value — there is no call
+   * to any of them anywhere in this function, and the test asserts their absence
+   * from its source rather than trusting this sentence.
+   */
+  function captureApplicantUi(name = "") {
+    const panel = applicantPanel();
+    const sections = buildSectionMap(panel);
+    const diagnostics = {};
+    recordSectionScan(sections, panel, document.querySelector("main") || document.body, diagnostics);
+
+    const accumulator = Applicants.createApplicantAccumulator();
+    // Read into a THROWAWAY accumulator. Nothing this touches is saved, and the
+    // record the page's own run is building is not disturbed.
+    snapshotPanel(panel, accumulator, diagnostics);
+    const snapshot = accumulator.snapshot();
+
+    const lines = (section) => (section ? blocksIn(section).map((block) => toLines(block.innerText || "")) : []);
+    const labelled = [...labelledValuesIn(panel).entries()].map(([label, value]) => ({ label, value }));
+
+    return Applicants.buildApplicantCapture({
+      name,
+      buildId: BUILD_ID,
+      capturedAt: new Date().toISOString(),
+      layout: diagnostics.layout?.layout || "",
+      signals: applicantLayoutSignals(panel, sections),
+      sectionScan: diagnostics.sectionScan || {},
+      // The window the header was actually parsed from, verbatim from the
+      // accumulator's own raw record — the same text, not a second reading.
+      headerText: toLines(snapshot.raw?.applicant_header || ""),
+      nameCandidates: diagnostics.name ? [{ value: diagnostics.name.name, source: diagnostics.name.source, evidence: "text" }] : [],
+      labelled,
+      blocks: {
+        qualifications: lines(sections.qualifications),
+        screening: lines(sections.screening),
+        experience: lines(sections.experience),
+        education: lines(sections.education),
+        skills: lines(sections.skills)
+      },
+      // Handed over as addresses and returned as KINDS — not one of them is
+      // stored. `captureLinkRelation` is where that happens, and it is pure.
+      links: [...panel.querySelectorAll("a[href]")].map((anchor) => anchor.getAttribute("href") || ""),
+      readers: diagnostics.readers || {},
+      // Every name the capture must replace consistently, so the fixture still
+      // exercises the corroboration the name reader is built on.
+      names: [snapshot.header.name, ...snapshot.experience.map((entry) => entry.title)].filter(Boolean),
+      companies: snapshot.experience.map((entry) => entry.company).filter(Boolean),
+      schools: snapshot.education.map((entry) => entry.institution).filter(Boolean)
+    });
+  }
+
   // ------------------------------------------------------------- messaging
   state.handler = (message, _sender, sendResponse) => {
     const type = message?.type;
@@ -6550,6 +6616,15 @@
 
     if (type === "PV_GET_DIAGNOSTICS") {
       sendResponse({ ok: true, surface: "applicants", diagnostics: state.lastDiagnostics });
+      return false;
+    }
+
+    if (type === "PV_APPLICANT_CAPTURE_UI") {
+      try {
+        sendResponse({ ok: true, surface: "applicants", buildId: BUILD_ID, capture: captureApplicantUi(message?.name) });
+      } catch (error) {
+        sendResponse({ ok: false, error: error?.message || String(error) });
+      }
       return false;
     }
 

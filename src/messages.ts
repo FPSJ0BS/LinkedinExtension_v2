@@ -101,7 +101,17 @@ export const APPLICANT_MESSAGES = {
    */
   RUN_LIFECYCLE: "PV_APPLICANT_RUN_LIFECYCLE",
   CLEAR: "PV_APPLICANT_CLEAR",
-  DIAGNOSTICS: "PV_APPLICANT_DIAGNOSTICS"
+  DIAGNOSTICS: "PV_APPLICANT_DIAGNOSTICS",
+  /**
+   * Capture the open applicant's LAYOUT — not the applicant.
+   *
+   * Read-only: no click, no scroll, nothing saved. What comes back is the
+   * section scan, the header window, the line arrays each reader consumed and
+   * the KIND of every link, with names replaced by stable pseudonyms and every
+   * address, number, token and credential taken out. It is what turns "this
+   * layout reads wrong" into a fixture.
+   */
+  CAPTURE_UI: "PV_APPLICANT_CAPTURE_UI"
 } as const;
 
 /**
