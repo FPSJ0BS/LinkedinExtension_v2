@@ -1,5 +1,6 @@
 import { clearApplicants, deleteApplicant, getAllApplicants } from "../applicant-db.js";
 import { APPLICANT_TABLE_COLUMNS, downloadApplicantCsv, formatEducation, formatExperience, formatQualification, formatScreening, resumeFile, resumeLink, resumeSummary } from "../applicant-csv.js";
+import { downloadJson } from "../csv.js";
 import { APPLICANT_MESSAGES, STOP_ALL, type ApplicantRecord } from "../messages.js";
 import { type StatusKind } from "./types.js";
 
@@ -197,6 +198,37 @@ class ApplicantsApp extends React.Component {
   );
 
   /**
+   * Why a column came back empty, from the page it was read on.
+   *
+   * The one report that answers "the layout reads wrong" without a live
+   * debugging session. `sectionScan` lists every heading the panel and the page
+   * rendered with the key each one resolved to, and a heading listed with an
+   * EMPTY key is a wording the section table does not know yet — which is the
+   * whole of the "current_role and current_company are empty on every row"
+   * failure mode, in one line. Beside it: which sections nothing named, which
+   * ones only BOUND the others, where each was found, how many cards came out of
+   * it, the markup it was read from, the layout verdict, the reader order, and
+   * the contact, resume and scroll walks.
+   *
+   * Deliberately not disabled when there is nothing yet: the worker's answer
+   * says so in words, and a control that is greyed out for a reason the page
+   * cannot explain is worse than one that answers "nothing to report".
+   */
+  downloadDiagnostics = async () => {
+    try {
+      const response = await send(APPLICANT_MESSAGES.DIAGNOSTICS);
+      if (response?.ok === false) throw new Error(response.error || "Diagnostics are not available yet.");
+      if (!response?.applicant) {
+        throw new Error("Nothing to report yet. Collect an applicant first, then try again.");
+      }
+      downloadJson(response, "profile-vault-applicant-diagnostics");
+      this.setMessage("Diagnostics report downloaded.", "success");
+    } catch (error) {
+      this.setMessage(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
+  /**
    * Every applicant on this job, one at a time, across every page.
    *
    * **The whole-job command, and since 3.7.13 the only one.** Collect Every
@@ -342,6 +374,23 @@ class ApplicantsApp extends React.Component {
             onClick={() => this.exportCsv(this.selectedApplicants(), "selected applicant(s)")}
           >
             Download Selected{selected ? ` (${selected})` : ""}
+          </button>
+          {/*
+            The report that makes an empty column explicable without a live
+            debugging session. The worker has answered PV_APPLICANT_DIAGNOSTICS
+            since 3.6, and nothing has ever sent it — CLAUDE.md carried it as a
+            known issue. It is the most useful control on this page when a
+            layout reads wrong: `sectionScan.headings[]` names every heading the
+            panel rendered with the key it resolved to, and an EMPTY key is a
+            wording the section table does not know yet, which is the whole of
+            the "current_role and current_company are empty on every row"
+            failure, stated in one line.
+
+            JSON, never a CSV column: rule 19 says append columns and never
+            reorder, and a diagnostics blob is not a column at all.
+          */}
+          <button className="secondary" type="button" onClick={this.downloadDiagnostics}>
+            Download Diagnostics
           </button>
           <button className="secondary" type="button" onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") })}>
             Saved Profiles

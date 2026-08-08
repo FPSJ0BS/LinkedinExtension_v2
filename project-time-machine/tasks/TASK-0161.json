@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0161",
+  "name": "Phase 8: the Applicants page can download its diagnostics",
+  "request": "Phase 8: the Applicants page can download its diagnostics",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T11:53:43.030Z",
+  "completedAt": "2026-08-08T11:57:50.690Z",
+  "startCommit": "711e1751fbe8c35eae5929d1013180e3fc772a38",
+  "gitRef": "task/TASK-0161",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 516 passed / 0 failed (was 513), docs:check 17 files, validate 31 build files"
+  ],
+  "result": "Phase 8 of the multiple-LinkedIn-UI support guide: the Applicants page can now ask for the report the worker has answered since 3.6 and nothing has ever sent. CLAUDE.md carried it as a known issue and that row is now gone. The report is what makes an empty column explicable without a live debugging session: sectionScan lists every heading the panel and the page rendered with the key each one resolved to, and a heading listed with an EMPTY key is a wording the section table does not know yet - which is the whole of the 'current_role and current_company are empty on every row' failure mode, in one line. Beside it now sit the Phase 6 auxiliary sections, the Phase 4 layout verdict and reader order, the Phase 3 reader provenance, and the Phase 7 list-movement measurement. It downloads as JSON through the same downloadJson the Import page uses; it is never a CSV column, and rule 19 is re-asserted in this task because a second downloadable artefact is exactly where that rule gets bent. A gap was closed while wiring it: applicantDiagnostics in the worker is only ever written by COLLECT_CURRENT, because a whole-job run is DETACHED - started with a fire-and-forget message and silent until it finishes - so the applicant a list run is reading right now was invisible to this report, which is exactly the applicant a recruiter reaches for it about. The worker now asks the page for its own state.lastDiagnostics via PV_GET_DIAGNOSTICS, which the content script has answered all along, and keeps its cached copy as the fallback for a tab since closed or navigated; so the report can only ever answer with more than it did. A closed tab is caught, not raised. The control is deliberately not disabled when there is nothing yet - the answer says so in words, because a control greyed out for a reason the page cannot explain is worse than one that answers 'nothing to report'. React 16.0.0 discipline held: a class method, no hooks, no Fragments, no createRoot, asserted against the comment-stripped source, because the first version of that assertion matched the comment at the top of the page that names createRoot in order to say it is unavailable - a comment is not a call, which is the distinction withoutComments exists for. Files: src/react/applicants-dashboard.tsx, src/background.ts, CLAUDE.md, tests/applicants-core.test.js, docs/CHECKS.md."
+}

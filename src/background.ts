@@ -2277,7 +2277,26 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
   }
 
   if (type === APPLICANT_MESSAGES.DIAGNOSTICS) {
-    return { ok: true, buildId: BUILD_ID, generatedAt: nowIso(), applicant: applicantDiagnostics };
+    // The worker's own copy is only ever written by COLLECT_CURRENT, because a
+    // whole-job run is detached — it is started with a fire-and-forget message
+    // and reports nothing back until it finishes. So the applicant a list run is
+    // reading right now is invisible here, and that is exactly the applicant a
+    // recruiter reaches for this report about.
+    //
+    // Ask the page. It keeps `state.lastDiagnostics` for whichever applicant it
+    // read last, whether that was a single collection or the four-hundredth row
+    // of a job. The cached copy stays as the fallback for a tab that has since
+    // been closed or navigated away, so this can only ever answer with more.
+    let live: any = null;
+    try {
+      const tab = await resolveApplicantTab();
+      live = await sendTabMessage(tab.id, { type: PROFILE_MESSAGES.GET_DIAGNOSTICS }, PING_TIMEOUT_MS);
+    } catch {
+      // No hiring tab, or nothing listening in it. The cached copy is the answer.
+    }
+    const applicant = live?.diagnostics || applicantDiagnostics;
+    if (live?.diagnostics) applicantDiagnostics = live.diagnostics;
+    return { ok: true, buildId: BUILD_ID, generatedAt: nowIso(), applicant };
   }
 
   if (type === APPLICANT_MESSAGES.STATUS) {

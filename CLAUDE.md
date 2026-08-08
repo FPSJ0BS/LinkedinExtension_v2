@@ -256,7 +256,6 @@ dist/     Build output — the folder Chrome loads
 | CSV import merges against a pre-loop snapshot; duplicate URLs in one file lose data | [dashboard.tsx](src/react/dashboard.tsx) |
 | `findByProfileUrl` scans all records despite an index | [db.js](src/db.js) |
 | Object URLs revoked on a fixed 15 s timer | [csv.js](src/csv.js) |
-| The Applicants page has no diagnostics button, though the worker answers one | [applicants-dashboard.tsx](src/react/applicants-dashboard.tsx) |
 | Pagination labels and the connections-total selector are assumptions until checked live | [connections.js](extension/content-scripts/connections.js) |
 
 ---

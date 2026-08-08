@@ -6172,3 +6172,90 @@ test("Phase 7: whether the left list moved is measured on the page, because it c
   assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
   assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "and the click budget is still seven");
 });
+
+
+// ------ Phase 8 of the multiple-LinkedIn-UI support guide: diagnostics
+//
+// "When a layout cannot be understood safely, report it instead of silently
+// returning empty fields." The report has existed since 3.6 and the worker has
+// answered it since then; nothing has ever sent the message, and CLAUDE.md
+// carried it as a known issue. This is the button.
+
+test("Phase 8: the Applicants page can ask for the report the worker has always answered", async () => {
+  const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const claude = await readFile(resolve(root, "CLAUDE.md"), "utf8");
+
+  // The control, and the handler behind it.
+  assert.match(page, /Download Diagnostics\s*\n?\s*<\/button>/, "the page renders the control");
+  assert.match(page, /onClick=\{this\.downloadDiagnostics\}/, "wired to a handler");
+  assert.match(page, /send\(APPLICANT_MESSAGES\.DIAGNOSTICS\)/, "which sends the message the worker answers");
+  assert.match(worker, /if \(type === APPLICANT_MESSAGES\.DIAGNOSTICS\) \{/, "and the worker still answers it");
+
+  // JSON, never a column. Rule 19 says append columns and never reorder, and a
+  // diagnostics blob is not a column at all.
+  assert.match(page, /downloadJson\(response, "profile-vault-applicant-diagnostics"\)/, "downloaded as JSON");
+  const handler = page.slice(page.indexOf("downloadDiagnostics = async"), page.indexOf("collectList ="));
+  assert.ok(handler.length > 200, "the handler must be found, not an empty slice");
+  assert.ok(!/downloadApplicantCsv|exportCsv/.test(handler), "and never through the CSV path");
+
+  // Nothing to report says so in words rather than greying the control out for
+  // a reason the page cannot explain.
+  assert.match(handler, /Nothing to report yet\./, "an empty report explains itself");
+
+  // React 16.0.0: a class method, no hooks, no Fragments, no createRoot.
+  // Judged on the CODE, not on the file: the comment at the top of this page
+  // names `createRoot` in order to say it is unavailable, and a comment is not
+  // a call — the same distinction `withoutComments` exists for.
+  assert.ok(!/useState|useEffect|useMemo|createRoot|React\.Fragment|<>/.test(withoutComments(page)),
+    "React 16.0.0 has none of those and TypeScript will not catch one");
+
+  // And the known issue it closes is gone from the brief.
+  assert.ok(!/The Applicants page has no diagnostics button/.test(claude),
+    "the known issue this phase closes must leave the list");
+});
+
+test("Phase 8: the report answers for the applicant the page is reading, not only the last one collected", async () => {
+  // THE GAP THIS CLOSES: `applicantDiagnostics` in the worker is only ever
+  // written by COLLECT_CURRENT. A whole-job run is detached — started with a
+  // fire-and-forget message and silent until it finishes — so the applicant a
+  // list run is reading right now was invisible to this report, and that is
+  // exactly the applicant a recruiter reaches for it about.
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const branch = worker.slice(
+    worker.indexOf("if (type === APPLICANT_MESSAGES.DIAGNOSTICS)"),
+    worker.indexOf("if (type === APPLICANT_MESSAGES.STATUS)")
+  );
+  assert.ok(branch.length > 300 && branch.length < 2000, "the branch must be found, and only it");
+
+  assert.match(branch, /sendTabMessage\(tab\.id, \{ type: PROFILE_MESSAGES\.GET_DIAGNOSTICS \}/,
+    "the page is asked for what it read last");
+  assert.match(branch, /const applicant = live\?\.diagnostics \|\| applicantDiagnostics;/,
+    "and the worker's cached copy is the fallback, so this can only ever answer with more");
+  assert.match(branch, /\} catch \{/, "a closed or navigated tab is not an error, it is the fallback");
+
+  // The content script has answered that message all along.
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  assert.match(source, /if \(type === "PV_GET_DIAGNOSTICS"\) \{/, "the page answers it");
+  assert.match(source, /diagnostics: state\.lastDiagnostics/, "with whichever applicant it read last");
+});
+
+test("Phase 8: a diagnostics report is never a CSV column", async () => {
+  // Re-asserted here because this is the phase that introduces a second
+  // downloadable artefact, and rule 19 is the one rule a new artefact is most
+  // likely to bend. The table and the CSV are byte-for-byte what they were.
+  const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
+  assert.equal(APPLICANT_TABLE_COLUMNS.length, 8, "eight table columns, still");
+  assert.equal(APPLICANT_CSV_COLUMNS.length, 9, "nine CSV columns, still");
+  assert.equal(
+    applicantsToCsv([]).replace(/^﻿/, "").split("\r\n")[0],
+    '"#","applicant_name","email","mobile","resume_file","current_role","current_company","total_experience","education"'
+  );
+
+  // And the page's own table header still matches the export, which is the
+  // assertion that has caught every accidental reorder.
+  const page = await readFile(resolve(root, "src/react/applicants-dashboard.tsx"), "utf8");
+  const head = /<thead>([\s\S]*?)<\/thead>/.exec(page);
+  assert.ok(head, "the table header must be found");
+  assert.ok(!/diagnostic/i.test(head[1]), "and it must not have grown a diagnostics column");
+});
