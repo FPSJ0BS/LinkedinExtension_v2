@@ -5,26 +5,35 @@ const Core = globalThis.ProfileVaultCore;
 // Kept in step with ARRAY_FIELDS in src/react/types.ts — that copy drives form
 // editing and this one drives validation, and they must list the same arrays.
 export const ARRAY_FIELDS = [
-  "cvLinks", "emails", "phones", "skills", "education", "openToWorkDetails",
+  "cvLinks", "emails", "phones", "skills", "education", "educationDetails",
+  "experience", "interests", "openToWorkDetails",
   "tags", "partialSections", "missingFields"
 ];
 
 /**
- * The stored record, in the order the table and the CSV show it.
+ * The stored record.
  *
- * 3.6.0 cut it down to what the run is actually for. `experience`,
+ * 3.6.0 cut it back to contact reachability and dropped everything the scan had
+ * already read — `experience`, `headline`, `location`, `about` — at the last
+ * step. What the scan reads is now what the record keeps:
+ *
+ * - `education`        the institutions, one name per line, which is what the
+ *                      table leads its Education cell with and what a search hits
+ * - `educationDetails` the WHOLE of each card — degree, field, dates, details
+ * - `experience`       one readable line per role, grouped by company
+ * - `interests`        the companies, newsletters, schools and groups followed
+ * - `headline`, `location`, `about` from the member's own top card
+ *
  * `yearsOfExperience`, `currentRole`, `currentCompany`, `currentEmploymentDates`,
- * `totalExperience`, `websites` and `profileImageUrl` are gone: they are no
- * longer extracted into the record, no longer exported, and no longer editable,
- * and a profile saved by an earlier version loses them the next time it is
- * written. Experience is still *read* during the scan — a late-hydrating
- * Experience section is real page change and the quiet count has to see it — it
- * is simply not stored.
+ * `totalExperience`, `websites`, `certifications`, `languages` and
+ * `profileImageUrl` stay retired: they were derived or unread, and a derived
+ * field that disagrees with the roles beside it is worse than no field (rule 1).
  */
 export const PROFILE_FIELDS = [
-  "fullName", "firstName", "lastName", "email", "emails", "mobile", "phones",
+  "fullName", "firstName", "lastName", "headline", "location", "about",
+  "email", "emails", "mobile", "phones",
   "cvUrl", "cvFileName", "cvAvailable", "cvLinks",
-  "openToWorkDetails", "education", "skills",
+  "openToWorkDetails", "education", "educationDetails", "experience", "skills", "interests",
   "profileUrl", "status", "lastCollectedAt", "notes", "tags"
 ];
 
@@ -43,7 +52,10 @@ export const PROFILE_STATUS = Object.freeze({
 });
 
 /** The value fields the Status column is judged on. */
-const PRIORITY_FIELDS = ["email", "mobile", "cvUrl", "skills", "education", "openToWorkDetails"];
+const PRIORITY_FIELDS = [
+  "email", "mobile", "cvUrl", "skills", "education", "experience", "interests",
+  "about", "location", "openToWorkDetails"
+];
 
 function deriveStatus(record) {
   const carries = PRIORITY_FIELDS.some((field) => Array.isArray(record[field]) ? record[field].length > 0 : Boolean(record[field]));
@@ -68,6 +80,22 @@ export function cvFileNameFrom(url) {
 
 export function cleanText(value) {
   return String(value ?? "").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").replace(/\u00A0/g, " ").replace(/[ \t]+/g, " ").trim();
+}
+
+/**
+ * `cleanText` for a paragraph.
+ *
+ * The About section is prose the member wrote, and its line breaks are part of
+ * what they wrote \u2014 collapsing them into one line rewrites it. Each line is
+ * cleaned on its own and the blank runs between paragraphs are capped at one.
+ */
+export function cleanParagraph(value) {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => cleanText(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**
@@ -230,6 +258,11 @@ export function normalizeProfile(input = {}) {
     fullName,
     firstName: cleanText(input.firstName) || split.firstName,
     lastName: cleanText(input.lastName) || split.lastName,
+    // The member's own top card. `about` keeps its line breaks — it is a
+    // paragraph the member wrote, and collapsing it would rewrite it.
+    headline: cleanText(input.headline),
+    location: cleanText(input.location),
+    about: cleanParagraph(input.about),
     email: primaryOf(input.email, emails),
     emails: linesToArray(emails),
     mobile: realPhones[0] || "",
@@ -242,7 +275,10 @@ export function normalizeProfile(input = {}) {
     cvLinks: linesToArray(realCvLinks),
     openToWorkDetails: linesToArray(input.openToWorkDetails),
     education: linesToArray(input.education),
+    educationDetails: linesToArray(input.educationDetails),
+    experience: linesToArray(input.experience),
     skills: linesToArray(input.skills),
+    interests: linesToArray(input.interests),
     profileUrl,
     status: cleanText(input.status),
     // The last time a collection actually wrote this record. A hand edit in the
@@ -276,7 +312,13 @@ export function validateProfile(profile) {
 
 export function mergeProfiles(existing, incoming) {
   const merged = { ...existing };
-  const replaceWhenPresent = new Set(["education", "openToWorkDetails", "partialSections", "missingFields"]);
+  // A fresh read of a whole section replaces that section; a contact list never
+  // does. Concatenating education or experience across two reads produces the
+  // same card twice as soon as one read caught it mid-hydration.
+  const replaceWhenPresent = new Set([
+    "education", "educationDetails", "experience", "interests",
+    "openToWorkDetails", "partialSections", "missingFields"
+  ]);
   // Contact lists concatenate: a CSV that carries one address must not drop the
   // second one already on the record.
   for (const [key, value] of Object.entries(incoming)) {

@@ -5,7 +5,7 @@ import { APPLICANT_MESSAGES, IMPORT_MESSAGES, STOP_ALL, type ImportSummary } fro
 
 const React: any = (globalThis as any).React;
 const ReactDOM: any = (globalThis as any).ReactDOM;
-const EXPECTED_BUILD_ID = "2026-08-03-react-v3.7.8";
+const EXPECTED_BUILD_ID = "2026-08-08-react-v3.8.0";
 
 interface PopupState {
   profile: ProfileRecord | null;

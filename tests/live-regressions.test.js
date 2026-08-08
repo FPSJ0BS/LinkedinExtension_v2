@@ -370,3 +370,68 @@ test("the worker pauses on a hidden collector and keeps the tab active", async (
   assert.match(tabsCore, /windows\.update\(windowId, \{ state: "normal", focused: false \}\)/,
     "the window must be raised out of a minimized state without stealing focus");
 });
+
+// ---------------------------------------------------------------------------
+// 9. A followed company was saved as the member's name, with an institution and
+//    a skill to match.
+//
+// The tiles inside Interests are what the scan actually read. Interests was not
+// in the section map, and `locateSectionRoot` only stops widening a section when
+// the container it is about to take would swallow a SECOND anchor — so a heading
+// the map has never heard of stops nothing, and the section above Interests kept
+// widening straight through it. Two guards, and the second is the one that
+// generalizes: every heading LinkedIn renders below the collected sections is a
+// boundary, so an unknown block can never be absorbed by the block above it.
+
+test("every section LinkedIn renders below the collected ones is a boundary", async () => {
+  const content = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
+  assert.match(content, /const BOUNDARY_ALIASES = \{/, "the boundaries must be declared, not implied");
+  for (const heading of [
+    "interests", "activity", "featured", "highlights", "projects", "publications",
+    "recommendations", "volunteering", "people also viewed"
+  ]) {
+    assert.ok(
+      content.includes(`"${heading}"`),
+      `"${heading}" must bound the section above it, or that section can take its cards`
+    );
+  }
+  assert.match(
+    content,
+    /const ALL_ANCHOR_ALIASES = \{ \.\.\.SECTION_ALIASES, \.\.\.BOUNDARY_ALIASES \};/,
+    "one map of where every section starts"
+  );
+  assert.match(
+    content,
+    /for \(const \[key, aliases\] of Object\.entries\(ALL_ANCHOR_ALIASES\)\)/,
+    "and the anchor matcher must consult it, not only the extracted sections"
+  );
+});
+
+test("a name candidate is checked against the profile's own URL before it is believed", async () => {
+  const content = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
+  assert.match(content, /function acceptNameCandidate\(value, profileUrl\)/, "an organization must be refused as a name");
+  assert.match(content, /Core\.looksLikeOrganizationName\(value\)/);
+  assert.match(content, /Core\.nameSlugAgreement\(value, profileUrl\) === "exact"/,
+    "unless the profile's own URL says that is who this page is about");
+  assert.match(content, /function slugNameBonus\(value, profileUrl\)/, "and agreement must score every other candidate");
+
+  // The URL is stamped once per run: LinkedIn routes an opened overlay into the
+  // address bar, and a name must never be checked against another member's page.
+  assert.match(content, /state\.profileUrl = profileUrl;/, "the run's own URL is stamped");
+  assert.match(content, /state\.profileUrl = "";/, "and cleared when the page routes elsewhere");
+});
+
+test("what the scan reads is what the record keeps", async () => {
+  const content = await readFile(resolve(root, "extension/content-scripts/content.js"), "utf8");
+  const profileBuild = content.slice(content.indexOf("const profile = {"), content.indexOf("// Confidence is scored"));
+  for (const field of [
+    "headline: identity.headline",
+    "location: identity.location",
+    "about: collector.data.about",
+    "educationDetails,",
+    "experience,",
+    "interests,"
+  ]) {
+    assert.ok(profileBuild.includes(field), `${field} must reach the record, not be read and dropped`);
+  }
+});

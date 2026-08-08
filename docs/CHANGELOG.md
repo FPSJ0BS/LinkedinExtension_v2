@@ -1,5 +1,79 @@
 # CHANGELOG.md
 
+## 3.8.0 — the block nobody told the map about, and the record that threw away what it had read
+
+Two faults, one cause between them, and one deliberate change of scope.
+
+**1. A followed company was saved as a connection's name.** The table showed a person called *Aakash
+Educational Services Limited*, with an institution ("Kota Rtu") and a skill ("Quality Control") to
+match. Nothing about those came off that member's own card. They came off the tiles inside
+**Interests**, the block that renders other entities.
+
+The name scorer had no shape test that could catch it: letters only, four words, no digits, near the
+top of a card — the same answers a real name gives. So the fix is not another shape test. It is the
+one identifier on the page that no re-render, no redesign and no neighbouring card can move: the
+member's **own URL**. LinkedIn builds `/in/<slug>` out of the member's name and only appends digits
+to make it unique, so the slug and the name agree by construction. `nameSlugAgreement` reports
+`exact` / `partial` / `conflict` / `unknown`, `acceptNameCandidate` refuses an organization-shaped
+value the URL does not confirm, and `slugNameBonus` scores every other candidate by it. A conflict is
+penalized rather than refused — a member who changed their display name after the slug was minted
+still has a real name on the page — and a name with no latin form is given **no opinion** rather than
+a wrong one (rule 1). This is structure, not array position (rule 7), and it holds on every layout.
+
+**2. And the cause underneath it: the section map had never heard of Interests.** `locateSectionRoot`
+stops widening a section when the container it is about to take would swallow a **second anchor** — so
+a heading the map does not know stops nothing, and the section above Interests kept widening straight
+through it and took its tiles as its own entities. That is why a followed company could be an
+institution, a skill and a name all at once.
+
+**⚠ The rule this establishes: every heading LinkedIn renders below the collected sections is a
+boundary, whether or not anything reads it.** `BOUNDARY_ALIASES` names Activity, Featured, Highlights,
+Projects, Publications, Courses, Honors, Volunteering, Organizations, Recommendations, Test scores,
+Causes, People also viewed, People you may know and the premium-profile strip. They are matched
+exactly like a real section heading and then never extracted, so each costs one boundary and promises
+nothing. Interests moved the other way — it is now a **collected** section, because the names on those
+tiles are worth having and reading them is what proves the boundary works.
+
+**3. What the scan reads is what the record keeps.** 3.6.0 cut the record back to contact
+reachability, and that was half right and half wasteful: the scan was still walking Experience, About
+and the top card on every pass and throwing the result away at the last step. Now kept —
+
+| Field | What it holds |
+|---|---|
+| `experience` | one readable line per role, grouped by company so a promotion is two roles there |
+| `educationDetails` | the whole of each card — degree, field, dates, details |
+| `interests` | the companies, newsletters, schools and groups followed |
+| `headline`, `location`, `about` | the member's own top card; `about` keeps its line breaks |
+
+`education` still holds the bare institution names beside them, because that is what the table leads
+its cell with and what a search hits. The **derived** fields stay retired — `totalExperience`,
+`currentRole`, `currentCompany`, `yearsOfExperience`, `websites`, `profileImageUrl` — because a value
+summed or picked out of a list, disagreeing with the roles printed beside it, is worse than no value.
+
+`mergeProfiles` treats each new list as a whole-section replacement rather than a concatenation:
+a scan's first pass always catches a section mid-hydration, and concatenating would keep both copies.
+
+**4. The table was rebuilt around them, as asked.** Name · Email · Mobile · Location · Education ·
+Skills · Experience · About · Interests · Open to Work · Status · Notes · Actions. **The name is the
+link now**, so the separate Profile URL column went with it. CV, Last Collected and Tags left the
+table — and none of them left the record: all three are in the details panel, the editor and the CSV,
+because the table decides what is on screen and nothing else (rules 18 and 19). About is capped by
+**word count**: ten words or fewer render inline, anything longer is hidden behind "See more", which
+is the same affordance every other compact cell already used.
+
+**The CSV appends and does not reorder** (rule 19). The first eighteen columns are exactly where
+3.6.0 left them, so a file written by any release since then still opens against the same headers;
+`location`, `headline`, `about`, `experience`, `education_details` and `interests` follow them.
+`CSV_TABLE_COLUMNS` stopped meaning "the file's order" and now means "the table's columns", which is
+the only way both rules can hold at once.
+
+**Not fixed, and not fixable from here:** the Skills section renders two or three skills and hides
+the rest behind *Show all N skills*. That control is not on rule 5's allowlist and was not added to
+it, so what is collected is what the profile paints.
+
+Build ID `2026-08-08-react-v3.8.0`, so an already-injected content script is refused and replaced
+rather than quietly serving the old scorer.
+
 ## 3.7.24 — the guard that stopped the scroll, and the page that was walked from its middle
 
 Two reports, one of them a regression 3.7.23 caused.

@@ -1,0 +1,103 @@
+{
+  "schema": 2,
+  "id": "TASK-0148",
+  "name": "Connections: keep the whole of education, skills and experience, add about, location and interests, and rebuild the Saved Profiles table around them",
+  "request": "Connections: keep the whole of education, skills and experience, add about, location and interests, and rebuild the Saved Profiles table around them",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-08T09:20:38.630Z",
+  "completedAt": "2026-08-08T09:41:49.386Z",
+  "startCommit": "919e456b5881c3b55d548ccfadedde154aa810fe",
+  "gitRef": "task/TASK-0148",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "added",
+      "path": "docs/multiple-linkedin-dom-ui-support-guide.md",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/csv.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/extraction-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/profile-utils.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/types.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/contact-extraction.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/csv.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/extraction-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/live-regressions.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/profile-utils.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/react-architecture.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: tsc --noEmit, build, 474 tests, docs:check, validate-build"
+  ],
+  "result": "TASK-0148: A followed company was saved as a connection's name, and the record threw away what the scan had already read. Cause of the first: the section map had never heard of Interests, and locateSectionRoot only stops widening a section when the container would swallow a SECOND anchor - so a heading the map does not know stops nothing, and the section above Interests widened straight through it and took its tiles as its own entities, which is how one followed company became a name, an institution and a skill at once. BOUNDARY_ALIASES now names every heading LinkedIn renders below the collected sections (Activity, Featured, Highlights, Projects, Publications, Courses, Honors, Volunteering, Organizations, Recommendations, Test scores, Causes, People also viewed, People you may know, the premium strip); they are matched exactly like a real heading and then never extracted, so each costs one boundary and promises nothing. Interests became a collected section. The name scorer gained the one identifier no re-render can move - the member's own URL: nameSlugAgreement reports exact/partial/conflict/unknown, acceptNameCandidate refuses an organization-shaped value the URL does not confirm, slugNameBonus scores the rest, a conflict is penalized rather than refused, and a name with no latin form is given no opinion rather than a wrong one (rules 1 and 7). The record now keeps what the scan was already reading and discarding: experience (one readable line per role, grouped by company), educationDetails (degree, field, dates, details), interests, headline, location and about (line breaks intact); education still holds the bare institutions beside them. The derived fields stay retired. mergeProfiles replaces a whole section rather than concatenating two copies of a mid-hydration read. The Saved Profiles table was rebuilt as Name (now the profile link) - Email - Mobile - Location - Education - Skills - Experience - About - Interests - Open to Work - Status - Notes - Actions; CV, Last Collected, Tags and Profile URL left the table and none of them left the record. About is capped by word count: ten or fewer inline, longer behind See more. The CSV appends its six new columns and does not reorder the eighteen 3.6.0 wrote (rule 19). Skills still collects only what the profile paints - Show all N skills is not on rule 5's allowlist. Build ID and version bumped to 3.8.0 so an already-injected content script is replaced. CLAUDE.md's local links were repointed at extension/ and docs/, which had been broken since the layout moved and were failing npm run docs:check on the base tree."
+}

@@ -86,26 +86,46 @@ test("the saved-profiles table shows the specified columns in the specified orde
   const headers = [...head.matchAll(/<th(?:\s[^>]*)?>([^<]+)<\/th>/g)].map((match) => match[1].trim());
   assert.deepEqual(
     headers,
-    ["Name", "Email", "Mobile", "CV", "Open to Work", "Education", "Skills",
-      "Profile URL", "Status", "Last Collected", "Notes", "Tags", "Actions"],
+    ["Name", "Email", "Mobile", "Location", "Education", "Skills", "Experience",
+      "About", "Interests", "Open to Work", "Status", "Notes", "Actions"],
     "the column order is part of the specification"
   );
+
+  // Asked for outright: the three columns that left the table.
+  for (const gone of ["CV", "Last Collected", "Tags", "Profile URL"]) {
+    assert.ok(!headers.includes(gone), `${gone} must not be a column any more`);
+  }
 
   const body = source.slice(source.indexOf("<tbody>"), source.indexOf("</tbody>"));
   assert.match(body, /summarizeEducation\(/, "education shows the first institution plus +N more");
   assert.match(body, /summarizeSkills\(/, "skills are capped with a +N more");
+  assert.match(body, /summarizeExperience\(/, "so is experience");
+  assert.match(body, /summarizeAbout\(/, "and About is capped by word count, not character count");
   assert.match(body, /<CompactCell/, "every long cell must be compact");
   assert.match(body, /View details/, "a details affordance is required");
   assert.match(source, />See more</, "and each compact cell must offer the rest");
+
+  // The Profile URL column went because the name became the link, not because
+  // the link went: a row with no way to open the profile would be worse.
+  const nameCell = body.slice(body.indexOf('className="name-cell"'), body.indexOf('label="Email"'));
+  assert.match(nameCell, /href=\{profile\.profileUrl\}/, "the name cell must link to the profile");
 
   // The whole value lives in the details view only.
   const details = source.slice(source.indexOf("renderDetails()"), source.indexOf("renderEditor()"));
   assert.match(details, /profile\.openToWorkDetails\.map/, "the full open-to-work panel belongs there");
   assert.match(details, /profile\.education\.map/, "and every institution");
+  assert.match(details, /profile\.educationDetails\.map/, "and the whole of every education card");
+  assert.match(details, /profile\.experience\.map/, "and every role");
   assert.match(details, /profile\.skills\.map/, "and every skill");
+  assert.match(details, /profile\.interests\.map/, "and every interest");
+  assert.match(details, /profile\.about/, "and the whole About paragraph the cell hid");
+  // Dropped from the table, kept on the record — so they must still be readable.
+  assert.match(details, /cvLabel\(profile\)/, "the CV is still reachable");
+  assert.match(details, /formatDate\(profile\.lastCollectedAt\)/, "so is when it was collected");
+  assert.match(details, /profile\.tags\.map/, "and the user's own tags");
 });
 
-test("the CSV columns are the table columns", async () => {
+test("the CSV exports the table's columns, and keeps the ones the table dropped", async () => {
   const csv = await readFile(resolve(root, "src/csv.js"), "utf8");
   const dashboard = await readFile(resolve(root, "src/react/dashboard.tsx"), "utf8");
   const head = dashboard.slice(dashboard.indexOf("<thead>"), dashboard.indexOf("</thead>"));
@@ -113,11 +133,20 @@ test("the CSV columns are the table columns", async () => {
     .map((match) => match[1].trim())
     .filter((label) => label !== "Actions")
     .map((label) => label.toLowerCase().replace(/ /g, "_"));
-  // The table calls two of them by a friendlier name than the file does.
-  const expected = headers.map((label) => (label === "cv" ? "cv_url" : label === "profile_url" ? "profile_url" : label));
   const module = await import("../src/csv.js");
-  assert.deepEqual([...module.CSV_TABLE_COLUMNS], expected, "the exported list must match the rendered header");
+  assert.deepEqual([...module.CSV_TABLE_COLUMNS], headers, "the exported list must match the rendered header");
   assert.match(csv, /export const CSV_TABLE_COLUMNS/, "the shared list must be exported, not duplicated");
+
+  // The file is no longer the table: rule 19 forbids reordering a column and the
+  // table reordered, so every table column must be IN the file, and the columns
+  // the table stopped showing must still be exported.
+  const labels = module.CSV_COLUMNS.map(([, label]) => label);
+  for (const label of module.CSV_TABLE_COLUMNS) {
+    assert.ok(labels.includes(label), `${label} is on the table and must be in the file`);
+  }
+  for (const kept of ["cv_url", "last_collected", "tags", "profile_url"]) {
+    assert.ok(labels.includes(kept), `${kept} left the table and must not leave the file`);
+  }
 });
 
 test("finding connections and extracting them are separate buttons", async () => {

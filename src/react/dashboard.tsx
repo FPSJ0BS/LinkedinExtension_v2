@@ -53,6 +53,31 @@ function summarizeEducation(entries: string[] = []) {
   return summarizeList(entries, 1);
 }
 
+/** The most recent role, and how many more there are. */
+function summarizeExperience(entries: string[] = []) {
+  return summarizeList(entries, 1);
+}
+
+function summarizeInterests(entries: string[] = []) {
+  return summarizeList(entries, 2);
+}
+
+/**
+ * How the About cell behaves.
+ *
+ * A profile's About is a paragraph, and a paragraph in a table cell makes the
+ * row unreadable. Ten words is the line the user drew: up to ten and the cell
+ * shows the whole thing, past ten and the text is hidden behind "See more",
+ * which opens the details panel where the full paragraph lives.
+ */
+const ABOUT_INLINE_WORD_LIMIT = 10;
+
+function summarizeAbout(about: string = ""): { text: string; words: number; hidden: boolean } {
+  const words = String(about || "").split(/\s+/).filter(Boolean);
+  const hidden = words.length > ABOUT_INLINE_WORD_LIMIT;
+  return { text: hidden ? "" : String(about || "").trim(), words: words.length, hidden };
+}
+
 function isOpenToWork(profile: ProfileRecord): boolean {
   return (profile.openToWorkDetails || []).length > 0;
 }
@@ -434,8 +459,14 @@ class DashboardApp extends React.Component {
             <button className="secondary small" type="button" onClick={close}>Close</button>
           </header>
 
-          {/* The record, in the order the table shows it. */}
+          {/*
+            The whole record. Three columns left the table in this release — CV,
+            Last collected and Tags — and all three are still here, because they
+            are still on the record and the table only decides what is on SCREEN.
+          */}
           <dl className="details-facts">
+            <div><dt>Headline</dt><dd>{profile.headline || "—"}</dd></div>
+            <div><dt>Location</dt><dd>{profile.location || "—"}</dd></div>
             <div><dt>Email</dt><dd>{profile.email ? <a href={`mailto:${profile.email}`}>{profile.email}</a> : "—"}</dd></div>
             <div><dt>Mobile</dt><dd>{profile.mobile ? <a href={`tel:${profile.mobile}`}>{profile.mobile}</a> : "—"}</dd></div>
             <div>
@@ -446,6 +477,14 @@ class DashboardApp extends React.Component {
             <div><dt>Status</dt><dd>{profile.status || "—"}</dd></div>
             <div><dt>Last collected</dt><dd>{formatDate(profile.lastCollectedAt)}</dd></div>
           </dl>
+
+          {profile.about ? (
+            <section className="details-section">
+              <h3>About</h3>
+              {/* `pre-wrap`: the member's own line breaks are part of what they wrote. */}
+              <p className="details-about">{profile.about}</p>
+            </section>
+          ) : null}
 
           {/* Only worth its own block when a profile carried more than one. */}
           {profile.cvLinks.length > 1 || profile.emails.length > 1 || profile.phones.length > 1 ? (
@@ -469,16 +508,41 @@ class DashboardApp extends React.Component {
           ) : null}
 
           <section className="details-section">
+            <h3>Experience ({profile.experience.length})</h3>
+            <ul className="details-list">
+              {profile.experience.length ? profile.experience.map((entry) => <li key={entry}>{entry}</li>) : <li>—</li>}
+            </ul>
+          </section>
+
+          {/*
+            The institutions lead, because that is what the table shows and what a
+            search matches. The full cards follow when the scan read more than the
+            name — the degree, the field, the dates — so nothing is lost to the
+            summary the table needs.
+          */}
+          <section className="details-section">
             <h3>Education ({profile.education.length})</h3>
             <ul className="details-list">
               {profile.education.length ? profile.education.map((entry) => <li key={entry}>{entry}</li>) : <li>—</li>}
             </ul>
+            {profile.educationDetails.length ? (
+              <ul className="details-list">
+                {profile.educationDetails.map((entry) => <li key={entry}>{entry}</li>)}
+              </ul>
+            ) : null}
           </section>
 
           <section className="details-section">
             <h3>Skills ({profile.skills.length})</h3>
             <div className="chip-list">
               {profile.skills.length ? profile.skills.map((skill) => <span className="chip" key={skill}>{skill}</span>) : "—"}
+            </div>
+          </section>
+
+          <section className="details-section">
+            <h3>Interests ({profile.interests.length})</h3>
+            <div className="chip-list">
+              {profile.interests.length ? profile.interests.map((entry) => <span className="chip" key={entry}>{entry}</span>) : "—"}
             </div>
           </section>
 
@@ -514,6 +578,8 @@ class DashboardApp extends React.Component {
             <h2 id="editorTitle">{profile.id ? "Edit profile" : "Add profile manually"}</h2>
             <div className="editor-grid">
               <InputField label="Full name" name="fullName" value={textValue("fullName")} onChange={this.updateEditor} />
+              <InputField label="Headline" name="headline" value={textValue("headline")} onChange={this.updateEditor} />
+              <InputField label="Location" name="location" value={textValue("location")} onChange={this.updateEditor} />
               <InputField label="Email" name="email" type="email" value={textValue("email")} onChange={this.updateEditor} />
               <InputField label="Mobile number" name="mobile" value={textValue("mobile")} onChange={this.updateEditor} />
               <InputField label="Status" name="status" value={textValue("status")} onChange={this.updateEditor} />
@@ -527,6 +593,7 @@ class DashboardApp extends React.Component {
                 rows={5}
                 placeholder="One labelled line per field, e.g. Job titles: Software Engineer"
               />
+              <EditorTextArea label="About" name="about" value={textValue("about")} onChange={this.updateEditor} rows={5} />
               <EditorTextArea
                 label="Education"
                 name="education"
@@ -535,7 +602,24 @@ class DashboardApp extends React.Component {
                 rows={4}
                 placeholder="One institution name per line"
               />
+              <EditorTextArea
+                label="Education details"
+                name="educationDetails"
+                value={listValue("educationDetails")}
+                onChange={this.updateEditor}
+                rows={4}
+                placeholder="One card per line, e.g. BIT Sindri — BTech, Chemical Engineering · 2019 – 2023"
+              />
+              <EditorTextArea
+                label="Experience"
+                name="experience"
+                value={listValue("experience")}
+                onChange={this.updateEditor}
+                rows={5}
+                placeholder="One role per line, e.g. Senior Lecturer — The Narayana Group · Jun 2023 - Present"
+              />
               <EditorTextArea label="Skills" name="skills" value={listValue("skills")} onChange={this.updateEditor} rows={4} />
+              <EditorTextArea label="Interests" name="interests" value={listValue("interests")} onChange={this.updateEditor} rows={3} />
               <EditorTextArea label="All email addresses" name="emails" value={listValue("emails")} onChange={this.updateEditor} rows={2} />
               <EditorTextArea label="All phone numbers" name="phones" value={listValue("phones")} onChange={this.updateEditor} rows={2} />
               <EditorTextArea label="CV / resume links" name="cvLinks" value={listValue("cvLinks")} onChange={this.updateEditor} rows={2} />
@@ -627,16 +711,25 @@ class DashboardApp extends React.Component {
             <thead>
               <tr>
                 <th><input type="checkbox" checked={allVisibleSelected} onChange={(event: any) => this.toggleVisible(event.target.checked)} aria-label="Select visible profiles" /></th>
-                {/* Pinned to the left as a pair with the body cell below it. */}
-                <th className="name-cell">Name</th><th>Email</th><th>Mobile</th><th>CV</th><th>Open to Work</th>
-                <th>Education</th><th>Skills</th><th>Profile URL</th><th>Status</th>
-                <th>Last Collected</th><th>Notes</th><th>Tags</th><th>Actions</th>
+                {/*
+                  Pinned to the left as a pair with the body cell below it. The
+                  name IS the link to the profile now, so there is no separate
+                  Profile URL column. CV, Last Collected and Tags left the table
+                  and stayed on the record — they are in the details panel, the
+                  editor and the CSV.
+                */}
+                <th className="name-cell">Name</th><th>Email</th><th>Mobile</th><th>Location</th>
+                <th>Education</th><th>Skills</th><th>Experience</th><th>About</th><th>Interests</th>
+                <th>Open to Work</th><th>Status</th><th>Notes</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {pageRows.length ? pageRows.map((profile) => {
                 const education = summarizeEducation(profile.education);
                 const skills = summarizeSkills(profile.skills);
+                const experience = summarizeExperience(profile.experience);
+                const interests = summarizeInterests(profile.interests);
+                const about = summarizeAbout(profile.about);
                 const more = openDetails(profile);
                 return (
                 <tr key={profile.id || profile.profileUrl}>
@@ -648,20 +741,22 @@ class DashboardApp extends React.Component {
                       aria-label={`Select ${profile.fullName || "profile"}`}
                     />
                   </td>
-                  <td className="name-cell">{profile.fullName}</td>
+                  {/* The name IS the profile link — one cell, not two. */}
+                  <td className="name-cell" data-label="Name">
+                    {profile.profileUrl ? (
+                      <a href={profile.profileUrl} target="_blank" rel="noreferrer">{profile.fullName || "Open profile"}</a>
+                    ) : (profile.fullName || "—")}
+                  </td>
                   <CompactCell className="contact-cell" label="Email" more={profile.emails.length > 1} onMore={more}>
                     {profile.email ? <a href={`mailto:${profile.email}`}>{profile.email}</a> : "—"}
                   </CompactCell>
                   <CompactCell className="contact-cell" label="Mobile" more={profile.phones.length > 1} onMore={more}>
                     {profile.mobile ? <a href={`tel:${profile.mobile}`}>{profile.mobile}</a> : "—"}
                   </CompactCell>
-                  <CompactCell label="CV" more={profile.cvLinks.length > 1} onMore={more}>
-                    {profile.cvUrl ? <a href={profile.cvUrl} target="_blank" rel="noreferrer">{cvLabel(profile)}</a> : "—"}
+                  <CompactCell label="Location" onMore={more}>
+                    {profile.location || "—"}
                   </CompactCell>
-                  <CompactCell label="Open to Work" more={isOpenToWork(profile)} onMore={more}>
-                    {isOpenToWork(profile) ? "Yes" : "—"}
-                  </CompactCell>
-                  <CompactCell label="Education" more={education.extra > 0} onMore={more}>
+                  <CompactCell label="Education" more={education.extra > 0 || profile.educationDetails.length > 0} onMore={more}>
                     {education.shown.length ? (
                       <span>
                         {education.shown[0]}
@@ -677,22 +772,32 @@ class DashboardApp extends React.Component {
                       </div>
                     ) : "—"}
                   </CompactCell>
-                  <td className="contact-cell" data-label="Profile URL">
-                    <span className="cell-clip">
-                      {profile.profileUrl ? <a href={profile.profileUrl} target="_blank" rel="noreferrer">Open</a> : "—"}
-                    </span>
-                  </td>
-                  <td data-label="Status"><span className={`status-pill ${profile.status}`.trim()}>{profile.status || "—"}</span></td>
-                  <td data-label="Last Collected">{formatDate(profile.lastCollectedAt)}</td>
-                  <CompactCell label="Notes" more={profile.notes.length > 60} onMore={more}>
-                    {profile.notes ? profile.notes.slice(0, 60) : "—"}
+                  <CompactCell label="Experience" more={experience.extra > 0} onMore={more}>
+                    {experience.shown.length ? (
+                      <span>
+                        {experience.shown[0]}
+                        {experience.extra ? <span className="chip more">+{experience.extra} more</span> : null}
+                      </span>
+                    ) : "—"}
                   </CompactCell>
-                  <CompactCell label="Tags" more={profile.tags.length > 3} onMore={more}>
-                    {profile.tags.length ? (
+                  {/* Ten words or fewer inline; anything longer is behind See more. */}
+                  <CompactCell label="About" more={about.hidden} onMore={more}>
+                    {about.hidden ? <span className="chip more">{about.words} words</span> : (about.text || "—")}
+                  </CompactCell>
+                  <CompactCell label="Interests" more={interests.extra > 0} onMore={more}>
+                    {interests.shown.length ? (
                       <div className="chip-list">
-                        {profile.tags.slice(0, 3).map((tag) => <span className="chip" key={tag}>{tag}</span>)}
+                        {interests.shown.map((entry) => <span className="chip" key={entry}>{entry}</span>)}
+                        {interests.extra ? <span className="chip more">+{interests.extra} more</span> : null}
                       </div>
                     ) : "—"}
+                  </CompactCell>
+                  <CompactCell label="Open to Work" more={isOpenToWork(profile)} onMore={more}>
+                    {isOpenToWork(profile) ? "Yes" : "—"}
+                  </CompactCell>
+                  <td data-label="Status"><span className={`status-pill ${profile.status}`.trim()}>{profile.status || "—"}</span></td>
+                  <CompactCell label="Notes" more={profile.notes.length > 60} onMore={more}>
+                    {profile.notes ? profile.notes.slice(0, 60) : "—"}
                   </CompactCell>
                   <td className="actions-cell">
                     <button className="secondary small" onClick={more}>View details</button>
@@ -702,6 +807,7 @@ class DashboardApp extends React.Component {
                 </tr>
                 );
               }) : (
+                // 14 = the checkbox column plus the thirteen named in the head.
                 <tr><td colSpan={14} className="empty">No profiles match the current filters.</td></tr>
               )}
             </tbody>

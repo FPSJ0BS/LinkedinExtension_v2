@@ -126,6 +126,29 @@
     return true;
   }
 
+  /**
+   * True for something that is genuinely an Interest.
+   *
+   * The Interests block renders OTHER entities — the companies, newsletters,
+   * schools and groups the member follows — and each tile carries a follower
+   * count and a Follow button, above a tab strip reading "Companies /
+   * Newsletters / Schools". The tile's name is the interest; none of the rest is.
+   */
+  function isInterestValue(value) {
+    const text = collapseRepeatedText(typeof value === "string" ? value : value?.name);
+    if (!text || text.length > 120) return false;
+    if (isNoiseText(text)) return false;
+    // The block's own heading and its tab labels.
+    if (SECTION_LABEL_PATTERN.test(text)) return false;
+    if (/^\s*\+?\s*follow(?:ing|ers?|ed)?\s*$/i.test(text)) return false;
+    // A tally rendered under the tile, not a name: "69,381 followers".
+    if (/\b(?:followers?|members?|subscribers?|associate members?)\b/i.test(text)) return false;
+    if (SKILL_CONTROL_PATTERN.test(text)) return false;
+    if (isEmploymentMeta(text)) return false;
+    if (/^[\d,.\s+]+$/.test(text)) return false;
+    return true;
+  }
+
   /** A profile section's own heading is never one of its values. */
   const SECTION_LABEL_PATTERN =
     /^(?:skills?|interests?|experiences?|educations?|languages?|certifications?|licenses? (?:&|and) certifications?|top voices|companies|groups|newsletters|schools|recommendations?|activity|about|featured|honors? (?:&|and) awards?|projects?|publications?|courses?|volunteering)$/i;
@@ -270,6 +293,86 @@
     if (!parts.length) return { firstName: "", lastName: "" };
     if (parts.length === 1) return { firstName: parts[0], lastName: "" };
     return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+  }
+
+  // ------------------------------------------------------- who the page is about
+  //
+  // Live defect: a connection was saved under the name "Aakash Educational
+  // Services Limited" — a company the member follows, rendered in the Interests
+  // block, not the member. Every signal the old scorer used said "this is a
+  // plausible person": letters only, four words, no digits, near the top of a
+  // card. What it never consulted is the one identifier on the page that no
+  // re-render and no redesign can move — the member's OWN URL. LinkedIn builds
+  // /in/<slug> out of the member's name and only appends digits to make it
+  // unique, so the slug and the name agree by construction, and a candidate that
+  // shares no word with it is somebody (or something) else. That is structure,
+  // not array position (rule 7), and it holds across every LinkedIn layout.
+
+  /** Words that make a value an organization's name rather than a person's. */
+  const ORGANIZATION_NAME_PATTERN =
+    /\b(?:limited|ltd|pvt|private|inc|incorporated|llc|llp|plc|gmbh|corp|corporation|company|co|institute|institutes|institution|university|college|school|schools|academy|academies|foundation|trust|group|services|solutions|technologies|technology|systems|enterprises|industries|labs|laboratories|consultancy|consultants|hospital|clinic|bank|society|association|council|ventures|holdings|partners|networks|studios|educational|education|international|global|pharmaceuticals|infotech|softech|software)\b/i;
+
+  /**
+   * True for a value that names an organization.
+   * Used to refuse one as a member's name — a company card, a school card and an
+   * Interests tile all render a bare organization name exactly like a person's.
+   */
+  function looksLikeOrganizationName(value) {
+    const text = cleanText(value);
+    if (!text) return false;
+    if (/[&@]|\bpvt\.|\bltd\./i.test(text)) return true;
+    return ORGANIZATION_NAME_PATTERN.test(text);
+  }
+
+  /** Lowercase, accent-free, so "Nihál" and the slug's "nihal" compare equal. */
+  function asciiFold(value) {
+    // Decompose, then drop every combining mark: `\p{M}` names the category
+    // rather than a code-point range, so the rule reads as what it is.
+    return cleanText(value).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  }
+
+  /** The letter-only words of a name. A script with no latin form yields none. */
+  function nameWordTokens(value) {
+    return asciiFold(value).split(/[^a-z]+/).filter((token) => token.length > 1);
+  }
+
+  /**
+   * The words LinkedIn built a profile URL out of.
+   *
+   * `/in/isha-sharma-264954380` → ["isha", "sharma"]: the numeric uniquifier
+   * splits away on its own because the split is on everything that is not a
+   * letter. An opaque member URN (`/in/ACoAAB...`) names nobody and yields none.
+   */
+  function profileSlugTokens(url) {
+    const match = /\/in\/([^/?#]+)/i.exec(cleanText(url));
+    if (!match) return [];
+    let slug = match[1];
+    try { slug = decodeURIComponent(slug); } catch { /* keep the raw slug */ }
+    if (/^ACoA/.test(slug)) return [];
+    return asciiFold(slug).split(/[^a-z]+/).filter((token) => token.length > 1);
+  }
+
+  /**
+   * How well a candidate name agrees with the profile's own URL.
+   *
+   * "exact"    — every word of the name is in the slug, or the two run together
+   *              ("nihalsharma-1a2b" is still Nihal Sharma).
+   * "partial"  — some words agree; a middle name or a suffix the slug dropped.
+   * "conflict" — the slug names somebody, and this candidate is not them.
+   * "unknown"  — no slug words, or a name with no latin form to compare. No
+   *              opinion is offered rather than a wrong one (rule 1).
+   */
+  function nameSlugAgreement(name, url) {
+    const slugTokens = profileSlugTokens(url);
+    const tokens = nameWordTokens(name);
+    if (!slugTokens.length || !tokens.length) return "unknown";
+    const joinedSlug = slugTokens.join("");
+    const joinedName = tokens.join("");
+    if (joinedSlug.includes(joinedName) || joinedName.includes(joinedSlug)) return "exact";
+    const matched = tokens.filter((token) => joinedSlug.includes(token)).length;
+    if (matched === tokens.length) return "exact";
+    if (matched > 0) return "partial";
+    return "conflict";
   }
 
   function looksLikeDateRange(value) {
@@ -676,6 +779,39 @@
       ["Details", record.details]
     ];
     return fields.filter(([, value]) => cleanText(value)).map(([label, value]) => `${label}: ${collapseRepeatedText(value)}`).join(" | ");
+  }
+
+  // ------------------------------------------------------- the readable forms
+  //
+  // `formatExperience` / `formatEducation` above write the LABELLED form, which
+  // exists so a record can be parsed back out of a string. These write the form a
+  // person reads — the line the table cell, the details panel and the CSV column
+  // show. Both are kept, and neither is derived from the other: the labelled form
+  // is a parse target and this is presentation, and collapsing them would mean
+  // one of the two doing its job badly.
+
+  /** One role: "Senior Lecturer — The Narayana Group · Full-time · Jun 2023 - Present". */
+  function describeExperienceRecord(record) {
+    if (!record) return "";
+    const head = [cleanText(record.title), cleanText(record.company)].filter(Boolean).join(" — ");
+    const parts = [
+      head,
+      cleanText(record.employmentType),
+      cleanText(record.dateRange),
+      cleanText(record.duration),
+      cleanText(record.location),
+      cleanText(record.workMode),
+      cleanText(record.description)
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }
+
+  /** One school: "BIT Sindri — BTEC, Chemical Engineering · 2019 – 2023". */
+  function describeEducationRecord(record) {
+    if (!record) return "";
+    const qualification = [cleanText(record.degree), cleanText(record.fieldOfStudy)].filter(Boolean).join(", ");
+    const head = [cleanText(record.institution), qualification].filter(Boolean).join(" — ");
+    return [head, cleanText(record.dates), cleanText(record.details)].filter(Boolean).join(" · ");
   }
 
   function parseMonthPoint(value, isEnd = false, now = new Date()) {
@@ -1482,6 +1618,10 @@
     const skills = new Map();
     const certifications = new Map();
     const languages = new Map();
+    // The companies, newsletters, schools and groups the member follows. Names
+    // only — rule 2 still forbids reading a contact detail out of this block,
+    // because everything in it belongs to somebody who is not this member.
+    const interests = new Map();
     const partialSections = new Set();
     // Contact reachability is now the point of the record, so it accumulates
     // exactly like an entity does: merge-only, deduped, first-seen order.
@@ -1566,6 +1706,9 @@
       },
       addLanguage(value) {
         return addSimple(languages, value, (text) => !SKILL_CONTROL_PATTERN.test(text) && !isEmploymentMeta(text));
+      },
+      addInterest(value) {
+        return addSimple(interests, value, isInterestValue);
       },
       addCertification(value) {
         const record = certificationRecord(value);
@@ -1653,14 +1796,30 @@
       /**
        * One entry per institution, named, in the order they were first read.
        *
-       * 3.6.0 stores the institution and nothing else. The degree, field, dates
-       * and details are still parsed — they are what tells two cards for the
-       * same school apart while the page hydrates — they are simply not stored.
+       * The bare institution name is what the table's Education cell leads with
+       * and what a search matches on. Everything else the card carried — the
+       * degree, the field, the dates, the details — is kept too, on
+       * `educationEntries()` below, so nothing read from the page is discarded.
        */
       education: () => uniqueText(
         groupEducationByInstitution([...education.values()]).map((record) => cleanText(record.institution)).filter(Boolean)
       ),
+      /** The whole of every education card, one readable line each. */
+      educationEntries: () => uniqueText(
+        groupEducationByInstitution([...education.values()]).map(describeEducationRecord).filter(Boolean)
+      ),
+      /**
+       * The whole of every role, one readable line each, grouped by company so a
+       * promotion inside one organization reads as two roles there rather than
+       * as two unrelated jobs.
+       */
+      experienceEntries: () => uniqueText(
+        groupExperienceByCompany([...experience.values()])
+          .flatMap((group) => group.roles.map(describeExperienceRecord))
+          .filter(Boolean)
+      ),
       skills: () => [...skills.values()],
+      interests: () => [...interests.values()],
       certifications: () => [...certifications.values()].map(formatCertification).filter(Boolean),
       languages: () => [...languages.values()],
       partialSections: () => [...partialSections],
@@ -1678,6 +1837,7 @@
           skills: skills.size,
           certifications: certifications.size,
           languages: languages.size,
+          interests: interests.size,
           emails: emails.size,
           phones: phones.size,
           cvLinks: cvLinks.size,
@@ -1698,6 +1858,10 @@
           counts.skills,
           counts.certifications,
           counts.languages,
+          // A late-hydrating Interests block is real page change: without it in
+          // the fingerprint the scan can call the page settled before the last
+          // section on it has rendered at all.
+          counts.interests,
           counts.emails,
           counts.phones,
           counts.cvLinks,
@@ -1714,7 +1878,12 @@
     certificationRecord, formatCertification, mergeEntityRecords,
     groupEducationByInstitution, createProfileAccumulator,
     stripEntityMeta, isEmploymentMeta, sanitizeCompanyName, sanitizeRoleTitle, isSkillValue,
-    SKILL_CONTROL_PATTERN,
+    isInterestValue, SKILL_CONTROL_PATTERN, SECTION_LABEL_PATTERN,
+    // Who the page is about: the member's own URL is the one identifier a
+    // re-render cannot move, so a name candidate is checked against it.
+    looksLikeOrganizationName, profileSlugTokens, nameSlugAgreement,
+    // The readable forms — what the table, the details panel and the CSV show.
+    describeExperienceRecord, describeEducationRecord,
     cleanText, normalizeKey, comparisonKey, collapseRepeatedText, isNoiseText, uniqueText, cleanEntityLines,
     canonicalizeProfileUrl, splitName, looksLikeDateRange, looksLikeLocation, isEmploymentType,
     splitCompanyEmployment, splitDateDetails, splitLocationDetails, parseExperienceLines, formatExperience,

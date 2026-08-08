@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-03-react-v3.7.8";
+  const BUILD_ID = "2026-08-08-react-v3.8.0";
   const Core = globalThis.ProfileVaultConnections;
   if (!Core) throw new Error("Profile Vault connections core is unavailable.");
 

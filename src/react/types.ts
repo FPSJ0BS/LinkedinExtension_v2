@@ -1,19 +1,25 @@
 export type StatusKind = "" | "success" | "error";
 
 /**
- * The stored record, in the order the Saved Profiles table shows it.
+ * The stored record.
  *
- * 3.6.0 cut the record down to what a run is for. `experience`,
- * `yearsOfExperience`, `currentRole`, `currentCompany`, `currentEmploymentDates`,
- * `totalExperience`, `websites` and `profileImageUrl` were removed — they are no
- * longer extracted, stored, exported, or editable. `headline`, `location`,
- * `about`, `certifications` and `languages` went the same way in 3.5.0.
+ * What the scan reads is what the record keeps. `yearsOfExperience`,
+ * `currentRole`, `currentCompany`, `currentEmploymentDates`, `totalExperience`,
+ * `websites`, `certifications`, `languages` and `profileImageUrl` stay retired —
+ * they were derived or unread, and a derived field that disagrees with the roles
+ * beside it is worse than no field at all.
  */
 export interface ProfileRecord {
   id?: string;
   fullName: string;
   firstName?: string;
   lastName?: string;
+  /** The member's own one-line summary, from the top card. */
+  headline: string;
+  /** The place the top card shows, never a place read from a role. */
+  location: string;
+  /** The About paragraph, line breaks and all. */
+  about: string;
   /** Primary address; `emails` holds every one that was found. */
   email: string;
   emails: string[];
@@ -30,7 +36,13 @@ export interface ProfileRecord {
   openToWorkDetails: string[];
   /** Institution names, deduplicated, in the order the profile renders them. */
   education: string[];
+  /** The whole of each education card — degree, field, dates, details. */
+  educationDetails: string[];
+  /** One readable line per role, grouped by company. */
+  experience: string[];
   skills: string[];
+  /** The companies, newsletters, schools and groups the member follows. */
+  interests: string[];
   profileUrl: string;
   /** "collected" | "partial" | "failed" — see PROFILE_STATUS. */
   status: string;
@@ -49,6 +61,9 @@ export interface ProfileRecord {
 
 export const EMPTY_PROFILE: ProfileRecord = {
   fullName: "",
+  headline: "",
+  location: "",
+  about: "",
   email: "",
   emails: [],
   mobile: "",
@@ -59,7 +74,10 @@ export const EMPTY_PROFILE: ProfileRecord = {
   cvLinks: [],
   openToWorkDetails: [],
   education: [],
+  educationDetails: [],
+  experience: [],
   skills: [],
+  interests: [],
   profileUrl: "",
   status: "",
   lastCollectedAt: "",
@@ -74,6 +92,9 @@ export const ARRAY_FIELDS = new Set([
   "phones",
   "skills",
   "education",
+  "educationDetails",
+  "experience",
+  "interests",
   "openToWorkDetails",
   "tags"
 ]);

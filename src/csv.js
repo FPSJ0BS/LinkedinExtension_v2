@@ -1,17 +1,17 @@
 import { normalizeProfile } from "./profile-utils.js";
 
 /**
- * The export, column for column with the Saved Profiles table.
+ * The export.
  *
- * 3.6.0 REPLACED this list rather than appending to it, and the order here is
- * the order of the table: name, email, mobile, cv, open to work, education,
- * skills, profile url, status, last collected, notes, tags. Every column that
- * carried experience, current role, current company, years, websites or the
- * portrait is gone, so a CSV written by 3.5.0 or earlier no longer round-trips
- * those values — they are ignored on import and are not recoverable from the
- * file. `all_emails`, `all_phone_numbers` and `cv_links` follow the twelve as
- * extra detail; the importer reads them when they are there and does not need
- * them when they are not.
+ * The first eighteen columns are exactly where 3.6.0 left them and are not
+ * reordered — rule 19 — so a file written by any release since then still opens
+ * against the same headers and still imports. What this release adds, it appends:
+ * `location`, `headline`, `about`, `experience`, `education_details` and
+ * `interests`, which is the whole of what the scan now keeps.
+ *
+ * The table no longer SHOWS cv_url, last_collected or tags. They are still
+ * exported, because the record still carries them and dropping a column loses
+ * data that a hidden column does not (rules 18 and 19).
  *
  * `csvToProfiles` needs `name`, `profile_url` and `last_collected` to recognise
  * a Profile Vault file. `full_name`, `source` and `collected_at` are still
@@ -36,18 +36,32 @@ export const CSV_COLUMNS = [
   ["cvFileName", "cv_file_name"],
   ["cvLinks", "cv_links"],
   ["source", "source"],
-  ["collectedAt", "collected_at"]
+  ["collectedAt", "collected_at"],
+  // Appended, never inserted: the whole of what the profile rendered.
+  ["location", "location"],
+  ["headline", "headline"],
+  ["about", "about"],
+  ["experience", "experience"],
+  ["educationDetails", "education_details"],
+  ["interests", "interests"]
 ];
 
-/** The twelve columns the table shows, in the table's order. */
+/**
+ * The columns the table shows, in the table's order.
+ *
+ * The file's order and the table's order stopped being the same list when the
+ * table dropped three columns and gained five: the file may not reorder and the
+ * table may, so this names the table's columns and the file keeps its own order.
+ */
 export const CSV_TABLE_COLUMNS = Object.freeze([
-  "name", "email", "mobile", "cv_url", "open_to_work", "education", "skills",
-  "profile_url", "status", "last_collected", "notes", "tags"
+  "name", "email", "mobile", "location", "education", "skills", "experience",
+  "about", "interests", "open_to_work", "status", "notes"
 ]);
 
 /** Columns whose cells hold one value per line. */
 const CSV_LIST_COLUMNS = new Set([
-  "cvLinks", "emails", "phones", "skills", "education", "openToWorkDetails", "tags"
+  "cvLinks", "emails", "phones", "skills", "education", "educationDetails",
+  "experience", "interests", "openToWorkDetails", "tags"
 ]);
 
 /** Labels an older export used for a column that still exists. */

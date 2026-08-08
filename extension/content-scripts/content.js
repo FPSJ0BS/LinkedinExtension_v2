@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-03-react-v3.7.8";
+  const BUILD_ID = "2026-08-08-react-v3.8.0";
   const Core = globalThis.ProfileVaultCore;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
   // Optional: present on pages where connections-core.js is also injected.
@@ -16,6 +16,8 @@
     buildId: BUILD_ID,
     lastUrl: location.href,
     lastDiagnostics: null,
+    /** The member this run is about. Stamped by extractProfile, cleared on a route. */
+    profileUrl: "",
     extracting: null,
     handler: null,
     urlTimer: null,
@@ -78,10 +80,48 @@
     education: ["education"],
     skills: ["skills"],
     certifications: ["licenses & certifications", "licenses and certifications", "certifications"],
-    languages: ["languages"]
+    languages: ["languages"],
+    interests: ["interests"]
   };
 
-  const ALL_SECTION_LABELS = Object.values(SECTION_ALIASES).flat();
+  /**
+   * Headings that are read for nothing but WHERE THEY START.
+   *
+   * Live defect: a connection was saved under the name "Aakash Educational
+   * Services Limited", with an institution and a skill to match — none of which
+   * were on that member's profile. They were on the tiles inside Interests, the
+   * block that renders OTHER entities. `locateSectionRoot` stops widening a
+   * section when the container it is about to take would swallow a second
+   * anchor, so a heading the map has never heard of does not stop anything: the
+   * section above Interests kept widening straight through it and took its tiles
+   * as its own entities.
+   *
+   * The answer is not a new rule about what an institution is — it is telling
+   * the map where the next section begins. These are matched exactly like a real
+   * section heading and then never extracted, so each one costs one boundary and
+   * promises nothing. Everything LinkedIn renders below the collected sections
+   * belongs here, and an unknown heading still costs nothing (rule 1).
+   */
+  const BOUNDARY_ALIASES = {
+    activity: ["activity"],
+    featured: ["featured"],
+    highlights: ["highlights"],
+    projects: ["projects"],
+    publications: ["publications"],
+    courses: ["courses"],
+    honors: ["honors & awards", "honors and awards", "honours & awards", "honours and awards"],
+    volunteering: ["volunteering", "volunteer experience"],
+    organizations: ["organizations"],
+    recommendations: ["recommendations"],
+    testScores: ["test scores"],
+    causes: ["causes"],
+    peopleAlsoViewed: ["people also viewed"],
+    peopleYouMayKnow: ["people you may know"],
+    moreProfiles: ["more profiles for you", "explore premium profiles"]
+  };
+
+  const ALL_ANCHOR_ALIASES = { ...SECTION_ALIASES, ...BOUNDARY_ALIASES };
+  const ALL_SECTION_LABELS = Object.values(ALL_ANCHOR_ALIASES).flat();
   const ACTION_PATTERN = /^(?:message|follow|connect|more|contact info|open to|add profile section|enhance profile|resources|show all|see more|show less|visit website|send profile|report|save|view profile)/i;
   const SOCIAL_PATTERN = /\b(?:followers?|connections?|mutual connections?|endorsements?|reactions?|comments?|reposts?|followed by)\b/i;
   const ROLE_PATTERN = /\b(?:developer|engineer|manager|student|founder|co-?founder|consultant|designer|analyst|recruiter|specialist|officer|lead|director|head|president|chief|advisor|board|researcher|freelancer|entrepreneur|owner|partner|architect|product|marketing|sales|operations)\b/i;
@@ -351,6 +391,50 @@
     return words.every((word) => /^[\p{L}][\p{L}'’.\-]*$/u.test(word));
   }
 
+  /**
+   * The member's own page, as the name check needs it.
+   *
+   * `state.profileUrl` is stamped once at the start of a run and is what a scan
+   * trusts; reading `location.href` is the fallback for a snapshot taken outside
+   * one, and is canonicalized because LinkedIn routes an opened overlay into the
+   * address bar.
+   */
+  function currentProfileUrl() {
+    return state.profileUrl || canonicalizeProfileUrl(location.href);
+  }
+
+  /**
+   * Is this candidate the name of THIS member?
+   *
+   * `looksLikePersonName` answers "is it shaped like a name" — and a company on a
+   * followed-companies tile is shaped exactly like one, which is how "Aakash
+   * Educational Services Limited" became a saved connection. This adds the only
+   * check that can tell them apart without guessing at position: an
+   * organization-shaped value is refused unless the profile's OWN URL says that
+   * is who this page is about.
+   */
+  function acceptNameCandidate(value, profileUrl) {
+    if (!looksLikePersonName(value)) return false;
+    if (!Core.looksLikeOrganizationName(value)) return true;
+    return Core.nameSlugAgreement(value, profileUrl) === "exact";
+  }
+
+  /**
+   * What the profile's own URL is worth to a candidate's score.
+   *
+   * A conflict is penalized rather than refused: a member who changed their
+   * display name after the slug was minted still has a real name on the page,
+   * and any candidate the slug DOES agree with will outscore it anyway.
+   */
+  function slugNameBonus(value, profileUrl) {
+    switch (Core.nameSlugAgreement(value, profileUrl)) {
+      case "exact": return 30;
+      case "partial": return 14;
+      case "conflict": return -25;
+      default: return 0;
+    }
+  }
+
   function normalizePortraitAlt(value) {
     return stripDegreeBadge(cleanText(value)
       .replace(/^profile (?:photo|picture) of\s+/i, "")
@@ -358,8 +442,13 @@
       .replace(/\s+profile (?:photo|picture)$/i, ""));
   }
 
-  function extractName(topCard, portrait) {
+  function extractName(topCard, portrait, profileUrl = currentProfileUrl()) {
     const candidates = [];
+    const add = (value, base, source, element) => {
+      if (!acceptNameCandidate(value, profileUrl)) return;
+      candidates.push({ value, score: base + slugNameBonus(value, profileUrl), source, element });
+    };
+
     const explicitSelectors = [
       "h1",
       "[role='heading'][aria-level='1']",
@@ -369,18 +458,15 @@
     for (const selector of explicitSelectors) {
       for (const element of topCard.querySelectorAll(selector)) {
         if (!isVisible(element) || isExcludedContext(element)) continue;
-        const value = stripDegreeBadge(element.innerText || element.textContent);
-        if (looksLikePersonName(value)) candidates.push({ value, score: 30, source: selector, element });
+        add(stripDegreeBadge(element.innerText || element.textContent), 30, selector, element);
       }
     }
 
-    const portraitAlt = normalizePortraitAlt(portrait?.alt || "");
-    if (looksLikePersonName(portraitAlt)) candidates.push({ value: portraitAlt, score: 26, source: "portrait-alt", element: portrait });
+    add(normalizePortraitAlt(portrait?.alt || ""), 26, "portrait-alt", portrait);
 
     const lines = collectCandidates(topCard, { maxLength: 140 });
     for (const candidate of lines) {
       const value = stripDegreeBadge(candidate.text);
-      if (!looksLikePersonName(value)) continue;
       let score = 8;
       if (candidate.tag === "H1") score += 20;
       if (/text-heading-xlarge|break-words/i.test(candidate.className)) score += 12;
@@ -390,11 +476,11 @@
         const portraitRect = portrait.getBoundingClientRect();
         if (Math.abs(candidate.rect.top - portraitRect.top) < 260) score += 4;
       }
-      candidates.push({ value, score, source: candidate.tag, element: candidate.element });
+      add(value, score, candidate.tag, candidate.element);
     }
 
     const titleName = cleanText(document.title).replace(/\s*[|–-]\s*LinkedIn.*$/i, "");
-    if (looksLikePersonName(titleName)) candidates.push({ value: titleName, score: 12, source: "document-title", element: null });
+    add(titleName, 12, "document-title", null);
 
     candidates.sort((a, b) => b.score - a.score);
     return { value: candidates[0]?.value || "", candidates: candidates.slice(0, 10).map(({ value, score, source }) => ({ text: value, score, source })) };
@@ -469,7 +555,10 @@
 
   function matchSectionKey(value) {
     const normalized = normalizeSectionLabel(value);
-    for (const [key, aliases] of Object.entries(SECTION_ALIASES)) {
+    // Boundaries are matched here with the collected sections, and dropped again
+    // in collectSections — one map of where every section starts, one list of
+    // the ones worth reading.
+    for (const [key, aliases] of Object.entries(ALL_ANCHOR_ALIASES)) {
       if (aliases.some((alias) => normalized === alias)) return key;
     }
     return "";
@@ -957,6 +1046,13 @@
         if (detectPartialSection(info, "licenses|certifications?")) collector.data.addPartialSection("certifications");
       } else if (key === "languages") {
         for (const value of extractSimpleTitles(info, SECTION_ALIASES.languages, sectionDiagnostics, 40)) collector.data.addLanguage(value);
+      } else if (key === "interests") {
+        // Names only. Every tile in here belongs to somebody who is not this
+        // member, so nothing but the name is read from it — rule 2 names this
+        // exact block as the one a stranger's details once came out of.
+        for (const value of extractSimpleTitles(info, SECTION_ALIASES.interests, sectionDiagnostics, 60)) {
+          collector.data.addInterest(value);
+        }
       }
     }
 
@@ -972,8 +1068,10 @@
     diagnostics.newEducation = after.education - before.education;
     diagnostics.newSkills = after.skills - before.skills;
     diagnostics.newCertifications = after.certifications - before.certifications;
+    diagnostics.newInterests = after.interests - before.interests;
     diagnostics.totals = after;
-    return diagnostics.newExperience + diagnostics.newEducation + diagnostics.newSkills + diagnostics.newCertifications;
+    return diagnostics.newExperience + diagnostics.newEducation + diagnostics.newSkills +
+      diagnostics.newCertifications + diagnostics.newInterests;
   }
 
   /** Counts DOM churn across the whole scan so diagnostics can prove it moved. */
@@ -1695,6 +1793,9 @@
     // Contact info overlay routes LinkedIn to /in/slug/overlay/contact-info/, so
     // reading `location.href` afterwards recorded the overlay as the profile.
     const profileUrl = canonicalizeProfileUrl(location.href);
+    // Stamped for the whole run so every name candidate is checked against the
+    // page this scan started on, never against one LinkedIn routed to mid-scan.
+    state.profileUrl = profileUrl;
 
     const diagnostics = {
       buildId: BUILD_ID,
@@ -1710,7 +1811,8 @@
       newEducation: 0,
       newSkills: 0,
       newCertifications: 0,
-      totals: { experience: 0, education: 0, skills: 0, certifications: 0, languages: 0 },
+      newInterests: 0,
+      totals: { experience: 0, education: 0, skills: 0, certifications: 0, languages: 0, interests: 0 },
       mutations: 0,
       quietScans: 0,
       stopReason: "",
@@ -1753,7 +1855,13 @@
     const { firstName, lastName } = splitName(fullName);
 
     const education = collector.data.education();
+    // The whole of what the page rendered, not a summary of it: every education
+    // card with its degree, field and dates, and every role with its company,
+    // type, dates, duration and location.
+    const educationDetails = collector.data.educationEntries();
+    const experience = collector.data.experienceEntries();
     const skills = collector.data.skills();
+    const interests = collector.data.interests();
     const partialSections = collector.data.partialSections();
 
     const emails = collector.data.emails();
@@ -1762,13 +1870,17 @@
 
     const now = new Date().toISOString();
     const profile = {
-      // 3.6.0 stores only what the run is for. Experience, current role and
-      // company, years, websites and the portrait were removed: they are still
-      // read during the scan — a late Experience section is real page change and
-      // the quiet count must see it — but nothing about them is kept.
+      // What the scan read is what the record keeps. 3.6.0 had cut the record
+      // back to contact reachability and threw the rest away at the last step —
+      // the scan still walked Experience, About and the top card and then
+      // dropped them on the floor. Nothing new is read to fill these in; they
+      // are the reads that were already happening, now kept.
       fullName,
       firstName,
       lastName,
+      headline: identity.headline,
+      location: identity.location,
+      about: collector.data.about,
       email: emails[0] || "",
       emails,
       mobile: phones[0] || "",
@@ -1777,7 +1889,10 @@
       cvLinks,
       openToWorkDetails: openToWork,
       education,
+      educationDetails,
+      experience,
       skills,
+      interests,
       profileUrl,
       notes: "",
       tags: [],
@@ -1803,7 +1918,10 @@
       openToWork: profile.openToWorkDetails,
       counts: {
         education: profile.education.length,
+        educationDetails: profile.educationDetails.length,
+        experience: profile.experience.length,
         skills: profile.skills.length,
+        interests: profile.interests.length,
         emails: profile.emails.length,
         phones: profile.phones.length,
         cvLinks: profile.cvLinks.length
@@ -1887,6 +2005,8 @@
     if (location.href !== state.lastUrl) {
       state.lastUrl = location.href;
       state.lastDiagnostics = null;
+      // A new page is a new member: the old one's URL must never name this one.
+      state.profileUrl = "";
     }
   }, 800);
 })();

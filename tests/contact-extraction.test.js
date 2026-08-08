@@ -629,11 +629,19 @@ test("a CV that is a hosted page has no file name, and the record says so", () =
   assert.equal(profile.cvFileName, "", "a page is not a file, and a name is never invented for it");
 });
 
-test("the fields 3.6.0 retired are gone from the record", () => {
+// The DERIVED fields stay retired; the READ ones came back.
+//
+// 3.6.0 retired both kinds together, and that was the mistake: the scan was
+// still walking Experience, About and the top card on every pass and throwing
+// the result away at the last step. A field the page renders is kept. A field
+// nothing renders — a "total experience" summed out of date ranges, a "current
+// role" picked out of a list — stays gone, because a derived value that
+// disagrees with the roles printed beside it is worse than no value (rule 1).
+test("the derived fields stay retired, and the ones the page renders are kept", () => {
   const profile = normalizeProfile({
     fullName: "Test",
     profileUrl: "https://www.linkedin.com/in/test",
-    experience: ["Title: Engineer | Company: Acme | Dates: Jan 2024 - Present"],
+    experience: ["Engineer — Acme · Jan 2024 - Present"],
     yearsOfExperience: "5.6",
     currentRole: "Engineer",
     currentCompany: "Acme",
@@ -643,11 +651,16 @@ test("the fields 3.6.0 retired are gone from the record", () => {
     profileImageUrl: "https://media.licdn.com/x.jpg"
   });
   for (const gone of [
-    "experience", "yearsOfExperience", "currentRole", "currentCompany",
+    "yearsOfExperience", "currentRole", "currentCompany",
     "currentEmploymentDates", "totalExperience", "websites", "profileImageUrl"
   ]) {
     assert.equal(profile[gone], undefined, `${gone} must not be on the record any more`);
   }
+  assert.deepEqual(
+    profile.experience,
+    ["Engineer — Acme · Jan 2024 - Present"],
+    "the roles the page rendered are what the record keeps"
+  );
 });
 
 test("a scalar email, mobile or CV supplied alone still lands in its list", () => {
@@ -663,37 +676,72 @@ test("a scalar email, mobile or CV supplied alone still lands in its list", () =
   assert.deepEqual(profile.cvLinks, ["https://example.com/solo.pdf"]);
 });
 
-test("headline, location, about, certifications and languages are no longer stored", () => {
+test("the member's own top card is stored, and the sections nothing reads are not", () => {
   const profile = normalizeProfile({
     fullName: "Test",
     profileUrl: "https://www.linkedin.com/in/test",
     headline: "Senior Engineer at Acme",
     location: "Chennai, India",
     about: "A paragraph about me.",
+    interests: ["Anthropic", "Anthropic", "Some Newsletter"],
     certifications: ["CKA"],
     languages: ["English"]
   });
 
-  for (const field of ["headline", "location", "about", "certifications", "languages", "contactInfo"]) {
-    assert.equal(profile[field], undefined, `${field} must not be on the record any more`);
+  assert.equal(profile.headline, "Senior Engineer at Acme");
+  assert.equal(profile.location, "Chennai, India");
+  assert.equal(profile.about, "A paragraph about me.");
+  assert.deepEqual(profile.interests, ["Anthropic", "Some Newsletter"], "interests dedupe like every other list");
+
+  // Certifications and Languages are parsed during the scan but not stored: no
+  // column asks for them, and a stored field nothing shows is a field nothing
+  // keeps honest.
+  for (const field of ["certifications", "languages", "contactInfo"]) {
+    assert.equal(profile[field], undefined, `${field} must not be on the record`);
   }
 });
 
-test("the CSV is the table, column for column", () => {
+// The About section is prose the member wrote. Its line breaks are part of what
+// they wrote, so the paragraph normalizer is not `cleanText`.
+test("About keeps its line breaks and loses only the blank runs", () => {
+  const profile = normalizeProfile({
+    fullName: "Test",
+    profileUrl: "https://www.linkedin.com/in/test",
+    about: "  First line.  \n\n\n\nSecond line.\n\tThird line.  "
+  });
+  assert.equal(profile.about, "First line.\n\nSecond line.\nThird line.");
+});
+
+// Rule 19: append columns, never reorder. A file written by any release since
+// 3.6.0 still opens against the same first eighteen headers, and everything this
+// release added comes after them.
+test("the CSV appends its new columns and never reorders the old ones", () => {
   const labels = CSV_COLUMNS.map(([, label]) => label);
   assert.deepEqual(
-    labels.slice(0, 12),
+    labels.slice(0, 18),
     ["name", "email", "mobile", "cv_url", "open_to_work", "education", "skills",
-      "profile_url", "status", "last_collected", "notes", "tags"],
-    "the twelve columns, in the table's order"
+      "profile_url", "status", "last_collected", "notes", "tags",
+      "all_emails", "all_phone_numbers", "cv_file_name", "cv_links", "source", "collected_at"],
+    "the columns 3.6.0 wrote, exactly where it left them"
   );
-  assert.deepEqual([...CSV_TABLE_COLUMNS], labels.slice(0, 12), "and the table's own list agrees");
+  assert.deepEqual(
+    labels.slice(18),
+    ["location", "headline", "about", "experience", "education_details", "interests"],
+    "and the whole of what the scan now keeps, appended"
+  );
+
+  // The table's columns are a different list in a different order — see
+  // react-architecture.test.js. Every one of them is still in the file.
+  for (const label of CSV_TABLE_COLUMNS) {
+    assert.ok(labels.includes(label), `${label} is on the table and must be in the file`);
+  }
+
   for (const gone of [
-    "headline", "location", "about", "certifications", "languages", "contact_information",
-    "experience", "years_of_experience", "total_experience", "current_role", "current_company",
+    "certifications", "languages", "contact_information",
+    "years_of_experience", "total_experience", "current_role", "current_company",
     "current_employment_dates", "websites", "profile_image_url"
   ]) {
-    assert.ok(!labels.includes(gone), `${gone} must not be exported any more`);
+    assert.ok(!labels.includes(gone), `${gone} must not be exported`);
   }
 });
 

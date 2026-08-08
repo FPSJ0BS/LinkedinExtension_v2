@@ -46,6 +46,46 @@ test("merge replaces newly extracted institutions instead of retaining stale one
 });
 
 
+// A section is read whole or not at all, so a fresh read of one replaces it.
+// Concatenating would produce the same card twice the moment one read caught the
+// section mid-hydration — which is exactly what every scan's first pass does.
+test("a fresh read replaces a whole section and never concatenates two copies of it", () => {
+  const url = "https://linkedin.com/in/a";
+  const existing = normalizeProfile({
+    fullName: "A Person",
+    profileUrl: url,
+    educationDetails: ["BIT Sindri"],
+    experience: ["Lecturer — The Narayana Group"],
+    interests: ["Stale Interest"]
+  });
+  const incoming = normalizeProfile({
+    fullName: "A Person",
+    profileUrl: url,
+    educationDetails: ["BIT Sindri — BTEC, Chemical Engineering · 2019 – 2023"],
+    experience: ["Senior Lecturer — The Narayana Group · Jun 2023 - Present"],
+    interests: ["Motion Education Pvt Ltd"]
+  });
+  const merged = mergeProfiles(existing, incoming);
+  assert.deepEqual(merged.educationDetails, ["BIT Sindri — BTEC, Chemical Engineering · 2019 – 2023"]);
+  assert.deepEqual(merged.experience, ["Senior Lecturer — The Narayana Group · Jun 2023 - Present"]);
+  assert.deepEqual(merged.interests, ["Motion Education Pvt Ltd"]);
+});
+
+test("a profile that rendered only its About and location is collected, not partial", () => {
+  // The Status column judges the record on what the run is FOR, and this release
+  // widened what that is: a member with no email and no CV who nonetheless
+  // rendered a location, an About and three roles is a collected profile.
+  const profile = normalizeProfile({
+    fullName: "A Person",
+    profileUrl: "https://linkedin.com/in/a",
+    location: "India",
+    about: "A paragraph."
+  });
+  assert.equal(profile.status, "collected");
+  const empty = normalizeProfile({ fullName: "A Person", profileUrl: "https://linkedin.com/in/b" });
+  assert.equal(empty.status, "partial", "and a profile that rendered nothing still says so");
+});
+
 test("replaceProfile removes previous extracted details while preserving record identity", () => {
   const existing = normalizeProfile({
     fullName: "Old Name",

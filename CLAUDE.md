@@ -8,9 +8,9 @@ Three surfaces, sharing the cores and nothing else:
 
 | Surface | Script | What it does |
 |---|---|---|
-| Profile pages | [content.js](content.js) | Extracts one member's profile |
-| Connections | [connections.js](connections.js) | Enumerates the account's connections, then collects them one at a time |
-| Hiring / applicants | [applicants.js](applicants.js) | Collects applicants on the recruiter's own job posts |
+| Profile pages | [content.js](extension/content-scripts/content.js) | Extracts one member's profile |
+| Connections | [connections.js](extension/content-scripts/connections.js) | Enumerates the account's connections, then collects them one at a time |
+| Hiring / applicants | [applicants.js](extension/content-scripts/applicants.js) | Collects applicants on the recruiter's own job posts |
 
 ---
 
@@ -205,7 +205,7 @@ dist/     Build output — the folder Chrome loads
 
 - **React is a global, not an import.** Every `.tsx` does `const React: any = (globalThis as any).React;`
   There is no bundler. Never write `import React from "react"`. To change versions, replace the files
-  in [vendor/](vendor/).
+  in [vendor/](extension/vendor/).
 - **React 16.0.0 is old.** No hooks, no `createContext`/`forwardRef`, no `memo`/`lazy`/`Suspense`, no
   Fragments or `<>`, no `createRoot`. Use class components. TypeScript will *not* catch a hook —
   `React` is `any`.
@@ -244,23 +244,23 @@ dist/     Build output — the folder Chrome loads
 | `findByProfileUrl` scans all records despite an index | [db.js](src/db.js) |
 | Object URLs revoked on a fixed 15 s timer | [csv.js](src/csv.js) |
 | The Applicants page has no diagnostics button, though the worker answers one | [applicants-dashboard.tsx](src/react/applicants-dashboard.tsx) |
-| Pagination labels and the connections-total selector are assumptions until checked live | [connections.js](connections.js) |
+| Pagination labels and the connections-total selector are assumptions until checked live | [connections.js](extension/content-scripts/connections.js) |
 
 ---
 
 ## Where the detail went
 
 This file is the working brief. The reasoning behind each rule — which live defect caused it, what was
-tried first, why a given approach was rejected — is in [CHANGELOG.md](CHANGELOG.md), one entry per
+tried first, why a given approach was rejected — is in [CHANGELOG.md](docs/CHANGELOG.md), one entry per
 release, and it is unusually complete. **Read the relevant entry before changing behaviour a rule
 names.** Tests carry the same reasoning in their names and comments; a failing test usually explains
 itself.
 
-Companion docs: [WORKFLOW.md](WORKFLOW.md) · [AGENTS.md](AGENTS.md) · [TECH_STACK.md](TECH_STACK.md) ·
-[CHECKS.md](CHECKS.md) (real results only) · [PHASES.md](PHASES.md) ·
-[PROJECT_STATUS.md](PROJECT_STATUS.md) · [INSTALL.md](INSTALL.md) · [MEMORY.md](MEMORY.md) ·
-[SKILLS.md](SKILLS.md) · [README.md](README.md).
+Companion docs: [WORKFLOW.md](docs/WORKFLOW.md) · [AGENTS.md](AGENTS.md) · [TECH_STACK.md](docs/TECH_STACK.md) ·
+[CHECKS.md](docs/CHECKS.md) (real results only) · [PHASES.md](docs/PHASES.md) ·
+[PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [INSTALL.md](docs/INSTALL.md) · [MEMORY.md](docs/MEMORY.md) ·
+[SKILLS.md](docs/SKILLS.md) · [README.md](README.md).
 
-[COMPLETE_EXTRACTION_SPEC.md](COMPLETE_EXTRACTION_SPEC.md) is a **proposal**, not current behaviour —
+[COMPLETE_EXTRACTION_SPEC.md](docs/COMPLETE_EXTRACTION_SPEC.md) is a **proposal**, not current behaviour —
 it describes reading from the data the page already holds rather than only what it painted. Every rule
 above stays in force until such an amendment lands in its own task.
