@@ -1,5 +1,57 @@
 # CHANGELOG.md
 
+## 3.7.25 — contact and resume before the walk, and the walk ends at the bottom
+
+**Requested outright: "before scrolling profile save contact and resume and then scroll to bottom,
+and without scrolling to top you can move to next profile."** This is the reordering the speed guide
+asked for and 3.7.23 declined; the concern that made it risky is answered here rather than used as a
+reason to refuse again.
+
+**The new order in `extractApplicant`:** expand what is collapsed → **read the panel where it
+arrived** → contact disclosure → resume → **then** walk to the bottom → ask again for a control that
+had not mounted in time.
+
+- **The arrival read is what makes it possible, not merely faster.** The resume is written to disk
+  under `header.name`, and that name is not simply taken from the panel: `chooseApplicantName`
+  arbitrates the candidates against `nameFromExplanations()`, the words LinkedIn's own qualification
+  verdict sentences share at the front. Those sentences render at the **top** of the panel, which is
+  exactly where it is sitting when this read is taken. Collecting the resume with no read at all would
+  save the file under whatever the panel's first line happened to be, or under nothing — rule 1, and
+  the precise defect `chooseApplicantName` exists for.
+- **The rule the old order existed for is kept, not dropped.** "An overlay opened **mid-scan** stops
+  the lazy walk dead" is still true and still honoured: both disclosures are opened *and closed*
+  before the walk begins. A test asserts each one's own dismissal.
+- **The one thing the new order can cost, and the one thing it must not.** Asking for those controls
+  earlier means a control that has not mounted yet reports as a control that does not exist —
+  `no-contact-control` is an applicant with no email and no phone, `no-resume-control` is
+  `available: false` / `unavailable`. That is a **field silently lost**, which is the single outcome
+  the speed guide forbids. The old order never met the risk because the panel had been walked end to
+  end by the time it looked. So a step that never found its control is asked **once more, after the
+  walk, where the old order asked**. It is not a general retry: `no-*-control` is precisely the
+  outcome that reports *nothing was clicked*, so this cannot press either control twice — rule 9d's
+  "once per applicant" holds and the click budget is unchanged at seven. Every other outcome (opened
+  it and it was empty, clicked and it never mounted, a real download, a legitimate `link_only`) is a
+  *finished* attempt and is left exactly as it stands. `setResume` is a per-key merge and the contact
+  accumulator is merge-only, so a later success replaces the earlier "there is none", and an applicant
+  who genuinely has neither is unchanged.
+
+**And the walk now ends where it finishes.** `scanApplicantPanel` used to scroll back to the top for
+its final read and then restore the column to where it started. Both are gone; the **read** stays,
+because it is a read — taken after the nested regions and the second expander pass have mounted
+content the earlier passes could not see — and `snapshotPanel` resolves its sections through
+`buildSectionMap` over the panel and the page, never through what happens to be in the viewport, so
+the scroll in front of it was never what made it work. The **page** is still handed back on every
+path including the failure one (that is "scrolling moves a column, never the recruiter's page"); the
+**column** is not, because on a whole-job walk there is nowhere to hand it back to — the next row is
+clicked immediately and LinkedIn rebuilds the column from scratch, so the restore's only visible
+effect was the profile jumping back to the top before moving on.
+
+Two tests changed **deliberately** rather than worked around, and both say so in place: *"the panel is
+walked to the bottom before any overlay is opened"* is now *"contact and resume are collected before
+the walk, and the walk ends at the bottom"*, and the adapter test now asserts the page is restored and
+the column deliberately is not. Files: `extension/content-scripts/applicants.js`,
+`tests/applicants-core.test.js`, `docs/CHANGELOG.md`.
+
 ## 3.7.24 — the guard that stopped the scroll, and the page that was walked from its middle
 
 Two reports, one of them a regression 3.7.23 caused.

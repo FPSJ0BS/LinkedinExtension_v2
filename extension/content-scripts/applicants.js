@@ -3685,7 +3685,6 @@
   async function scanApplicantPanel(panel, accumulator, diagnostics, budget) {
     let live = livePanel(panel);
     let target = chooseScrollTarget(live);
-    const originalY = currentScrollTop(target);
     const deadline = Date.now() + SCAN_BUDGET_MS;
     // `revealPanelContent` scrolls whatever ancestors an element needs, which
     // can include the document, so the page's own position is remembered too.
@@ -3770,14 +3769,34 @@
         }
       }
 
-      // A final read from the top, once everything below has hydrated.
-      scrollPanelTo(0, target);
-      await waitForDomQuiet(300, 1600);
+      /**
+       * A final read, once everything below has hydrated — and deliberately
+       * WITHOUT going back to the top for it.
+       *
+       * **Requested outright: "scroll to bottom and without scrolling to top you
+       * can move to next profile."** The read stays, because it is a *read*: it
+       * is taken after the nested regions and the second expander pass have
+       * mounted content the earlier passes could not see, and dropping it would
+       * drop a chance to capture a value that arrived late. What goes is the
+       * *scroll* in front of it, which was never what made it work —
+       * `snapshotPanel` resolves its sections through `buildSectionMap` over the
+       * panel and the page, not through what happens to be in the viewport.
+       */
       live = livePanel(live);
       snapshotPanel(live, accumulator, diagnostics);
     } finally {
-      // Hand the panel back where the recruiter left it, on every path.
-      scrollPanelTo(originalY, target);
+      /**
+       * The PAGE is handed back; the COLUMN is left where the walk ended.
+       *
+       * These were one line and they are two different promises. Restoring the
+       * page is rule 6's "scrolling moves a column, never the recruiter's page",
+       * and it stays on every path including the failure one. Restoring the
+       * column was "hand the panel back where the recruiter left it" — and on a
+       * whole-job walk there is nowhere to hand it back to: the next row is
+       * clicked immediately and LinkedIn rebuilds the column from scratch, so the
+       * scroll was work whose only visible effect was the profile jumping back to
+       * the top before moving on, which is exactly what was asked to stop.
+       */
       window.scrollTo({ top: originalWindowY, behavior: "auto" });
     }
 
@@ -3838,10 +3857,25 @@
   /**
    * Collect the applicant currently open in the detail panel.
    *
-   * The order is fixed and asserted by a test: expand what is collapsed, walk
-   * the panel to the bottom, and only then open the two disclosures. An overlay
-   * opened mid-scan would stop the walk dead and the record would be built from
-   * whatever had mounted by then.
+   * **The order is fixed, asserted by a test, and was requested outright:
+   * "before scrolling profile save contact and resume and then scroll to bottom,
+   * and without scrolling to top you can move to next profile."**
+   *
+   *   1. Expand what is collapsed.
+   *   2. **Read the panel where it arrived** — which settles the name, and the
+   *      name is what the resume file is saved to disk under.
+   *   3. Open the contact disclosure, read it, close it.
+   *   4. Collect the resume: the address without opening anything where the page
+   *      already rendered it, the viewer and its own Download control otherwise,
+   *      closed again either way.
+   *   5. **Then** walk the panel to the bottom — and stay there.
+   *   6. Ask once more for a control that had not mounted in time for step 3 or
+   *      4, which is the only thing the new order can cost.
+   *
+   * The rule the old order existed for is kept rather than dropped: an overlay
+   * opened **mid-scan** stops the lazy walk dead, and none is — both disclosures
+   * are closed before step 5 begins. What is gone is walking to the bottom and
+   * then scrolling back to the top so the resume control could be found again.
    */
   async function extractApplicant(options = {}) {
     if (!Applicants.isHiringPage(location.href)) {
@@ -3888,24 +3922,44 @@
     if (options.expand !== false) {
       await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
     }
-    if (options.scan !== false) {
-      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
-      panel = walked.panel || panel;
-    } else snapshotPanel(panel, accumulator, diagnostics);
 
-    // The scan can run for a minute and a half, and the column re-mounts on this
-    // surface. Asked again now rather than trusted from before it.
-    assertExpectedApplicant(expected);
+    /**
+     * THE FIRST READ, taken where the panel arrived and before anything is
+     * opened or scrolled.
+     *
+     * **Requested outright: "before scrolling profile save contact and resume
+     * and then scroll to bottom, and without scrolling to top you can move to
+     * next profile."** The order below is that sentence, and this read is what
+     * makes it possible rather than merely faster.
+     *
+     * The resume is written to disk under `header.name` — that is the whole
+     * point of the name on this surface — and the name is not simply taken from
+     * the panel: `chooseApplicantName` arbitrates the candidates against
+     * `nameFromExplanations()`, the words LinkedIn's own qualification verdict
+     * sentences share at the front. Those sentences render at the top of the
+     * panel, which is where it is sitting right now, and reading them is what
+     * makes the chosen name the **corroborated** one. Collecting the resume
+     * before any read at all would save the file under whatever the panel's
+     * first line happened to be, or under nothing — rule 1, and the exact defect
+     * `chooseApplicantName` was written for.
+     *
+     * One read settles it. Everything below still re-reads on every pass, into
+     * the same merge-only accumulator, so this can only ever add.
+     */
+    snapshotPanel(panel, accumulator, diagnostics);
 
-    // The overlays are opened on whatever the panel is now, not on the node the
-    // extraction started with — a detached one contains no control at all.
-    panel = livePanel(panel);
-    // The one call that also records the full section scan: what was looked
-    // for, every heading the page actually rendered, where each section was
-    // found and what nothing named at all.
-    diagnostics.sections = Object.keys(buildSectionMap(panel, diagnostics));
+    // The header as the arrival read resolved it: the name the file will be
+    // saved under, and the key the download is de-duplicated on.
+    const header = accumulator.snapshot().header;
+    const applicantKey = Applicants.applicantId(
+      context.jobId,
+      header.profileUrl || "",
+      header.name || "",
+      context.applicationId || ""
+    );
 
-    // Only now, with the panel settled, are the disclosures opened.
+    // The disclosures are opened FIRST, and both are closed again before the
+    // walk below starts.
     //
     // A DISCLOSURE THAT FINDS THE PAGE HIDDEN IS A LOST FIELD, NOT A LOST
     // APPLICANT. Both of these used to re-throw `hidden`, which threw away the
@@ -3931,21 +3985,14 @@
       }
     }
 
-    const header = accumulator.snapshot().header;
-    const applicantKey = Applicants.applicantId(
-      context.jobId,
-      header.profileUrl || "",
-      header.name || "",
-      context.applicationId || ""
-    );
-
     if (options.resume !== false) {
       try {
         // Closing the contact disclosure can re-mount the column underneath it.
         panel = livePanel(panel);
         // The name the record will carry, which is the name the file is saved
-        // under. It is settled by now: the qualification explanations that
-        // corroborate it were read on the very first snapshot.
+        // under. It is settled by the arrival read above: the qualification
+        // explanations that corroborate it render at the top of the panel, which
+        // is exactly where the panel is sitting when that read is taken.
         await collectResume(panel, accumulator, diagnostics, applicantKey, header.name || "");
       } catch (error) {
         // Same rule as the contact disclosure above, and this is the site that
@@ -3953,6 +4000,79 @@
         // take the tab away. The resume is left as whatever it was resolved to
         // — `link_only` or `not_attempted`, never a guess (rule 6) — and the
         // person, their history and their verdicts are still saved.
+        if (error?.stopped) throw error;
+        if (error?.hidden) accumulator.addWarning("resume: the page was hidden while the viewer was open");
+        else accumulator.addWarning(`resume: ${error?.message || error}`);
+      }
+    }
+
+    /**
+     * AND ONLY NOW THE WALK, which ends at the bottom and stays there.
+     *
+     * Both disclosures above open an overlay and close it again *before* this
+     * line, so the rule the old order existed for is kept rather than dropped: a
+     * modal opened **mid-scan** stops the lazy walk dead, and none is. What
+     * changes is that the panel is no longer walked to the bottom and then
+     * scrolled back to the top so the resume control can be found again — the
+     * "scrolls down, then goes back up for the resume" the speed guide names.
+     */
+    panel = livePanel(panel);
+    if (options.scan !== false) {
+      const walked = await scanApplicantPanel(panel, accumulator, diagnostics, options.expand === false ? null : expansion);
+      panel = walked.panel || panel;
+    }
+
+    // The scan can run for a minute and a half, and the column re-mounts on this
+    // surface. Asked again now rather than trusted from before it.
+    assertExpectedApplicant(expected);
+    panel = livePanel(panel);
+    // The one call that also records the full section scan: what was looked
+    // for, every heading the page actually rendered, where each section was
+    // found and what nothing named at all.
+    diagnostics.sections = Object.keys(buildSectionMap(panel, diagnostics));
+
+    /**
+     * THE ONE THING THE NEW ORDER CAN COST, AND THE ONE THING IT MUST NOT.
+     *
+     * Running the two disclosures first means asking for their controls earlier,
+     * and a control that has not mounted yet is reported as a control that does
+     * not exist: `no-contact-control` is an applicant with no email or phone, and
+     * `no-resume-control` is `available: false` / `unavailable` — a *field
+     * silently lost*, which is the one outcome the speed guide forbids outright.
+     * The old order never met that risk because the panel had been walked end to
+     * end by the time it looked.
+     *
+     * So a step that never found its control is asked once more, here, where the
+     * old order asked. It is not a general retry: `no-*-control` is precisely the
+     * outcome that reports **nothing was clicked**, so this cannot press either
+     * control twice — rule 9d's "once per applicant" holds, and the file's click
+     * budget is per call site and unchanged. Every other outcome (opened it and
+     * it was empty, clicked and it never mounted, a real download, a `link_only`)
+     * is a *finished* attempt and is left exactly as it stands.
+     *
+     * `setResume` is a per-key merge and the contact accumulator is merge-only,
+     * so a later attempt that succeeds replaces the earlier "there is none" and
+     * an applicant who genuinely has neither is unchanged.
+     */
+    if (options.contact !== false && diagnostics.contact?.reason === "no-contact-control") {
+      try {
+        diagnostics.contact.retriedAfterWalk = true;
+        await openContactAndCollect(panel, accumulator, diagnostics);
+      } catch (error) {
+        if (error?.stopped) throw error;
+        if (error?.hidden) accumulator.addWarning("contact: the page was hidden while the disclosure was open");
+        else accumulator.addWarning(`contact: ${error?.message || error}`);
+      }
+    }
+    if (options.resume !== false && diagnostics.resume?.reason === "no-resume-control") {
+      try {
+        panel = livePanel(panel);
+        diagnostics.resume.retriedAfterWalk = true;
+        // The walk may have resolved a better name than the arrival read did, and
+        // the file is saved under whichever the record will carry.
+        const settled = accumulator.snapshot().header;
+        await collectResume(panel, accumulator, diagnostics, applicantKey, settled.name || header.name || "");
+      } catch (error) {
         if (error?.stopped) throw error;
         if (error?.hidden) accumulator.addWarning("resume: the page was hidden while the viewer was open");
         else accumulator.addWarning(`resume: ${error?.message || error}`);
