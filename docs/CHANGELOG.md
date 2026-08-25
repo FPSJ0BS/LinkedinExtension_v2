@@ -1,5 +1,163 @@
 # CHANGELOG.md
 
+## 3.10.0 — the notice asked for a refresh, and nothing ever gave it one
+
+TASK-0189. **"Scanning resume for viruses. Please refresh the page now."** —
+LinkedIn's own words, where the resume card belongs, reported a second time and
+this time with the detail that settles it: *"this is after many applicants
+profiles are saved"*. The ask was that it be fixed permanently, and the reporter
+named the remedy themselves — reload the page at that applicant when waiting
+does not help.
+
+**Also in 3.10.0, and a separate change: applicant messaging (TASK-0188).** That
+work is what makes this a minor bump rather than a patch, and it wrote no entry
+of its own, so it is recorded here in outline only. The applicant panel's own
+**Message** control becomes the **ninth click**, exempted from the denylist for
+that one purpose and no other; the feature **inserts** the rendered template into
+LinkedIn's own composer and **stops there**, so the recruiter reads it and presses
+Enter themselves and no Send control is ever resolved, let alone pressed.
+`send` and `inmail` remain denylisted for every purpose, everywhere. Rule 5 in
+CLAUDE.md was amended in the same breath, as an amendment to that rule must be.
+**The reasoning is in the TASK-0188 commit**, and nothing below is part of it —
+everything from here is TASK-0189.
+
+**The diagnosis comes from the shape of the report rather than from the DOM.**
+3.9.1's report of the same notice was "the first two applicants downloaded and
+every one after them did not". This one is "after many profiles are saved".
+Different N, same shape, and that shape is the whole finding. A genuine
+**per-file** virus scan fails on *scattered* applicants — those documents were
+uploaded on unrelated days by unrelated people and have nothing whatever to do
+with each other, so there is no mechanism by which finishing applicant N would
+decide anything about applicant N+1. Failing for **everyone after applicant N**
+is therefore a property of the **document**, not of the documents: the page's own
+session for fetching attachments has gone stale, and *"Please refresh the page
+now"* is LinkedIn saying so in its own words. The notice was read for two
+releases as a description of a file. It is a description of the page.
+
+**Why the two previous fixes could not have worked, and why neither is touched.**
+3.9.1 taught the run to *recognise* the notice: LinkedIn takes the whole resume
+card away while scanning, control included, so the reader had been writing
+`UNAVAILABLE` for somebody who plainly does have a CV. It now waits a bounded
+five seconds and records `available: true` with `NOT_ATTEMPTED` instead — rule 1,
+a blank beats a wrong value, and "I did not look" is the true statement. 3.9.3
+taught it to *come back*: `hasPendingResume` keeps exactly that pairing out of
+the collected index, and the page-completion gate re-opens the panel once before
+the pager is pressed. Both were correct, both survived every adversarial pass,
+and both are byte-for-byte what they were. **But all of it stays on the same
+document, whose answer is already decided.** Waiting five seconds on a stale
+session gets a stale session five seconds later; re-opening the panel over it
+re-reads the same refusal. The only remedy that was ever left — "refresh the
+hiring page and run again" — was written to `run.lastError` and printed to a
+console for a **person** to act on, and the runs that hit this are precisely the
+long unattended ones nobody is watching.
+
+**What is new is that the extension does what the notice asks.**
+`planResumeRecovery`, a pure policy in `src/applicants-core.js`, decides
+`continue` / `reload` / `give-up` from five inputs: the phase, how many
+applicants are still owed a resume, the streak of consecutive scan notices, the
+reloads already spent, and whether any resume was recovered since the last one.
+It is pure, so the decision is executed in tests rather than reasoned about
+inside a DOM walk — the same discipline `pagerSearchReason` was moved to in
+3.9.6, and for the same reason: this one ends in a page reload, and a rule that
+strong should not be readable only by tracing a loop.
+
+**Two triggers, and neither of them is "the notice appeared".**
+
+* **The streak** — `RESUME_SCAN_STREAK_LIMIT = 3`. One notice is an ordinary
+  per-file scan and is worth the cheap remedies first; that is the case the wait
+  and the re-open exist for, and it usually clears. Three *consecutive*
+  applicants meeting it is not a coincidence on a list whose applicants uploaded
+  at unrelated times — it is evidence about the document — so the run stops
+  burning applicants on a page that cannot answer. Being wrong is bounded and
+  self-repairing in both directions: too high spends resumes this run could have
+  had, too low spends a reload, and every applicant passed over is recorded as
+  still owed, so the reload goes back for all three anyway.
+* **The end of the walk**, when anyone is still owed. By then minutes have
+  passed, and the wait and the panel re-open have each had their turn on every
+  one of them. This is the trigger that catches a page that went stale late — on
+  the last applicant, where no streak can ever form.
+
+**THE REJECTED ALTERNATIVE, which was the first design and is the obvious
+reading of the notice: reload the instant the notice appears.** Two costs, both
+real, and either one alone is disqualifying. On a stale page *every* applicant
+shows the notice, so that is not one reload — it is one **per applicant**,
+twenty-five of them on the list that was reported, and each one throws away the
+walk's position in the list and its page in the pager, which are the two things
+five releases of pager work exist to hold on to. And when the scan genuinely *is*
+still running on a single file, an immediate reload comes back to the same notice
+and asks for another: a loop with a page reload in it, on the recruiter's own
+page, which is the classic way to turn a transient failure into a browser that
+will not stop moving. Every trigger above is therefore either **evidence the
+document is at fault** or **the end of the walk** — never the notice itself.
+
+**The bound, and where it had to live.** `MAX_RESUME_RELOADS = 2`, persisted on
+the auto-run lease in `chrome.storage.local` rather than held in the run —
+**because the reload destroys the document and every counter inside it, and a
+budget that resets on the act it is bounding is not a budget.** It is written
+*before* the caller reloads, which is the entire point of the round trip through
+the worker: the document that asks is about to stop existing, and its successor
+reads that count to decide whether it may ask again.
+
+**The second reload is earned, not granted, and driving the whole cycle rather
+than reasoning about it is what showed the difference.** A simulation of the
+persisted loop — run, decide, persist, reload, new document, run — proved the two
+bounds here are not independent. The progress rule gives up the moment a reload
+recovers nothing, so a page that comes back exactly as broken stops after **one**
+reload and never reaches the ceiling at all; the budget is only ever spent in
+full by a page that *is* recovering and simply has more to give. That is the
+right way round, and it is the opposite of what a flat budget would spend: a page
+that answered the question is not asked it twice more, and a page that gave up
+half its resumes gets another turn. The prose here originally claimed the second
+reload existed for a first that landed too early. It does not, and the sentence
+was wrong in the same way the code comment beside it was wrong.
+
+A reload that recovered no resume therefore does not earn a second one even with
+budget left; `recovered` is exact in that position precisely because a resumed
+run opens **only** the applicants it still owes — everyone finished is retired in
+bulk from the collected index — so any resume it reads at all is one the reload
+recovered. Zero means the remedy changed nothing, and a remedy that changed
+nothing does not get another turn merely because the budget would allow it.
+
+**The defect found while building it, and without it none of the rest would
+work.** A walk that reached the bottom of the list reported `COMPLETED` **even
+when it never got ten of the resumes** — and `claimAutoRun` refuses to re-arm a
+completed job. So the reload would have destroyed the document, come back to a
+freshly injected script, and done *nothing at all*: the same permanent failure
+3.9.6 and 3.9.8 each reached from a different direction, a job settled
+`COMPLETED` on a page whose work was not finished, which is the one state this
+surface cannot recover from. **A run that still owes resumes has not finished the
+job.** It now reports `INTERRUPTED` before reloading, following the existing
+"report first, then act" discipline — the worker has to see this execution end
+before it can hand the job to the next one, and a lease still marked `running` is
+refused. **A reload that was refused settles the same way**: a hidden tab, a
+Stop, or a challenge means the resumes are still owed and nothing has been done
+about them, so the run ends `INTERRUPTED` and stays restartable rather than
+losing those documents permanently to a tab that merely happened to be in the
+background — rule 9's "a hidden tab is never a finished one", applied to resumes
+instead of to a scroll. Giving up, by contrast, still settles `COMPLETED`, and
+that is deliberate rather than an oversight: give-up is terminal — the budget is
+spent and the remedy demonstrably changed nothing — and an interrupted settle
+there would leave `continueInterruptedRun` restarting the run forever, the same
+loop the rejected alternative was rejected for, one level up.
+
+**Unchanged, and worth saying so.** **No new click is added by the resume work,
+and the count stays at nine** — the ninth is TASK-0188's Message control above,
+and a reload is not a control at all: rule 5 governs what may be *pressed*, and
+this presses nothing. No selector, no schema, no CSV column, no permission.
+`waitForResumeScan`, `recordScanningResume` and the end-of-page re-open sweep are
+all still there and all still run **first** — this is a path added *after* the
+working one, never a replacement for it, which is the multiple-UI guide's one
+rule applied to a remedy instead of to a reader. And `canReload` is the caller's
+to answer, passed in rather than assumed by the core, because it carries the
+three rules this file cannot see: a hidden tab (rule 9), a Stop (rule 12), a
+challenge (rule 10). Any one of them refuses the reload outright, and the refusal
+is visible in the verdict instead of silently skipping the policy — a Stop takes
+the reload budget with it, so no reload can fire behind a person who has stopped
+the run.
+
+**No live claim: rule 20 stands.** `npm run check` passed; loading `dist/` in
+Chrome is the user's step, and local checks do not prove a live LinkedIn fix.
+
 ## 3.9.8 — the run pressed the page it was already on, for five releases
 
 TASK-0187. Found by a parallel trace of the whole click path, and confirmed by

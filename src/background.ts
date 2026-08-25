@@ -20,7 +20,7 @@ const TabsCore: any = (globalThis as any).ProfileVaultTabs;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-25-react-v3.9.8";
+const BUILD_ID = "2026-08-25-react-v3.10.0";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -1796,7 +1796,14 @@ async function autoRunFor(jobId: string, tabId = 0): Promise<any> {
     armed: true,
     options: claimed.entry.options || {},
     armedAt: claimed.entry.armedAt || "",
-    tracking: claimed.tracking
+    tracking: claimed.tracking,
+    // How much of the resume-reload budget this job has already spent (3.10.0).
+    // Sent with the claim rather than left to a second round trip, because the
+    // very first thing a *resumed* run needs to know is whether it is resuming
+    // because of a reload it asked for — and it needs that before it reads its
+    // first applicant, not after. An entry armed before 3.10.0 has no counter,
+    // which reads as zero and is correct: it has never reloaded.
+    resumeReloads: Number(claimed.entry.resumeReloads) || 0
   };
 }
 
@@ -1819,11 +1826,90 @@ async function settleAutoRunFor(jobId: string, report: any): Promise<any> {
 }
 
 /**
+ * Read — or spend — this job's resume-reload budget (3.10.0).
+ *
+ * THE LIVE DEFECT. LinkedIn renders "Scanning resume for viruses. Please refresh
+ * the page now." where the resume card belongs, and past some point in a long
+ * run it says that for *every* remaining applicant: the page's attachment
+ * session has gone stale and no amount of waiting on that document brings it
+ * back. LinkedIn itself names the remedy — refresh the page — so the fix is for
+ * the run to reload the hiring page and come back for the applicants it still
+ * owes.
+ *
+ * WHY THE BUDGET LIVES HERE AND NOT IN THE RUN. A reload destroys the document
+ * and with it `state`, the run object, and every counter inside them. A limit
+ * held in the content script would be reset by the very act it exists to bound,
+ * so "at most N reloads" would mean "at most N reloads per reload" — which is no
+ * limit at all, and a page that reloads forever is far worse than one that
+ * collects nothing. The auto-run lease is the only thing on this surface that
+ * already survives navigation, it is already keyed by job, and it is already
+ * removed by the universal Stop; so the counter rides on it. `claimAutoRun` and
+ * `settleAutoRun` both spread `...entry`, so the count survives every claim and
+ * every settle without either of them knowing it exists.
+ *
+ * `spend: false` is a plain read, and it writes nothing: asking how much budget
+ * is left must never consume any.
+ *
+ * A MISSING ENTRY IS NEVER CREATED, even when spending. A job with no lease is a
+ * job the recruiter never asked to collect, so there is no run here to bound —
+ * and writing an entry would ARM it, which is this extension deciding on its own
+ * to start clicking on somebody's applicants. That is the one thing the whole
+ * auto-run design exists to prevent. Zero is reported instead, and a caller with
+ * no lease behind it gets the same answer as one with no budget left.
+ *
+ * A blank job id is refused without writing, exactly as `armAutoRun` and
+ * `autoRunFor` refuse one: an entry under a blank key would be read back by
+ * every other job that has one.
+ */
+async function resumeReloadFor(jobId: string, spend: boolean): Promise<any> {
+  const key = String(jobId || "").trim();
+  if (!key) return { ok: true, reloads: 0 };
+  const runs = await readAutoRuns();
+  const entry = runs[key];
+  /**
+   * Not armed: report the budget as ALREADY SPENT, and write nothing.
+   *
+   * Zero was the first answer here and it is the unbounded one. There is no
+   * lease to increment, so a page told "zero spent" reloads, comes back, is told
+   * "zero spent" again, and reloads forever — the counter can never rise because
+   * there is nothing to write it on. Inventing a lease instead is worse: that
+   * would arm a job nobody asked to collect.
+   *
+   * Reporting it spent fails closed, and it costs nothing real, because a reload
+   * from this state was never going to work anyway: `claimAutoRun` on a missing
+   * entry answers `not-collected-before`, so the reloaded page would come back
+   * and do nothing at all. A run with no lease has nothing to resume.
+   *
+   * This also covers a `readAutoRuns` that failed and returned `{}`, which is
+   * the same situation seen from the storage layer: we cannot bound it, so we
+   * do not permit it.
+   */
+  if (!entry || typeof entry !== "object") {
+    return { ok: true, reloads: Number(Applicants.MAX_RESUME_RELOADS) || 2 };
+  }
+  const current = Number(entry.resumeReloads) || 0;
+  if (!spend) return { ok: true, reloads: current };
+
+  const noted = Applicants.noteResumeReload(entry, { now: nowIso() });
+  if (!noted.changed) return { ok: true, reloads: current };
+  runs[key] = noted.entry;
+  // Persisted BEFORE the caller reloads, which is the whole point of the round
+  // trip: the document that asked is about to stop existing, and its successor
+  // reads this count to decide whether it may ask again.
+  await chrome.storage.local.set({ [AUTO_RUN_KEY]: runs }).catch(() => undefined);
+  return { ok: true, reloads: Number(noted.entry.resumeReloads) || 0 };
+}
+
+/**
  * Forget every armed job.
  *
  * Called by the universal Stop, and this is not incidental: a Stop that could be
  * undone by navigating away and back is not a Stop. Rule 13a says Stop ends
  * everything, so it ends the standing instruction too.
+ *
+ * It takes the resume-reload counter with it, and that is deliberate rather than
+ * incidental too: a budget that outlived a Stop would let a reload fire after
+ * the recruiter had already ended the run.
  */
 async function disarmAutoRuns(): Promise<void> {
   await chrome.storage.local.remove(AUTO_RUN_KEY).catch(() => undefined);
@@ -2309,6 +2395,17 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
 
   if (type === APPLICANT_MESSAGES.RUN_LIFECYCLE) {
     return settleAutoRunFor(String(message?.jobId || ""), message?.tracking || {});
+  }
+
+  if (type === APPLICANT_MESSAGES.RESUME_RELOAD) {
+    // The persisted half of the stale-attachment-session recovery. The page
+    // asks with `spend: false` to find out what it has left, and with
+    // `spend: true` immediately before it reloads — the count has to be durable
+    // by the time the document goes, because the document is what goes.
+    //
+    // The worker decides nothing about *whether* to reload; it only keeps the
+    // number the page cannot keep for itself.
+    return resumeReloadFor(String(message?.jobId || ""), message?.spend === true);
   }
 
   if (type === APPLICANT_MESSAGES.CLEAR) {

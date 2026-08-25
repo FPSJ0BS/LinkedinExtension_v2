@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.9.8";
+  const BUILD_ID = "2026-08-25-react-v3.10.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -6847,6 +6847,107 @@
     return { opened: true, record };
   }
 
+  // ------------------------------------ the resume LinkedIn never let go of
+  //
+  // "Scanning resume for viruses. Please refresh the page now." Reported live
+  // twice, and the second report named the shape that names the cause: "this is
+  // after many applicants profiles are saved" — the same shape as 3.9.1's "the
+  // first two downloaded and every one after them did not". Failing for
+  // *everyone after applicant N* is a property of the DOCUMENT, not of the
+  // documents: a genuine per-file scan fails on scattered applicants, because
+  // those files were uploaded on unrelated days. The page's attachment session
+  // has gone stale, and LinkedIn's own notice says exactly what cures it.
+  //
+  // Everything built for this so far stays on that same stale document, which is
+  // why none of it could ever clear it: `waitForResumeScan` waits five seconds
+  // on a page whose answer is already fixed, `recordScanningResume` writes the
+  // honest blank (rule 1), and 3.9.6's end-of-page re-open opens the same panel
+  // on the same document. All three are correct, all three are untouched, and
+  // all three are the cheap remedies that must be tried first. What was missing
+  // is that **nothing ever did what the notice asks** — the run printed "refresh
+  // the hiring page and run again" and gave up, which is the one step a person
+  // has to be watching to take, and the runs that hit this are the long
+  // unattended ones.
+  //
+  // The policy for when to reload lives in `Applicants.planResumeRecovery`,
+  // where it is pure and testable. What lives here is the two things the core
+  // cannot see: whether this page may be reloaded at all, and what the job's
+  // persisted reload budget currently says.
+  //
+  // **No click is added by any of it (rule 5).** A reload is not a control: it
+  // resolves nothing, presses nothing, and the allowlist is untouched.
+
+  /**
+   * May this page be reloaded right now?
+   *
+   * `planResumeRecovery` decides whether the *page* is the thing that is broken.
+   * It is pure and can see neither a tab nor a Stop nor a checkpoint, so it
+   * takes this answer as `canReload` rather than guessing at it. Every clause
+   * below is one of the standing rules applied to the strongest thing this
+   * extension does to a page the recruiter is sitting in front of:
+   *
+   *   - **rule 12** — a Stop ends everything. A reload landing a moment after
+   *     one would restart the very surface the recruiter just told to stop.
+   *   - **rule 9** — a hidden tab is never a finished one. LinkedIn does not
+   *     render a background tab, so a reload there returns to a document that
+   *     will not paint, the notice would be read again off a frozen DOM, and the
+   *     reload budget would be spent proving it.
+   *   - **rule 10** — a CAPTCHA, a checkpoint or a rate limit must PAUSE and
+   *     wait for a person. Reloading into one is how a restriction becomes a
+   *     worse restriction.
+   *
+   * A refusal here is deliberately VISIBLE rather than silent: the verdict comes
+   * back `continue` carrying a reason that names it, and the caller reports the
+   * job INTERRUPTED instead of settling it COMPLETED. That matters more than it
+   * looks — `claimAutoRun` refuses to re-arm a completed job, so a tab that
+   * merely happened to be in the background would otherwise lose those resumes
+   * permanently. Rule 9, applied to resumes rather than to rows.
+   */
+  function mayReloadForResumes() {
+    if (state.aborted || state.run?.stopRequested || state.autoRun?.disabled) return false;
+    if (!isPageVisible() || state.wentHidden) return false;
+    return !currentChallenge().challenged;
+  }
+
+  /** Short: this is one small number from the worker, never a file or a record. */
+  const RESUME_RELOAD_BUDGET_TIMEOUT_MS = 4000;
+
+  /**
+   * How many reloads this job has already spent — asked of the worker, never
+   * held in the run.
+   *
+   * **The budget cannot live in this document, because the thing it bounds
+   * destroys this document.** A counter that resets on the event it is counting
+   * is not a budget at all, so it is persisted on the job's auto-run entry and
+   * read back across the reload. `spend: true` claims one; `spend: false` only
+   * looks.
+   *
+   * **A FAILED READ IS "CANNOT RELOAD", NEVER "NO RELOADS SPENT."** That budget
+   * is the only thing standing between this feature and a page that reloads
+   * itself forever, so a worker that does not answer — asleep, replaced
+   * mid-flight, or running a build without this handler — must not be read as a
+   * fresh allowance. Answering `ok: false` is carried straight through to
+   * `canReload: false`, so an unanswered read continues the run and reports it
+   * interrupted rather than reloading on an unbounded guess. The failure mode of
+   * being too cautious here is one page not refreshed; the failure mode of being
+   * too trusting is a browser that will not stop moving.
+   */
+  async function readResumeReloadBudget(jobId, spend = false) {
+    if (!cleanText(jobId)) return { ok: false, reloads: 0 };
+    try {
+      // The same bounded send the resume cycle uses. A worker that is waking can
+      // take a moment; a worker that is gone must not hold the run.
+      const reply = await sendRuntimeMessageWithTimeout(
+        { type: "PV_APPLICANT_RESUME_RELOAD", jobId, spend: spend === true },
+        RESUME_RELOAD_BUDGET_TIMEOUT_MS
+      );
+      if (!reply?.ok) return { ok: false, reloads: 0 };
+      return { ok: true, reloads: Math.max(0, Number(reply.reloads) || 0) };
+    } catch {
+      return { ok: false, reloads: 0 };
+    }
+  }
+
   async function extractAllApplicants(options = {}) {
     beginRun();
     // The list is NOT walked up front any more.
@@ -6945,6 +7046,67 @@
 
     /** Extra passes spent finishing the CURRENT page. Reset by a pager press. */
     let pageSweeps = 0;
+
+    /**
+     * CONSECUTIVE APPLICANTS WHOSE RESUME WAS STILL BEING VIRUS-SCANNED.
+     *
+     * The evidence that decides "is it the file, or is it the page". One notice
+     * is an ordinary per-file scan and is worth the cheap remedies first — the
+     * wait and the end-of-page re-open exist for exactly that case, and it
+     * usually clears. Several in a ROW is not a coincidence on a list whose
+     * applicants uploaded their CVs on unrelated days; it is the page's own
+     * attachment session having gone stale, which is what LinkedIn's notice is
+     * actually reporting when it asks for a refresh.
+     *
+     * `Applicants.RESUME_SCAN_STREAK_LIMIT` holds how many, so the number is
+     * declared once in the core beside the reasoning for it rather than here.
+     */
+    let scanStreak = 0;
+
+    /**
+     * Resumes this run actually READ — downloaded, or already on disk.
+     *
+     * Consulted by the policy only once a reload has already been spent, and it
+     * is exact there: a resumed run opens only the applicants it still owes,
+     * because everybody finished was retired in bulk from the collected index,
+     * so any resume it reads at all is a resume the reload recovered. Zero after
+     * a reload means the reload changed nothing, and a remedy that changed
+     * nothing does not earn a second turn merely because the budget would allow
+     * one.
+     */
+    let resumesRecovered = 0;
+
+    /**
+     * Everyone this run has seen owe a CV it could not read, by row.
+     *
+     * Deliberately RUN-wide and not page-wide, which is the one place this
+     * differs from the `unfinished` ledger above. `unfinished` is cleared by a
+     * pager press, correctly — it is the gate's list of rows to re-arm on the
+     * page being walked, and page two's allowance must not be spent on page
+     * one's failures. But owing a resume is not a property of a page: an
+     * applicant the completion gate gave up on after
+     * `MAX_PAGE_COMPLETION_SWEEPS` is still owed a CV after the pager has moved
+     * on, and reading `owed` off the last page alone would answer zero for a job
+     * that is missing twenty files. A reload goes back for all of them, because
+     * `hasPendingResume` keeps every one of them out of the collected index.
+     *
+     * Keyed by row rather than counted, so the same applicant re-opened by the
+     * completion sweep is one debt and not two, and so a second read that
+     * finally gets the file can settle it.
+     */
+    const resumesOwed = new Set();
+
+    /**
+     * The recovery verdict this run ends on, handed to the caller.
+     *
+     * Decided here and ACTED ON there, and the split is deliberate: the reload
+     * destroys this document, so it must not happen until the worker has been
+     * told this execution did not finish the job. See `runEveryApplicant`.
+     */
+    let resumeRecovery = null;
+
+    /** Did the walk stop early to reload? Then the end-of-walk ask is moot. */
+    let reloadRequested = false;
 
     /**
      * Every row this run has finished with, by identity.
@@ -7657,6 +7819,58 @@
         } else {
           unfinished.delete(key);
         }
+        /**
+         * IS IT THE FILE, OR IS IT THE DOCUMENT?
+         *
+         * The streak is evidence about the PAGE, so only an answer that says
+         * something about the page's attachment session is allowed to move it.
+         *
+         *   - **Pending** — `available: true` paired with `NOT_ATTEMPTED` — is
+         *     the scan notice and nothing else writes that pairing. It is the
+         *     one answer that means "I saw a CV and the page would not give it
+         *     to me", so it is the one answer that extends the streak.
+         *   - **Read** — `DOWNLOADED` or `ALREADY_SAVED` — is proof the
+         *     attachment session is alive on this very document, so it clears
+         *     the streak outright and settles that applicant's debt.
+         *   - **Looked at and got nothing** — `UNAVAILABLE` (this person has no
+         *     CV), `LINK_ONLY` (the card rendered and gave up its address) and
+         *     `FAILED` (the file was reached and the fetch lost) — all mean the
+         *     resume card itself RENDERED, which a stale document does not
+         *     manage. They clear the streak too, and none of them is owed:
+         *     `hasPendingResume` is false for every one of them, so no later run
+         *     comes back for them either and counting them here would send a
+         *     reload after files that are not coming.
+         *
+         * **A person with no CV must not extend a streak**, which is why
+         * `UNAVAILABLE` resets rather than being passed over. Three applicants
+         * who simply never attached anything are not evidence of a stale page,
+         * and treating them as such would reload a document that is working
+         * perfectly.
+         *
+         * The only status left neutral is a bare `NOT_ATTEMPTED` with no resume
+         * seen, which is what a floor record carries: the row never opened and
+         * the resume step never ran, so it knows nothing about the page and is
+         * not allowed to vote either way.
+         */
+        const resumeStatus = cleanText(saved?.applicant?.resume?.downloadStatus);
+        if (Applicants.hasPendingResume(saved)) {
+          scanStreak += 1;
+          resumesOwed.add(key);
+        } else if (
+          resumeStatus === Applicants.RESUME_STATUS.DOWNLOADED
+          || resumeStatus === Applicants.RESUME_STATUS.ALREADY_SAVED
+        ) {
+          scanStreak = 0;
+          resumesRecovered += 1;
+          resumesOwed.delete(key);
+        } else if (
+          resumeStatus === Applicants.RESUME_STATUS.UNAVAILABLE
+          || resumeStatus === Applicants.RESUME_STATUS.LINK_ONLY
+          || resumeStatus === Applicants.RESUME_STATUS.FAILED
+        ) {
+          scanStreak = 0;
+          resumesOwed.delete(key);
+        }
         if (!countedCollected.has(key)) {
           countedCollected.add(key);
           state.run.collected += 1;
@@ -7683,30 +7897,151 @@
       processed.add(key);
       state.run.index = processed.size;
       state.run.updatedAt = new Date().toISOString();
+      /**
+       * ENOUGH IN A ROW MEANS THE PAGE, NOT THE FILES — so stop burning
+       * applicants on a document whose answer is already fixed.
+       *
+       * **Why this is not "reload the moment the notice appears"**, which is the
+       * obvious reading of LinkedIn's own wording and was the first design. On a
+       * stale page EVERY applicant shows the notice, so that is not one reload,
+       * it is one per applicant — twenty-five on the reported list — and each
+       * one throws away the walk's position in the list and its place in the
+       * pager. And when the scan genuinely IS still running on one file, an
+       * immediate reload comes back to the same notice and asks for another,
+       * which is a loop with a page reload inside it. So the trigger is either
+       * evidence about the document (here) or the end of the walk (below), by
+       * which time minutes have passed and every cheap remedy has had its turn.
+       *
+       * The budget is only asked for once this page has something to say, and
+       * only when the page may be reloaded at all, so a quiet run never sends
+       * this message and a hidden or stopped one never wakes the worker for an
+       * answer it is not allowed to act on.
+       */
+      if (scanStreak >= Applicants.RESUME_SCAN_STREAK_LIMIT) {
+        const budget = mayReloadForResumes()
+          ? await readResumeReloadBudget(jobId)
+          : { ok: false, reloads: 0 };
+        const verdict = Applicants.planResumeRecovery({
+          phase: "walking",
+          owed: resumesOwed.size,
+          streak: scanStreak,
+          reloads: budget.reloads,
+          recovered: resumesRecovered,
+          // Both halves, folded: `ok` is true only when this page was allowed to
+          // reload AND the worker actually answered with the budget.
+          canReload: budget.ok
+        });
+        if (verdict.action === Applicants.RESUME_RECOVERY.RELOAD) {
+          resumeRecovery = verdict;
+          reloadRequested = true;
+          // NOT `COMPLETED`. The walk is being cut short on purpose with rows
+          // still unopened, and the line below this loop turns a RUNNING state
+          // into COMPLETED — which `claimAutoRun` then refuses to re-arm, so the
+          // reloaded page would come back and do nothing at all.
+          state.run.state = Applicants.RUN_STATE.STOPPED;
+          state.run.lastError =
+            `${scanStreak} resumes in a row were still being virus-scanned, so it is this page and not `
+            + `those files (${verdict.owed} resume(s) owed). Reloading the hiring page, as LinkedIn's own `
+            + "notice asks, and continuing from the applicants that are not yet saved.";
+          state.run.updatedAt = new Date().toISOString();
+          break;
+        }
+        // Not reloading — the budget is spent, the last reload recovered
+        // nothing, or this page may not be reloaded right now. Start the
+        // evidence over rather than asking again on every applicant after this
+        // one: the walk carries on either way, and a page that is genuinely
+        // stale will have re-earned the answer within another few rows.
+        scanStreak = 0;
+      }
       // A breath before the next one, and a Stop lands on the next row's
       // `assertRunnable()` a moment later.
       await paceBetweenApplicants();
     }
 
     if (state.run.state === Applicants.RUN_STATE.RUNNING) state.run.state = Applicants.RUN_STATE.COMPLETED;
+
+    /**
+     * THE END OF THE WALK IS THE SECOND TRIGGER, and it is the gentler one.
+     *
+     * The streak above catches a page that went stale in the middle of a run.
+     * This catches the rest: resumes owed one or two at a time across pages,
+     * never three in a row, each of which the wait and the completion sweep both
+     * failed to get. By now every cheap remedy has had its turn and minutes have
+     * passed, so a scan that was genuinely still running has had every chance to
+     * finish and what is left is the document.
+     *
+     * `owed` is asked of the RUN's ledger rather than of the last page's, for
+     * the reason `resumesOwed` records: a pager press clears `unfinished`, so
+     * reading it here would answer zero for a job missing a file on every page
+     * but the last.
+     *
+     * Nothing is sent when nothing is owed, and nothing is sent when this page
+     * may not be reloaded anyway — a quiet run must not wake the worker to be
+     * told there is nothing to do. `planResumeRecovery` is still called in both
+     * cases, because a verdict of "continue, nothing owed" is an answer the
+     * caller needs and is not the same answer as "continue, but only because I
+     * was not allowed to act".
+     */
+    if (!reloadRequested) {
+      const owedResumes = resumesOwed.size;
+      const budget = owedResumes > 0 && mayReloadForResumes()
+        ? await readResumeReloadBudget(jobId)
+        : { ok: false, reloads: 0 };
+      resumeRecovery = Applicants.planResumeRecovery({
+        phase: "finished",
+        owed: owedResumes,
+        reloads: budget.reloads,
+        recovered: resumesRecovered,
+        canReload: budget.ok
+      });
+      if (resumeRecovery.action === Applicants.RESUME_RECOVERY.RELOAD) {
+        // Same reason as the mid-walk break: reaching the end of the LIST is not
+        // finishing the JOB while files are still owed, and a COMPLETED job is
+        // one `claimAutoRun` will not re-arm — so the reloaded page would come
+        // back to a standing instruction that had already been cancelled.
+        state.run.state = Applicants.RUN_STATE.STOPPED;
+        state.run.lastError =
+          `${resumeRecovery.owed} resume(s) are still owed after the whole list was walked. `
+          + "Reloading the hiring page, as LinkedIn's own notice asks, and going back for them.";
+        state.run.updatedAt = new Date().toISOString();
+      }
+    }
+    // On the run's own diagnostics, so the next live report answers "why did it
+    // reload" — or "why did it not" — in one line instead of another round of
+    // reading source.
+    listDiagnostics.listScroll.resumeRecovery = resumeRecovery
+      ? { ...resumeRecovery, streak: scanStreak, recovered: resumesRecovered }
+      : null;
+
     /**
      * A resume the scan never released is the one failure with an ACTION, so it
      * is said out loud rather than left in a warning on one record.
      *
-     * LinkedIn's own notice reads "Please refresh the page now", and this
-     * extension deliberately will not reload the hiring page mid-run — that
-     * would tear down the list, the pager and the panel the walk is standing on.
-     * So the reload is the recruiter's to do, and they can only do it if
-     * somebody tells them it is worth doing. `hasPendingResume` now also keeps
-     * these applicants OUT of the collected index, so simply running again after
-     * the refresh reaches them; no `recollect` of the whole job is needed.
+     * LinkedIn's own notice reads "Please refresh the page now". This is what is
+     * printed when the extension is NOT going to do that itself — the budget is
+     * spent, the last reload recovered nothing, or the page may not be reloaded
+     * right now — so the reload goes back to being the recruiter's to do, and
+     * they can only do it if somebody tells them it is worth doing.
+     * `hasPendingResume` keeps these applicants OUT of the collected index, so
+     * simply running again after the refresh reaches them; no `recollect` of the
+     * whole job is needed.
+     *
+     * Suppressed on the reload path and only there: telling somebody to refresh
+     * the page a heartbeat before the page refreshes itself is an instruction
+     * that reads as a failure. The reload announces itself in
+     * `runEveryApplicant` instead, where it happens.
      */
+    const reloadingForResumes = resumeRecovery?.action === Applicants.RESUME_RECOVERY.RELOAD;
     const scanning = [...unfinished].filter(([, reason]) => reason.includes("virus-scanning"));
-    if (scanning.length) {
+    if (scanning.length && !reloadingForResumes) {
+      // WHY the extension is not doing it, appended rather than replacing the
+      // line: "refresh and run again" with no reason is what two rounds of live
+      // reports have already been spent guessing at.
+      const why = resumeRecovery?.reason ? ` The extension did not reload it itself: ${resumeRecovery.reason}.` : "";
       const note =
         `${scanning.length} resume(s) were still being virus-scanned by LinkedIn and were not saved. `
         + "Refresh the hiring page and run again — those applicants are not marked collected, "
-        + "so the next run will go straight back for them.";
+        + `so the next run will go straight back for them.${why}`;
       state.run.lastError = note;
       console.warn(`[Profile Vault ${BUILD_ID}] ${note}`, { rows: scanning.map(([row]) => row) });
     }
@@ -7724,7 +8059,15 @@
     listDiagnostics.listScroll.tempo = tempoSnapshot();
     logListWalk(listDiagnostics.listScroll);
 
-    return { records: [...resultsByKey.values()], run: { ...state.run }, list: listDiagnostics.listScroll || null };
+    // `resumeRecovery` travels with the result because the ACT is the caller's:
+    // the reload destroys this document, so it must not happen until the worker
+    // has been told this execution did not finish the job.
+    return {
+      records: [...resultsByKey.values()],
+      run: { ...state.run },
+      list: listDiagnostics.listScroll || null,
+      resumeRecovery
+    };
   }
 
   /**
@@ -7758,9 +8101,120 @@
     };
     try {
       const result = await extractAllApplicants(options);
-      const lifecycle = result.run?.state === Applicants.RUN_STATE.COMPLETED
+      /**
+       * DO WHAT THE NOTICE ASKS — and do it in this order, because the reload
+       * destroys the document every step after it would have needed.
+       *
+       * **1. Report INTERRUPTED first, and this is the load-bearing line.** The
+       * lifecycle below reports COMPLETED whenever the walk reached the end of
+       * the list, and `claimAutoRun` refuses to re-arm a job whose execution
+       * reported COMPLETED. A run that still owes resumes has NOT finished the
+       * job, so reporting it complete would mean the reloaded page comes back to
+       * a standing instruction that has already been cancelled and does nothing
+       * at all — the reload would cost the recruiter their run and buy nothing.
+       *
+       * **2. Spend the reload before taking it**, not after: the budget is
+       * persisted on the job precisely because it has to survive the thing it is
+       * bounding, and a reload taken before it is paid for is a reload nothing
+       * is counting. If the worker will not take the payment the reload does not
+       * happen — an unbudgeted reload is how a transient failure becomes a
+       * browser that will not stop moving, and one page left unrefreshed is a
+       * far cheaper mistake.
+       *
+       * **3. Say it out loud.** The recruiter is watching their own page move
+       * under them; a page that reloads itself with no explanation is
+       * indistinguishable from LinkedIn misbehaving.
+       *
+       * **4. Reload — and return without touching `continueInterruptedRun`.**
+       * That call schedules a fresh run on this page, and a fresh run starting
+       * in the moments before the reload lands would put two drivers on one
+       * document. The reload IS the continuation.
+       *
+       * No click is added by any of this (rule 5): a reload resolves no control,
+       * presses nothing, and the allowlist is untouched.
+       */
+      if (result.resumeRecovery?.action === Applicants.RESUME_RECOVERY.RELOAD) {
+        await report(Applicants.AUTO_RUN_STATE.INTERRUPTED);
+        const spent = await readResumeReloadBudget(jobId, true);
+        /**
+         * PAID FOR, AND PAID FOR EXACTLY ONCE.
+         *
+         * `ok` on its own is not proof of payment. The worker answers a job with
+         * NO lease by reporting the budget as already spent rather than by
+         * creating one — it refuses to arm a job nobody asked to collect, which
+         * is the one thing the whole auto-run design exists to prevent — and
+         * that reply is `ok: true` like any other. So the test is that the count
+         * actually ROSE, by exactly one, from the number the policy made its
+         * decision on. Anything else is an answer that merely looks like a
+         * payment, and a reload nothing counted is a reload that can repeat
+         * forever.
+         */
+        const paid = spent.ok
+          && Number(spent.reloads) === Number(result.resumeRecovery.reloads) + 1;
+        if (!paid) {
+          console.warn(
+            `[Profile Vault ${BUILD_ID}] not reloading the hiring page: the job's reload budget could not `
+            + "be spent, and a reload nothing is counting is one that can repeat forever. "
+            + `${result.resumeRecovery.owed} resume(s) are still owed — refresh the page and run again.`
+          );
+          return result;
+        }
+        console.warn(
+          `[Profile Vault ${BUILD_ID}] reloading the hiring page (${spent.reloads} of `
+          + `${Applicants.MAX_RESUME_RELOADS}): ${result.resumeRecovery.owed} resume(s) are still owed `
+          + `because LinkedIn was virus-scanning them (${result.resumeRecovery.reason}). Its own notice `
+          + "asks for a refresh; the run will pick up the applicants that are not yet saved."
+        );
+        location.reload();
+        return result;
+      }
+      /**
+       * A REFUSED RELOAD IS NOT A FINISHED JOB.
+       *
+       * `continue` carrying a reason means the policy WANTED to reload and this
+       * page was not allowed to — a hidden tab, a Stop, a challenge, or a worker
+       * that did not answer. The walk still reached the end of the list, so
+       * today's line would settle the job COMPLETED, and `claimAutoRun` refuses
+       * to re-arm a completed job: the owed resumes would be lost permanently
+       * because the tab happened to be in the background. That is rule 9's "a
+       * hidden tab is never a finished one", applied to resumes rather than to
+       * rows.
+       *
+       * Tested on the reason rather than on the count, because `continue` with
+       * no reason is the ordinary quiet ending and must stay exactly as it was.
+       * `give-up` is deliberately NOT here: recovery is exhausted, the warning
+       * naming why has already been printed, and settling it interrupted would
+       * hand it straight back to `continueInterruptedRun` for ever.
+       */
+      const reloadRefused = result.resumeRecovery?.action === Applicants.RESUME_RECOVERY.CONTINUE
+        && Number(result.resumeRecovery.owed) > 0
+        && Boolean(result.resumeRecovery.reason);
+      const lifecycle = result.run?.state === Applicants.RUN_STATE.COMPLETED && !reloadRefused
         ? Applicants.AUTO_RUN_STATE.COMPLETED
         : Applicants.AUTO_RUN_STATE.INTERRUPTED;
+      if (reloadRefused) {
+        /**
+         * ...AND THIS DOCUMENT MUST AGREE WITH WHAT IT JUST TOLD THE WORKER.
+         *
+         * The worker is not the only thing that remembers a finished job.
+         * `startAutoRun` stamps `autoRun.ranKey` when `state.run.state` is
+         * COMPLETED, and `noteReturnToTab` refuses to restart a view carrying
+         * that stamp — deliberately, because restarting a genuinely completed
+         * 665-row walk on every glance at the tab was its own live defect. But
+         * a run that could not reload is exactly the run a tab return SHOULD
+         * pick up, so reporting it interrupted to the worker while leaving this
+         * copy saying COMPLETED would close the door the report just opened.
+         *
+         * Written AFTER `result` was built, and that timing is the whole safety
+         * of it: `continueInterruptedRun` reads the frozen `result.run`, which
+         * still says COMPLETED, so it returns early exactly as it does today.
+         * Nothing restarts here and now — on a page that may not be reloaded,
+         * restarting immediately is the one thing that would spin. What changes
+         * is only that coming back to the tab is allowed to try again.
+         */
+        state.run.state = Applicants.RUN_STATE.STOPPED;
+        state.run.updatedAt = new Date().toISOString();
+      }
       await report(lifecycle);
       // Reported first, then continued: the worker has to see this execution
       // finish before it can hand the job to the next one, and `claimAutoRun`

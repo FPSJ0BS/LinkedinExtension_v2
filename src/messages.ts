@@ -100,6 +100,24 @@ export const APPLICANT_MESSAGES = {
    * content-script loop cannot overwrite the lifecycle of its successor.
    */
   RUN_LIFECYCLE: "PV_APPLICANT_RUN_LIFECYCLE",
+  /**
+   * "How many times has this job already reloaded the page chasing resumes
+   * LinkedIn was still virus-scanning?" — and, with `spend: true`, "record that
+   * it is about to do so again."
+   *
+   * LinkedIn's own remedy for a stale attachment session is to refresh the page,
+   * so the run does exactly that and comes back for the applicants it still
+   * owes. The budget that stops it looping cannot live in the run: a reload
+   * destroys the document and every counter in it, so a limit held there would
+   * be reset by the very act it bounds. It rides on the auto-run lease instead,
+   * which already survives navigation and is already cleared by the universal
+   * Stop — so a Stop takes the reload budget with it and no reload can fire
+   * after one.
+   *
+   * A job with no lease is answered with zero and nothing is written: an
+   * unarmed job has no run to bound, and writing an entry would arm one.
+   */
+  RESUME_RELOAD: "PV_APPLICANT_RESUME_RELOAD",
   CLEAR: "PV_APPLICANT_CLEAR",
   DIAGNOSTICS: "PV_APPLICANT_DIAGNOSTICS",
   /**

@@ -3725,6 +3725,17 @@
       runId: cleanText(runId),
       attempt: 1,
       tabId: Number(tabId) || 0,
+      /**
+       * How many times this job has reloaded the hiring page chasing resumes
+       * LinkedIn was still virus-scanning (3.10.0).
+       *
+       * It lives here, on the lease, because the reload destroys the document
+       * and every counter inside it — a budget held in the run would reset on
+       * the very act it is meant to bound. Re-arming the job (the recruiter
+       * pressing Collect again) deliberately starts a fresh entry with a fresh
+       * budget: that is a new deliberate instruction, not a runaway.
+       */
+      resumeReloads: 0,
       state: AUTO_RUN_STATE.RUNNING
     };
   }
@@ -3776,6 +3787,28 @@
       changed: true,
       reason: next,
       entry: { ...entry, state: next, updatedAt: cleanText(now) }
+    };
+  }
+
+  /**
+   * Spend one of this job's resume reloads.
+   *
+   * Separate from `settleAutoRun` and deliberately not folded into it: settling
+   * is a *terminal* report about an execution, and this is the opposite — it is
+   * recorded immediately BEFORE the document is destroyed, precisely so the
+   * successor can read it. Folding the two together would mean the only way to
+   * spend the budget was to end the run.
+   *
+   * An entry written before 3.10.0 has no counter at all, which reads as zero and
+   * is correct: it has never reloaded.
+   */
+  function noteResumeReload(entry, { now = "" } = {}) {
+    if (!entry || typeof entry !== "object") return { changed: false, reason: "missing", entry };
+    const spent = Math.max(0, Number(entry.resumeReloads) || 0) + 1;
+    return {
+      changed: true,
+      reason: "reloaded",
+      entry: { ...entry, resumeReloads: spent, updatedAt: cleanText(now) }
     };
   }
 
@@ -3879,6 +3912,140 @@
    */
   function isFullyCollectedApplicant(record) {
     return isCollectedApplicant(record) && !hasPendingResume(record);
+  }
+
+  /**
+   * How many applicants in a row must meet the scan notice before the PAGE, and
+   * not the file, is the thing that is broken.
+   *
+   * **THE SIGNATURE THAT NAMES THE CAUSE.** Two live reports of this defect
+   * share a shape that a per-file virus scan cannot produce. 3.9.1: "the first
+   * two applicants downloaded and every one after them did not." 3.10.0: "this is
+   * after many applicants profiles are saved." A scan that runs per attachment
+   * fails on scattered applicants, because the files were uploaded on different
+   * days and are unrelated to each other. **Failing for everyone after applicant
+   * N is a property of the document, not of the documents** — the page's own
+   * session for fetching attachments has gone stale, and "Please refresh the
+   * page now" is LinkedIn telling us exactly that in its own words.
+   *
+   * That is why waiting never cleared it, and why the end-of-page re-open added
+   * by TASK-0180 never cleared it either: both stay on a document whose answer
+   * is already decided. Only a reload changes it.
+   *
+   * Three, not one. One notice is an ordinary per-file scan and is worth the
+   * cheap remedies first — it is the case the wait and the re-open exist for,
+   * and it usually clears. Three consecutive is not a coincidence on a list
+   * whose applicants uploaded at unrelated times. The cost of being wrong is
+   * bounded and self-repairing in both directions: too high spends resumes this
+   * run could have had, too low spends a reload, and every applicant passed over
+   * is recorded as still owed, so the reload goes back for all three anyway.
+   */
+  const RESUME_SCAN_STREAK_LIMIT = 3;
+
+  /**
+   * How many times one job may reload the hiring page chasing resumes.
+   *
+   * A reload is the strongest thing this extension does to a page the recruiter
+   * is sitting in front of, and an unbounded one is the classic way to turn a
+   * transient failure into a browser that will not stop moving.
+   *
+   * **The second reload is EARNED, not granted, and that is the interesting
+   * part.** Driving the whole cycle rather than reasoning about it showed the
+   * two bounds here are not independent: the progress rule below gives up as
+   * soon as a reload recovers nothing, so a page that does not improve stops
+   * after ONE reload and never reaches this ceiling. The budget is only ever
+   * spent in full by a page that IS recovering and simply has more to give —
+   * some resumes came back, some are still owed.
+   *
+   * That is the right way round. A page that came back exactly as broken has
+   * answered the question, and asking it twice more is how a bounded remedy
+   * still ends up feeling like a loop to the person watching it. A page that
+   * gave up half its resumes has earned another turn. So the effective cost is
+   * one reload in the hopeless case and two in the improving one, which is the
+   * opposite of what a flat budget would spend.
+   *
+   * Persisted on the auto-run entry rather than held in the run, because the
+   * reload destroys the document and every counter in it. A budget that resets
+   * on the thing it is bounding is not a budget.
+   */
+  const MAX_RESUME_RELOADS = 2;
+
+  const RESUME_RECOVERY = Object.freeze({
+    CONTINUE: "continue",
+    RELOAD: "reload",
+    GIVE_UP: "give-up"
+  });
+
+  /**
+   * What to do about resumes LinkedIn was still virus-scanning.
+   *
+   * **THE LIVE COMPLAINT, twice: "Scanning resume for viruses. Please refresh
+   * the page now."** 3.9.1 taught the run to recognise the notice, wait, and
+   * record `NOT_ATTEMPTED` rather than a wrong `UNAVAILABLE`. TASK-0183 taught
+   * it to come back — `hasPendingResume` keeps those applicants out of the collected
+   * index so a later run returns for them. Both were right and neither is
+   * touched here. **What was missing is that nothing ever did what the notice
+   * asks.** The run waited five seconds on a document whose answer was already
+   * decided, re-opened the panel on that same document, and then told the
+   * recruiter to refresh and run again by hand — which is the one step a person
+   * has to be watching to take, and the runs that hit this are the long
+   * unattended ones.
+   *
+   * So the reload becomes the extension's, and this decides when.
+   *
+   * **WHY NOT RELOAD THE MOMENT THE NOTICE APPEARS**, which is the obvious
+   * reading of the notice and was the first design. Two costs, both real. On a
+   * stale page every applicant shows the notice, so it is not one reload, it is
+   * one per applicant — twenty-five on the reported list — and each throws away
+   * the walk's position in the list and its page in the pager. And when the scan
+   * IS genuinely still running on one file, an immediate reload returns to the
+   * same notice and asks for another, which is a loop with a page reload in it.
+   * Every trigger here is therefore either **evidence the document is at fault**
+   * (the streak) or **the end of the walk**, by which time minutes have passed
+   * and the cheap remedies have all had their turn.
+   *
+   * `canReload` is the caller's, and it carries the rules this file cannot see:
+   * a hidden tab (rule 9), a Stop (rule 12), a challenge (rule 10). Passed in
+   * rather than assumed, so a refusal there is visible in the verdict instead of
+   * silently skipping the whole policy.
+   *
+   * `recovered` is consulted **only after a reload has already been spent**, and
+   * it is exact there: a resumed run opens only the applicants it still owes —
+   * everyone finished is retired in bulk from the collected index — so any
+   * resume it reads at all is a resume the reload recovered. Zero means the
+   * reload changed nothing, and a remedy that changed nothing does not earn a
+   * second turn merely because the budget would allow it.
+   *
+   * No click is added by any of this (rule 5): a reload is not a control, and
+   * the eight remain eight.
+   */
+  function planResumeRecovery({
+    phase = "walking",
+    owed = 0,
+    streak = 0,
+    reloads = 0,
+    recovered = 0,
+    canReload = true,
+    maxReloads = MAX_RESUME_RELOADS,
+    streakLimit = RESUME_SCAN_STREAK_LIMIT
+  } = {}) {
+    const count = (value) => Math.max(0, Number(value) || 0);
+    const owing = count(owed);
+    const spent = count(reloads);
+    const verdict = (action, reason) => ({ action, reason, owed: owing, reloads: spent });
+
+    const finished = cleanText(phase) === "finished";
+    const wanted = finished
+      ? owing > 0
+      : count(streak) >= Math.max(1, count(streakLimit));
+    if (!wanted) return verdict(RESUME_RECOVERY.CONTINUE, "");
+
+    if (!canReload) return verdict(RESUME_RECOVERY.CONTINUE, "the page may not be reloaded right now");
+    if (spent >= count(maxReloads)) return verdict(RESUME_RECOVERY.GIVE_UP, "reload-budget-spent");
+    if (spent > 0 && count(recovered) === 0) {
+      return verdict(RESUME_RECOVERY.GIVE_UP, "the last reload recovered no resume");
+    }
+    return verdict(RESUME_RECOVERY.RELOAD, finished ? "resumes-still-owed" : "page-stale");
   }
 
   /**
@@ -4671,13 +4838,14 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, hasPendingResume,
     isFullyCollectedApplicant, createCollectedIndex,
+    RESUME_SCAN_STREAK_LIMIT, MAX_RESUME_RELOADS, RESUME_RECOVERY, planResumeRecovery,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop, CONCLUSIVE_PAGER_REASONS, isConclusivePagerReason,
     pagerSearchReason,
     MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
-    AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
+    AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun, noteResumeReload,
     // capturing a layout nobody has seen, with nobody's details in it
     CAPTURE_SCHEMA_VERSION, CAPTURE_LINK_RELATIONS, createCapturePseudonyms,
     captureLinkRelation, sanitizeCaptureText, buildApplicantCapture,

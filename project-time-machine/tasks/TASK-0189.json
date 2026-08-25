@@ -1,0 +1,66 @@
+{
+  "schema": 2,
+  "id": "TASK-0189",
+  "name": "Reload the hiring page to recover resumes LinkedIn was still virus-scanning",
+  "request": "Reload the hiring page to recover resumes LinkedIn was still virus-scanning",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T12:25:01.277Z",
+  "completedAt": "2026-08-25T12:46:23.601Z",
+  "startCommit": "f3ca5b55f7854d9dfde54ce071d35dea997d3861",
+  "gitRef": "task/TASK-0189",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed - typecheck, build, 678 tests, doc links, build validation"
+  ],
+  "result": "3.10.0 / TASK-0189: the run now does what LinkedIn's notice asks. THE LIVE COMPLAINT, twice: 'Scanning resume for viruses. Please refresh the page now.' THE DIAGNOSIS COMES FROM THE SHAPE OF THE REPORT, not the DOM: 3.9.1's was 'the first two downloaded and every one after them did not', this one is 'after many profiles are saved'. A per-FILE scan fails on scattered applicants - those documents were uploaded on unrelated days by unrelated people, so finishing applicant N decides nothing about N+1. Failing for EVERYONE AFTER N is a property of the DOCUMENT: the page's attachment session has gone stale, and the notice says so in LinkedIn's own words. It was read for two releases as a description of a file; it is a description of the page. WHY THE TWO PREVIOUS FIXES COULD NOT HAVE WORKED, and neither is touched: 3.9.1 recognises the notice and records NOT_ATTEMPTED rather than a wrong UNAVAILABLE (rule 1); TASK-0183 keeps those applicants out of the collected index so a later run returns for them. Both correct, both stay on a document whose answer is already decided, and the only remaining remedy was printed to a console for a person to act on - when the runs that hit this are precisely the long unattended ones. planResumeRecovery is pure and in the core, decided from phase, owed, streak, reloads spent and recovered. TWO TRIGGERS AND NEITHER IS 'THE NOTICE APPEARED': three consecutive notices, which is evidence about the document rather than the files; or the end of the walk while anyone is owed, by which time minutes have passed and the 5s wait and the panel re-open have each had their turn. THE REJECTED ALTERNATIVE, which was the first design and the obvious reading of the notice - reload on sight - costs one reload PER APPLICANT on a stale page, twenty-five on the reported list, each discarding the walk's list position and its pager page, the two things five releases of pager work exist to hold; and on a genuinely in-progress scan it returns to the same notice and asks again, a loop with a page reload in it. THE BOUND HAD TO LIVE ON THE LEASE (chrome.storage) because the reload destroys the document and every counter in it - a budget that resets on the act it bounds is not a budget - and it is paid BEFORE the reload, with the payment proven to have incremented by exactly one, because a reload nothing counts can repeat forever. THE SECOND RELOAD IS EARNED, NOT GRANTED: a simulation of the full persisted cycle showed the progress rule gives up the moment a reload recovers nothing, so a hopeless page costs ONE reload and only an improving page ever spends two - the opposite of a flat budget, and it corrected a comment I had written claiming otherwise. AN UNBOUNDED HOLE FOUND AND CLOSED: the relay first answered 'zero spent' for a job with NO lease, where the counter cannot be written at all - reload, come back, told zero again, forever. It now reports the budget spent, which fails closed and costs nothing, because claimAutoRun refuses a job it has no record of so that reload was never going to resume anything. THE DEFECT WITHOUT WHICH NONE OF IT WORKS: a walk reaching the bottom of the list reported COMPLETED even owing ten resumes, and claimAutoRun refuses to re-arm a completed job - the reload would have come back and done nothing at all, the same permanent failure 3.9.6 and 3.9.8 each reached from a different direction. A run that still owes resumes has not finished the job: INTERRUPTED before reloading, and INTERRUPTED too when the reload is REFUSED by a hidden tab, a Stop or a challenge, which is rule 9's 'a hidden tab is never a finished one' applied to resumes. give-up stays COMPLETED on purpose, or continueInterruptedRun restarts it forever. A PERMANENT TEST AMENDED IN THE OPEN, NOT DELETED: 'the applicants page is never reloaded' encoded a flow the user stated, and the same user stated this amendment. Narrowed to what it was protecting - a reload is never how the run changes applicants - and enforced harder than before: exactly ONE reload in the file, inside the recovery branch, after the INTERRUPTED report, after the budget is proven paid, with nothing scheduling a second driver, and none in the row-click path. NO NEW CLICK: the built artifact carries 9 clicks, 1 reload and 0 navigations. No selector, schema, CSV column or permission touched. NO LIVE CLAIM: rule 20 stands. Files: src/applicants-core.js, src/background.ts, src/messages.ts, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, + version bump."
+}
