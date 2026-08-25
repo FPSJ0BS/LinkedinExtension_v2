@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.9.1";
+  const BUILD_ID = "2026-08-25-react-v3.9.2";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -4933,7 +4933,14 @@
     // applicant already finished; the worker's save is a merge, so a record
     // arriving twice enriches the stored one instead of duplicating it.
     try {
-      await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record });
+      // The diagnostics ride along with the save. A whole-job run is DETACHED
+      // - started fire-and-forget and silent until it finishes - so this is
+      // the only message it sends per applicant, and without it the worker
+      // holds no copy of the report at all for a list run. The worker is torn
+      // down after ~30s idle, which is less than the walk from the LinkedIn
+      // tab to this extension's own Applicants page, so asking the page alone
+      // was never enough.
+      await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record, diagnostics });
     } catch (error) {
       diagnostics.saveError = error instanceof Error ? error.message : String(error);
     }
@@ -7141,7 +7148,21 @@
   function onRouteChanged() {
     if (location.href === state.lastUrl) return;
     state.lastUrl = location.href;
-    state.lastDiagnostics = null;
+    // **The report is STAMPED here, not destroyed.** Until 3.9.2 this line
+    // was `state.lastDiagnostics = null`, and the intent was right - the
+    // previous applicant's diagnostics must never be reported as this one's.
+    // Deleting it was the wrong way to honour that, because on THIS surface
+    // the address bar carries the applicationId and moves on every single
+    // applicant switch (see the note in CLAUDE.md: LinkedIn routes ahead of
+    // the render). So a whole-job run wiped the report once per row, and
+    // Download Diagnostics answered "Nothing to report yet" after collecting
+    // four hundred people.
+    //
+    // The report already NAMES who it is about - `selected.name`, and the
+    // applicationId in `context` - so it cannot be mistaken for the applicant
+    // now on screen. `supersededAt` says so a second time, in words, for a
+    // reader who has only the JSON in front of them.
+    if (state.lastDiagnostics) state.lastDiagnostics.supersededAt = new Date().toISOString();
     checkAutoRunArrival();
   }
 

@@ -1,5 +1,14 @@
 # PHASES.md
 
+## Completed in 3.9.2 — the diagnostics report was unreachable
+
+A reporting bug, fixed on its own because the report is the instrument every remaining live
+question is meant to be answered with. Local checks only (rule 20).
+
+| Task | Goal | Status |
+|---|---|---|
+| TASK-0172 | Download Diagnostics returns a report after a whole-job run | Complete |
+
 ## Completed in 3.9.1 — the first live capture
 
 Driven by screenshots of a real recruiter account rather than by reasoning about markup. What the

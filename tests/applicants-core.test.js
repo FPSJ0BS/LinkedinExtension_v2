@@ -6239,6 +6239,9 @@ test("Phase 8: the Applicants page can ask for the report the worker has always 
 });
 
 test("Phase 8: the report answers for the applicant the page is reading, not only the last one collected", async () => {
+  // Phase 8 closed the first half of this and 3.9.2 closed the rest: asking
+  // the page is only an answer while the page still HAS one, and it did not.
+  // See the 3.9.2 block at the end of this file.
   // THE GAP THIS CLOSES: `applicantDiagnostics` in the worker is only ever
   // written by COLLECT_CURRENT. A whole-job run is detached — started with a
   // fire-and-forget message and silent until it finishes — so the applicant a
@@ -6249,12 +6252,12 @@ test("Phase 8: the report answers for the applicant the page is reading, not onl
     worker.indexOf("if (type === APPLICANT_MESSAGES.DIAGNOSTICS)"),
     worker.indexOf("if (type === APPLICANT_MESSAGES.CAPTURE_UI)")
   );
-  assert.ok(branch.length > 300 && branch.length < 2000, "the branch must be found, and only it");
+  assert.ok(branch.length > 300 && branch.length < 4000, "the branch must be found, and only it");
 
   assert.match(branch, /sendTabMessage\(tab\.id, \{ type: PROFILE_MESSAGES\.GET_DIAGNOSTICS \}/,
     "the page is asked for what it read last");
-  assert.match(branch, /const applicant = live\?\.diagnostics \|\| applicantDiagnostics;/,
-    "and the worker's cached copy is the fallback, so this can only ever answer with more");
+  assert.ok(branch.includes("const applicant = live?.diagnostics || (await rememberedApplicantDiagnostics());"),
+    "and the worker's stored copy is the fallback, so this can only ever answer with more");
   assert.match(branch, /\} catch \{/, "a closed or navigated tab is not an error, it is the fallback");
 
   // The content script has answered that message all along.
@@ -7146,4 +7149,166 @@ test("3.9.1: handling the scan cost no click and no new status", async () => {
     "applicant_name", "email", "mobile", "resume_file",
     "current_role", "current_company", "total_experience", "education"
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// 3.9.2 — "Nothing to report yet", after collecting a whole job
+//
+// Reported live: Download Diagnostics answered "Nothing to report yet. Collect
+// an applicant first, then try again." on an account that had just collected
+// applicants successfully.
+//
+// THREE separate nulls, each on its own sufficient to produce that message, and
+// all three had to be closed — closing any two still leaves a broken button.
+//
+//  1. The page threw its own copy away. `onRouteChanged` set
+//     `state.lastDiagnostics = null` on every address change, and on THIS
+//     surface the address carries the applicationId and moves on every single
+//     applicant switch. A four-hundred-row run wiped the report four hundred
+//     times.
+//  2. The worker was never told. A whole-job run is detached, so the worker's
+//     cached copy was written by COLLECT_CURRENT alone and a list run left it
+//     untouched.
+//  3. The worker does not outlive the walk. An MV3 service worker is torn down
+//     after about thirty seconds idle, taking a module-level variable with it —
+//     and collecting happens in the LinkedIn tab while downloading happens on
+//     the extension's own page.
+//
+// This is also why the Phase 8 test above passed while the button did not work:
+// it asserted the worker asks the page, and the worker did ask the page. The
+// page had nothing left to answer with.
+// ---------------------------------------------------------------------------
+
+test("3.9.2: a route change stamps the diagnostics report, it does not destroy it", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const watcher = source.slice(
+    source.indexOf("function onRouteChanged"),
+    source.indexOf("let routeCheckScheduled")
+  );
+  assert.ok(watcher.length > 80 && watcher.length < 900, "the watcher must be found, and only it");
+
+  // THE DEFECT, named so it cannot come back: the only copy of the report was
+  // deleted every time LinkedIn moved the address bar.
+  assert.ok(!/state\.lastDiagnostics = null/.test(watcher),
+    "the report must not be destroyed by a route change");
+
+  // The intent behind that line was right and is kept: a report must never be
+  // read as belonging to the applicant now on screen. It is answered by SAYING
+  // the page has moved on, not by having nothing to say.
+  assert.match(watcher, /supersededAt/, "a superseded report says so instead of vanishing");
+
+  // And the report has always named who it is about, which is what makes
+  // keeping it safe rather than merely convenient.
+  const extract = source.slice(
+    source.indexOf("diagnostics.selected = {"),
+    source.indexOf("state.lastDiagnostics = diagnostics;")
+  );
+  assert.ok(extract.length > 100, "the selected block must be found");
+  assert.match(extract, /name: record\.applicant\.name/, "the report names its own applicant");
+});
+
+test("3.9.2: a detached whole-job run makes the worker's copy, through the save it already sends", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // A whole-job run reports nothing until it finishes, so the streamed
+  // per-applicant save is the ONLY message it sends per applicant. Riding along
+  // with it costs no extra round trip and no new message type.
+  assert.match(
+    source,
+    /sendMessage\(\{ type: "PV_APPLICANT_SAVE", record, diagnostics \}\)/,
+    "the streamed save carries the report"
+  );
+
+  const save = worker.slice(
+    worker.indexOf("if (type === APPLICANT_MESSAGES.SAVE)"),
+    worker.indexOf("if (type === APPLICANT_MESSAGES.LIST)")
+  );
+  assert.ok(save.length > 200 && save.length < 1600, "the save branch must be found, and only it");
+  assert.match(save, /rememberApplicantDiagnostics\(message\?\.diagnostics\)/,
+    "and the worker keeps it");
+
+  // The record is untouched by this. Diagnostics are a SIBLING of the record on
+  // the message, never a field inside it — rule 19 and the 18-key schema both
+  // depend on a report never becoming part of an applicant.
+  assert.match(save, /saveApplicant\(message\?\.record \|\| \{\}\)/,
+    "the saved record is still the record and nothing else");
+  const stored = Object.keys(Applicants.normalizeApplicantRecord({}).applicant);
+  assert.ok(!stored.includes("diagnostics"), "a report is never a field on an applicant");
+});
+
+test("3.9.2: the worker's copy outlives the worker, and dies with the browser", async () => {
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+  const source = withoutComments(worker);
+
+  // THE THIRD NULL. `let applicantDiagnostics` is module state in an MV3
+  // service worker, which Chrome tears down after about thirty seconds idle.
+  // Collecting happens in the LinkedIn tab; downloading happens on the
+  // extension's own Applicants page. The walk between the two is regularly
+  // longer than the worker's life.
+  assert.match(source, /function rememberApplicantDiagnostics/, "there is a durable writer");
+  assert.match(source, /function rememberedApplicantDiagnostics/, "and a durable reader");
+
+  // `session`, never `local`. The report carries the applicant's name, address
+  // and number in `selected`, and a debugging artefact has no business
+  // outliving the browser session on disk. Session storage is memory-backed.
+  const store = source.slice(
+    source.indexOf("function diagnosticsStore"),
+    source.indexOf("async function rememberApplicantDiagnostics")
+  );
+  assert.ok(store.length > 30 && store.length < 400, "the store accessor must be found, and only it");
+  assert.match(store, /storage\?\.session/, "session storage, which goes when the browser does");
+  assert.ok(!/storage\.local/.test(store), "never local, which would leave contact details on disk");
+
+  // A build of Chrome without it still gets the in-memory copy: this can only
+  // ever add. Both helpers reach the store through the same optional call.
+  const writer = source.slice(
+    source.indexOf("async function rememberApplicantDiagnostics"),
+    source.indexOf("async function rememberedApplicantDiagnostics")
+  );
+  assert.match(writer, /applicantDiagnostics = diagnostics;/, "the in-memory copy is written first");
+  assert.match(writer, /diagnosticsStore\(\)\?\./, "and the durable one is optional");
+
+  // Every writer goes through the one door, so a fourth cannot be added that
+  // quietly writes only the copy that dies.
+  assert.equal((source.match(/applicantDiagnostics = /g) || []).length, 3,
+    "the variable is assigned only inside its own three helpers");
+
+  // Clearing the applicants clears the report about them.
+  const clear = worker.slice(
+    worker.indexOf("if (type === APPLICANT_MESSAGES.CLEAR)"),
+    worker.indexOf("if (type === APPLICANT_MESSAGES.DIAGNOSTICS)")
+  );
+  assert.match(clear, /forgetApplicantDiagnostics\(\)/, "and Clear forgets it, durable copy included");
+});
+
+test("3.9.2: none of this added a click, a column, a status or a permission", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  // The whole fix is reporting. It reads nothing new off the page and presses
+  // nothing at all.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/trusted: true/g) || []).length, 1, "and trusted:true is still at one site");
+
+  const { APPLICANT_TABLE_COLUMNS } = await import("../src/applicant-csv.js");
+  assert.deepEqual([...APPLICANT_TABLE_COLUMNS], [
+    "applicant_name", "email", "mobile", "resume_file",
+    "current_role", "current_company", "total_experience", "education"
+  ], "eight table columns, unchanged");
+
+  // `storage` was already held — the worker keeps its own state in it. Session
+  // storage is the same permission, so the manifest does not move.
+  const manifest = JSON.parse(
+    await readFile(resolve(root, "extension/manifest.json"), "utf8")
+  );
+  assert.deepEqual(manifest.host_permissions, [
+    "https://www.linkedin.com/*",
+    "https://linkedin.com/*",
+    "https://media.licdn.com/*",
+    "https://static.licdn.com/*"
+  ], "host permissions are unchanged");
+  assert.ok(manifest.permissions.includes("storage"), "storage was already held");
 });

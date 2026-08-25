@@ -1,5 +1,42 @@
 # CHECKS.md
 
+## 3.9.2 — the diagnostics report was unreachable (TASK-0172)
+
+Executed in this environment on 2026-08-25. **Real results only.**
+
+`npm run check`: typecheck clean · build ok · **546 → 550 passed / 0 failed** ·
+docs:check 18 files · validate 31 build files. `dist/build-meta.json` reads
+`3.9.2` / `2026-08-25-react-v3.9.2`, and `dist/applicants.js` carries both
+changes (`supersededAt`, and `diagnostics` on the streamed save).
+
+### One intermediate failure, and it was the point
+
+The Phase 8 test `"the report answers for the applicant the page is reading, not
+only the last one collected"` failed on the changed worker line and was updated.
+Worth recording that **that test passed for the whole time the button was
+broken**: it asserts the worker asks the page, and the worker did ask the page —
+the page had nothing left to answer with, four thousand lines away in the content
+script. The 3.9.2 tests assert the absence of `state.lastDiagnostics = null` in
+the route watcher by name.
+
+### What is still not verified — the live checklist
+
+The eight items under 3.9.1 are all still unverified and still apply. This
+release adds one, and it is the one to do **first**, because it is what makes the
+other eight answerable:
+
+0. **Download Diagnostics returns a file after a whole-job run.** Collect a job,
+   walk to the extension's Applicants page, press it. The JSON should carry
+   `applicant.selected.name` for the last applicant read, and — if LinkedIn has
+   routed since — a `supersededAt` stamp beside it.
+
+The 3.9.1 list is unchanged and every item on it is still the user's step. The
+contact-via-`More...` item (number 4) is **reported as still failing on a live
+account**, and the diagnostics fix above is what will say where it stops:
+`diagnostics.contact` records `viaMenu`, `menuClicked`, `menuOpened` and a
+`reason`.
+
+
 ## 3.9.1 — the first live capture (TASK-0168 … TASK-0171)
 
 Executed in this environment on 2026-08-25. **Real results only.** The trigger for this release was

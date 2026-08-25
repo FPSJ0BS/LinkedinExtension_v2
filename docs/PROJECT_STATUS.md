@@ -1,8 +1,23 @@
 # Profile Vault React — Project Status
 
 **Status date:** 2026-08-25
-**Version:** 3.9.1
-**Build ID:** `2026-08-25-react-v3.9.1`
+**Version:** 3.9.2
+**Build ID:** `2026-08-25-react-v3.9.2`
+
+## Latest work — the diagnostics report was unreachable (3.9.2)
+
+Reported live: **Download Diagnostics answered "Nothing to report yet"** on an account that had
+just collected a whole job. Three separate nulls, each on its own sufficient — the page deleted its
+copy on every address change (and this surface changes address on every applicant), the worker was
+never told because a whole-job run is detached, and the worker itself is torn down after thirty
+seconds idle, which is less than the walk from the LinkedIn tab to the extension's own page.
+
+No click, column, status or permission moved. The report is the instrument the remaining live
+questions are meant to be answered with, which is why it was worth its own release.
+
+**The open live question that matters most** is unchanged and is now reported as still failing:
+contact details behind `More...` are not being saved. `diagnostics.contact` records where that path
+stops, and until 3.9.2 that record could not be retrieved.
 
 ## Latest work — the first live capture (3.9.1)
 

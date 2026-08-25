@@ -1,0 +1,80 @@
+{
+  "schema": 2,
+  "id": "TASK-0172",
+  "name": "Download Diagnostics reports nothing after a list run",
+  "request": "Download Diagnostics reports nothing after a list run",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T07:48:36.711Z",
+  "completedAt": "2026-08-25T07:56:09.573Z",
+  "startCommit": "063827266d7efdf52aa350051197bbe4f2e123ba",
+  "gitRef": "task/TASK-0172",
+  "files": [
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PHASES.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/SETUP.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 550 tests passed / 0 failed (546 before), docs:check 18 files, validate 31 build files",
+    "dist/build-meta.json reads 3.9.2 / 2026-08-25-react-v3.9.2 and all five injected dist scripts carry the new build ID",
+    "dist/applicants.js carries both content-script changes (supersededAt, and diagnostics on the streamed save)"
+  ],
+  "result": "TASK-0172: Download Diagnostics answered 'Nothing to report yet' after a whole job had been collected. THREE separate nulls, each on its own sufficient, all three closed here because closing any two still leaves a broken button. (1) The page threw its own copy away: onRouteChanged set state.lastDiagnostics = null on every address change, and on this surface the address bar carries the applicationId and moves on EVERY applicant switch - the note already in CLAUDE.md saying LinkedIn routes ahead of the render. A four-hundred-row run wiped the report four hundred times. The intent behind that line was right and is kept, but it is honoured by STAMPING rather than deleting: supersededAt says the page has moved on, and the report has always carried selected.name and the applicationId in context, so it names its own applicant and cannot be mistaken for the one now on screen. (2) The worker was never told: a whole-job run is detached - fire-and-forget, silent until it finishes - so applicantDiagnostics was written by COLLECT_CURRENT alone and a list run left it untouched. The streamed per-applicant PV_APPLICANT_SAVE carries the report now, which is the one message a detached run does send, so this costs no extra round trip and no new message type; the diagnostics are a SIBLING of the record on the message and never a field inside it. (3) The worker itself does not last: applicantDiagnostics is module state in an MV3 service worker torn down after ~30s idle, and collecting happens in the LinkedIn tab while downloading happens on the extension's own Applicants page - the walk between them is routinely longer than that. A copy now lives in chrome.storage.session, session rather than local deliberately because the report carries the applicant's name, address and number in selected and a debugging artefact has no business outliving the browser session on disk; a Chrome without session storage still gets the in-memory copy, so this can only ever add. Worth recording why the existing Phase 8 test passed the whole time the button was broken: it asserts the worker asks the page, and the worker did ask the page - the page had nothing left to answer with, four thousand lines away in the route watcher. The new tests assert the absence of state.lastDiagnostics = null in that watcher by name, that every writer goes through one door (applicantDiagnostics assigned in exactly its three helpers), that the store is session and never local, and that a report is never a field on an applicant. Nothing about extraction moved: no click added (still eight), trusted:true still at one site, eight table columns and nine CSV columns unchanged, six resume verdicts unchanged, host permissions unchanged - storage was already held for the worker's own state and session storage is the same permission. Released as 3.9.2: build ID 2026-08-25-react-v3.9.2 in all six files, version 3.9.2 in manifest.json, package.json and build.mjs, with README and SETUP's build-ID checks updated to match. Docs: CHANGELOG, CHECKS (a new item 0 on the live checklist, to be done first because it is what makes the other eight answerable), PHASES, PROJECT_STATUS. RULE 20 STANDS: none of this has been run against a live LinkedIn page, and loading dist/ in Chrome is the user's step. The contact-via-More failure is still open and is what this report is now needed for. Files: extension/content-scripts/applicants.js, src/background.ts, tests/applicants-core.test.js, the six build-ID sites, extension/manifest.json, package.json, README.md, docs/CHANGELOG.md, docs/CHECKS.md, docs/PHASES.md, docs/PROJECT_STATUS.md, docs/SETUP.md"
+}

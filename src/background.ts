@@ -20,7 +20,7 @@ const TabsCore: any = (globalThis as any).ProfileVaultTabs;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-25-react-v3.9.1";
+const BUILD_ID = "2026-08-25-react-v3.9.2";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -1619,6 +1619,47 @@ const APPLICANT_RUN_TIMEOUT_MS = 3600000;
 
 /** The newest applicant diagnostics, for the downloadable report. */
 let applicantDiagnostics: any = null;
+/**
+ * And a copy that outlives this worker.
+ *
+ * An MV3 service worker is torn down after about thirty seconds idle, and the
+ * variable above dies with it. Collecting is done in the LinkedIn tab; the
+ * report is downloaded from the extension's own Applicants page. The walk
+ * between those two is longer than thirty seconds often enough that the
+ * in-memory copy was routinely gone by the time the button was pressed - one
+ * of the three reasons Download Diagnostics answered "Nothing to report yet"
+ * after a successful run.
+ *
+ * `storage.session` rather than `storage.local` deliberately. The report
+ * carries the applicant's name, address and number in `selected`, and a
+ * debugging artefact has no business outliving the browser session on disk;
+ * session storage is memory-backed and goes when Chrome does. If a build of
+ * Chrome does not offer it, the in-memory copy is still the answer - this can
+ * only ever add.
+ */
+const APPLICANT_DIAGNOSTICS_KEY = "profileVaultApplicantDiagnostics";
+
+function diagnosticsStore(): any {
+  return (chrome as any)?.storage?.session || null;
+}
+
+async function rememberApplicantDiagnostics(diagnostics: any): Promise<void> {
+  if (!diagnostics) return;
+  applicantDiagnostics = diagnostics;
+  await diagnosticsStore()?.set({ [APPLICANT_DIAGNOSTICS_KEY]: diagnostics }).catch(() => undefined);
+}
+
+async function rememberedApplicantDiagnostics(): Promise<any> {
+  if (applicantDiagnostics) return applicantDiagnostics;
+  const stored = await diagnosticsStore()?.get(APPLICANT_DIAGNOSTICS_KEY).catch(() => null);
+  applicantDiagnostics = stored?.[APPLICANT_DIAGNOSTICS_KEY] || null;
+  return applicantDiagnostics;
+}
+
+async function forgetApplicantDiagnostics(): Promise<void> {
+  applicantDiagnostics = null;
+  await diagnosticsStore()?.remove(APPLICANT_DIAGNOSTICS_KEY).catch(() => undefined);
+}
 
 const HIRING_URL_PATTERN = /^https:\/\/(?:www\.)?linkedin\.com\/(?:hiring|talent)\//i;
 /** The last hiring page actually seen, so a later command can return to it. */
@@ -2213,6 +2254,11 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     const saved = await saveApplicant(message?.record || {});
     // The surest address there is: a page an applicant was actually read from.
     await rememberHiringUrl(saved?.extraction?.sourceUrl);
+    // **This is the only per-applicant message a detached run sends**, so it is
+    // the only place the worker can learn what a whole-job run is reading.
+    // Before 3.9.2 the cached report was written by COLLECT_CURRENT alone, and
+    // a recruiter who collected a whole job had no report at all.
+    await rememberApplicantDiagnostics(message?.diagnostics);
     return { ok: true, id: saved.id };
   }
 
@@ -2264,7 +2310,7 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
 
   if (type === APPLICANT_MESSAGES.CLEAR) {
     await clearApplicants();
-    applicantDiagnostics = null;
+    await forgetApplicantDiagnostics();
     // The stored applicants are what a restarted run walks past. With them gone
     // there is nothing to come back to, so the standing instruction goes too.
     await disarmAutoRuns();
@@ -2277,16 +2323,27 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
   }
 
   if (type === APPLICANT_MESSAGES.DIAGNOSTICS) {
-    // The worker's own copy is only ever written by COLLECT_CURRENT, because a
-    // whole-job run is detached — it is started with a fire-and-forget message
-    // and reports nothing back until it finishes. So the applicant a list run is
-    // reading right now is invisible here, and that is exactly the applicant a
-    // recruiter reaches for this report about.
+    // Reported live: "Nothing to report yet" after a whole job had been
+    // collected. THREE separate nulls, each on its own sufficient, and 3.9.2
+    // closes all three because closing any two still leaves a broken button.
     //
-    // Ask the page. It keeps `state.lastDiagnostics` for whichever applicant it
-    // read last, whether that was a single collection or the four-hundredth row
-    // of a job. The cached copy stays as the fallback for a tab that has since
-    // been closed or navigated away, so this can only ever answer with more.
+    // 1. The page threw its copy away. `onRouteChanged` nulled
+    //    `state.lastDiagnostics` on every address change, and on this surface
+    //    the address carries the applicationId and moves on every applicant.
+    //    It is stamped now instead of deleted.
+    // 2. The worker was never told. A whole-job run is detached — fire and
+    //    forget, silent until it finishes — so the cached copy was written by
+    //    COLLECT_CURRENT alone. The streamed per-applicant save carries the
+    //    report now, which is the one message a detached run does send.
+    // 3. The worker itself does not last. Thirty seconds idle and it is torn
+    //    down, taking a module-level variable with it; collecting happens in
+    //    the LinkedIn tab and downloading happens on the extension's own page,
+    //    and the walk between them is often longer than that. Hence a copy in
+    //    session storage.
+    //
+    // The page is still asked FIRST, because it holds the applicant being read
+    // right now and the worker holds the one most recently saved. The stored
+    // copy is the fallback, so this can only ever answer with more.
     let live: any = null;
     try {
       const tab = await resolveApplicantTab();
@@ -2294,8 +2351,8 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     } catch {
       // No hiring tab, or nothing listening in it. The cached copy is the answer.
     }
-    const applicant = live?.diagnostics || applicantDiagnostics;
-    if (live?.diagnostics) applicantDiagnostics = live.diagnostics;
+    const applicant = live?.diagnostics || (await rememberedApplicantDiagnostics());
+    if (live?.diagnostics) await rememberApplicantDiagnostics(live.diagnostics);
     return { ok: true, buildId: BUILD_ID, generatedAt: nowIso(), applicant };
   }
 
@@ -2349,7 +2406,7 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
       APPLICANT_EXTRACT_TIMEOUT_MS
     );
     if (!response?.ok) throw new Error(response?.error || "The applicant could not be collected.");
-    applicantDiagnostics = response.diagnostics || applicantDiagnostics;
+    await rememberApplicantDiagnostics(response.diagnostics);
     // The record was already persisted by the streamed save; this reply is what
     // the popup shows, not what makes it durable.
     return { ok: true, record: response.record, diagnostics: response.diagnostics };

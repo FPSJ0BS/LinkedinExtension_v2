@@ -1,5 +1,75 @@
 # CHANGELOG.md
 
+## 3.9.2 — "Nothing to report yet", after collecting a whole job
+
+TASK-0172. Reported live, on an account that had just collected applicants
+successfully: **Download Diagnostics answered "Nothing to report yet. Collect an
+applicant first, then try again."**
+
+This is a reporting bug, not an extraction bug — no applicant was ever collected
+wrongly because of it. It matters more than its size because the diagnostics
+report is the instrument every remaining live question is meant to be answered
+with, and it has been unusable on the one workflow a recruiter actually uses:
+collecting a whole job.
+
+### Three nulls, each on its own sufficient
+
+Closing any two of them still leaves a broken button, which is why all three are
+in one task.
+
+**1. The page threw its own copy away.** `onRouteChanged` set
+`state.lastDiagnostics = null` on every address change. The intent was right and
+is kept — the previous applicant's report must never be read as this one's — but
+deleting it was the wrong way to honour that, because **on this surface the
+address bar carries the applicationId and moves on every single applicant
+switch**. That is not a new discovery; it is the note already in CLAUDE.md that
+says LinkedIn routes ahead of the render. So a four-hundred-row run wiped the
+report four hundred times, and the last one went too, on whatever re-render
+followed. It is **stamped** now instead of deleted: `supersededAt` says the page
+has moved on, and the report has always carried `selected.name` and the
+applicationId in `context`, so it names its own applicant and cannot be mistaken
+for the one now on screen.
+
+**2. The worker was never told.** A whole-job run is *detached* — started with a
+fire-and-forget message and silent until it finishes — so the worker's cached
+copy was written by `COLLECT_CURRENT` alone, and a list run left it untouched.
+The streamed per-applicant save carries the report now. That is the one message
+a detached run does send per applicant, so this costs no extra round trip and no
+new message type. The diagnostics are a **sibling of the record on the message,
+never a field inside it**: an applicant has eighteen keys and a report is not one
+of them.
+
+**3. The worker itself does not last.** `applicantDiagnostics` is module state in
+an MV3 service worker, which Chrome tears down after about thirty seconds idle.
+Collecting happens in the LinkedIn tab; the report is downloaded from the
+extension's own Applicants page. **The walk between those two is routinely longer
+than the worker's life.** There is a copy in `chrome.storage.session` now —
+`session` rather than `local` deliberately, because the report carries the
+applicant's name, address and number in `selected`, and a debugging artefact has
+no business outliving the browser session on disk. A Chrome without session
+storage still gets the in-memory copy; this can only ever add.
+
+### Why the existing test passed while the button did not work
+
+Phase 8's test asserts that the worker asks the page for what it read last. The
+worker did ask the page. **The page had nothing left to answer with** — and the
+test could not see that, because it reads the worker's source and the defect was
+four thousand lines away in the content script's route watcher. The 3.9.2 tests
+assert the absence of `state.lastDiagnostics = null` in that watcher by name, so
+this cannot come back quietly.
+
+### What did not change
+
+No click was added — still eight, `trusted: true` still at one site. No CSV
+column, no table column, no resume status, no host permission; `storage` was
+already held for the worker's own state, and session storage is the same
+permission. Nothing about extraction moved: this release reads nothing new off
+the page and presses nothing at all.
+
+**Rule 20 stands.** The build ID changed, so `dist/` must be reloaded and the
+LinkedIn tab reloaded with it.
+
+
 ## 3.9.1 — the first live capture, and the three things it contradicted
 
 TASK-0168 to TASK-0171. **This is the first release driven by screenshots of a real recruiter
