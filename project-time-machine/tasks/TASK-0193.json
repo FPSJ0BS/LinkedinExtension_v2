@@ -1,0 +1,66 @@
+{
+  "schema": 2,
+  "id": "TASK-0193",
+  "name": "Reload the hiring page on the applicant showing the virus-scan notice",
+  "request": "Reload the hiring page on the applicant showing the virus-scan notice",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T13:54:14.649Z",
+  "completedAt": "2026-08-25T13:55:34.282Z",
+  "startCommit": "fd97cf348a3dfc924cee5b40b1f0c20f2c7301eb",
+  "gitRef": "task/TASK-0193",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build 3.11.0, 682 tests 0 fail, 19 doc-link files, validate 31 build files"
+  ],
+  "result": "3.11.0 / TASK-0193: the reload now arrives on the applicant that showed the notice, and keeps arriving. THE REPORT NAMED THREE DEFECTS IN ONE SENTENCE - 'it never reload on the same profile it occurs, the extension is reloading after 2nd or 3rd, and at last it was not even reloading it kept going through 6 profile without even reloading' - and each had its own cause in 3.10.0. (1) RESUME_SCAN_STREAK_LIMIT 3 -> 1. 3.10.0 considered reloading on sight, argued against it at length and chose a streak of three; its two stated costs were real, but the streak bought loop-safety by making two innocent applicants fail first, so the remedy could never be seen to work by the person watching and the applicant in the screenshot was never the one it helped. That judgement is reversed IN THE OPEN, with the reasoning written into the code rather than only into a commit. (2) MAX_RESUME_RELOADS 2 -> 12, because two was sized for a trigger that needed three notices to earn; on a policy answering the notice where it appears it is exhausted by the second applicant, which is the '6 profiles without even reloading' verbatim. (3) THE WORST ONE, because it was permanent within the run: 3.10.0 gave up on the whole job the moment ONE reload recovered nothing, so a single reload landing while a scan genuinely had not finished disarmed the feature for every applicant after it. Replaced by MAX_FRUITLESS_RESUME_RELOADS=3, which RESETS TO ZERO on any recovery so it counts reloads that are not helping rather than reloads that happened. THE LOOP IS CLOSED PROPERLY INSTEAD OF BY PROXY: MAX_APPLICANT_RESUME_RELOADS=2 counts against the applicant's own row key, so a file whose scan really has not finished costs THAT applicant two reloads and the walk moves past them still owed - which is exactly the failure the streak stood in for, closed from the applicant causing it rather than from the two either side. 'recovered' is GONE from the decision and its removal is the point: a per-run counter cannot say whether reloads help ACROSS a reload because the reload destroys the run holding it, so it is folded into a persisted fruitless streak at the moment a reload is paid for. The lease gained resumeReloadKey, resumeReloadKeyCount and resumeReloadFruitless for the same reason resumeReloads already lived there - one key and one count, not a map, because an unbounded map on a lease is a leak with a recruiter's applicant ids in it. The spend is charged to the applicant the decision was made FOR, and the permanent click-budget test was WIDENED to pin that: charge it to the wrong key and this applicant's bound never climbs and one file triggers a reload every pass for ever. THE END OF THE WALK IS EXEMPT from the per-applicant bound, deliberately - that reload is for everyone still owed, and charging it to whoever was last would let one stubborn file veto the reload the other twenty needed. TWO PERMANENT TESTS AMENDED IN THE OPEN, NOT DELETED: 'a quiet walk never reloads' swept streaks below the limit, which at limit 1 is a single value, so it is rewritten to assert what it always protected - a walk meeting NO notice never reloads - across every owed/budget/applicant/fruitless combination, and pinned so it cannot pass vacuously; 'a remedy that changed nothing does not get another turn' keeps its guarantee and moves its threshold, asserting that one and two fruitless reloads DO still reload, because that is the bug fix. A HOPELESS PAGE IS NOW A DRIVEN TEST RATHER THAN A CLAIM: the full persisted cycle simulated end to end terminates after THREE reloads on the fruitless breaker, never approaching the ceiling of twelve. A JUNK LIMIT FAILS IN THE OPPOSITE DIRECTION FROM A JUNK COUNTER and is asserted: an unreadable counter is 'nothing has happened yet', an unreadable BOUND clamps to zero and spends nothing, because reading a missing bound as unlimited would delete the only thing standing between this feature and a page that reloads for ever. VERIFIED: 682 tests 0 fail (678 before; 6 amended, 4 added), typecheck, build, doc links and validate all clean; the BUILT dist re-checked at 9 clicks unchanged, exactly 1 location.reload(), 0 navigations, 0 Enter/submit. NO SELECTOR, SCHEMA, CSV COLUMN, PERMISSION OR CLICK TOUCHED. A MISTAKE MADE AND REVERSED, RECORDED IN docs/CHECKS.md RATHER THAN DROPPED: TASK-0192's messaging-templates files were restored from a checkpoint on the belief they had been lost, when TASK-0192 had in fact been ABORTED mid-session with the reason 'messaging phase 1 never wanted'; they are parked in a git stash rather than deleted, and this release contains none of that work. NO LIVE CLAIM: rule 20 stands; the thing most worth watching on the first live run is that a reload does not carry the walk's pager position. Files: src/applicants-core.js, src/background.ts, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, docs/CHECKS.md, + version bump to 3.11.0 in eight places."
+}

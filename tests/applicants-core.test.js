@@ -4287,8 +4287,15 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
 
   // It pays for the reload first, and proves the payment landed. A reload
   // nothing is counting is a reload that can repeat forever.
-  assert.match(recoveryBranch, /readResumeReloadBudget\(jobId, true\)/,
+  assert.match(recoveryBranch, /readResumeReloadBudget\(jobId, true,/,
     "the reload is spent from the persisted budget");
+  // ...and charged to the applicant the decision was made FOR. Without this the
+  // spend could land on the wrong key, this applicant's per-applicant bound
+  // would never climb, and the one file that keeps scanning could trigger a
+  // reload on every pass for ever — the loop that reloading on sight has to be
+  // protected from.
+  assert.match(recoveryBranch, /applicantKey: result\.resumeRecovery\.applicantKey/,
+    "and it is charged to the applicant whose notice triggered it");
   assert.ok(
     recoveryBranch.indexOf("if (!paid)") < recoveryBranch.indexOf("location.reload()"),
     "and an unpaid reload does not happen"
@@ -9308,28 +9315,48 @@ test("3.9.5: a page already collected is progress, not a fruitless pager", async
 // all of it.
 // --------------------------------------------------------------------------
 
-test("3.10.0: the reload answers evidence the DOCUMENT is stale, never a single notice", () => {
+test("3.11.0: the notice is answered on the applicant that shows it, not two applicants later", () => {
   const { planResumeRecovery: plan, RESUME_RECOVERY } = Applicants;
 
-  // A walk in progress. One notice is an ordinary per-file scan and is worth the
-  // cheap remedies first (3.9.1's wait, 3.9.6's end-of-page re-open) — it
-  // usually clears, and reloading on it would be one reload PER APPLICANT on a
-  // stale page, twenty-five on the reported list, each throwing away the walk's
-  // place in the list and its page in the pager.
+  // AMENDED FROM 3.10.0, IN THE OPEN, AND THE AMENDMENT IS THE POINT OF THE
+  // RELEASE. This test was called "the reload answers evidence the DOCUMENT is
+  // stale, never a single notice", and it asserted that ONE notice must not
+  // reload: one is an ordinary per-file scan, three in a row is a stale page.
+  // The recruiter watched it run and reported what that judgement cost:
+  //
+  //   "I want to reload the page as soon as the error is seen. While checking
+  //    it I am seeing it NEVER RELOAD ON THE SAME PROFILE IT OCCURS - the
+  //    extension is reloading after the 2nd or 3rd, and at last it was not even
+  //    reloading, it kept going through 6 profiles without even reloading."
+  //
+  // A remedy that arrives two applicants after the page it is fixing is one
+  // nobody watching can see working, and the applicant in the screenshot was
+  // never the one it helped.
+  //
+  // NOTHING WAS GIVEN UP TO GET HERE. What the streak was really buying is
+  // loop-safety — a file whose scan has genuinely not finished must not send the
+  // page round for ever — and that is now bought directly by
+  // MAX_APPLICANT_RESUME_RELOADS, asserted in its own test below. The streak
+  // bought it by making two innocent applicants fail first; the per-applicant
+  // bound buys it from the applicant who is actually causing it.
+
+  // Still true, and still the guarantee that protects every healthy run: a page
+  // whose resumes are fine is left alone.
   assert.deepEqual(plan({ phase: "walking", streak: 0, owed: 0 }),
     { action: RESUME_RECOVERY.CONTINUE, reason: "", owed: 0, reloads: 0 },
     "a page whose resumes are fine is left alone");
 
-  // A streak is the evidence. Three consecutive is not a coincidence on a list
-  // whose applicants uploaded at unrelated times, and `page-stale` names the
-  // thing being blamed — the document, not the file.
-  assert.deepEqual(plan({ phase: "walking", streak: 3 }),
-    { action: RESUME_RECOVERY.RELOAD, reason: "page-stale", owed: 0, reloads: 0 },
-    "three in a row indicts the page itself");
+  // ONE notice now reloads, and `page-stale` still names the thing being blamed.
+  // "One notice" is not "the instant the notice paints": `waitForResumeScan`
+  // polls it for five seconds first and returns early the moment it clears, so
+  // what reaches this policy is a notice that already survived the cheap remedy.
+  assert.deepEqual(plan({ phase: "walking", streak: 1, owed: 1 }),
+    { action: RESUME_RECOVERY.RELOAD, reason: "page-stale", owed: 1, reloads: 0 },
+    "the notice is answered where it appears, on that applicant");
 
-  // The end of the walk is the other trigger, and it needs no streak: by then
-  // minutes have passed, every cheap remedy has had its turn, and whoever is
-  // still owed a CV is owed one because the document never produced it.
+  // The end of the walk is the other trigger and needs no streak at all. It is
+  // now the WIDER of the two: reloading on sight is bounded per applicant, so it
+  // necessarily leaves people behind, and this is the sweep for all of them.
   assert.deepEqual(plan({ phase: "finished", owed: 4 }),
     { action: RESUME_RECOVERY.RELOAD, reason: "resumes-still-owed", owed: 4, reloads: 0 },
     "a finished walk that still owes resumes reloads and goes back for them");
@@ -9339,85 +9366,122 @@ test("3.10.0: the reload answers evidence the DOCUMENT is stale, never a single 
     { action: RESUME_RECOVERY.CONTINUE, reason: "", owed: 0, reloads: 0 },
     "a finished walk owing nothing has nothing to reload FOR");
 
-  // The budget, spent.
-  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 2 }),
-    { action: RESUME_RECOVERY.GIVE_UP, reason: "reload-budget-spent", owed: 4, reloads: 2 },
+  // The job ceiling, spent.
+  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 12 }),
+    { action: RESUME_RECOVERY.GIVE_UP, reason: "reload-budget-spent", owed: 4, reloads: 12 },
     "the ceiling is reached and the answer is to stop, not to try once more");
 
-  // A reload already spent that recovered nothing. `recovered` is exact here and
-  // only here: a resumed run opens only the applicants it still OWES, so any
-  // resume it read at all is one the reload recovered. Zero means the remedy
-  // changed nothing.
-  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 1, recovered: 0 }),
-    { action: RESUME_RECOVERY.GIVE_UP, reason: "the last reload recovered no resume", owed: 4, reloads: 1 },
-    "a remedy that changed nothing is not repeated merely because the budget allows it");
+  // This applicant's own reloads, spent. The most specific answer available, so
+  // it is the one reported: "this person's file is not coming back however often
+  // the page is reloaded" is a better reason than "the job is out of budget".
+  assert.deepEqual(plan({ phase: "walking", streak: 1, owed: 2, applicantReloads: 2 }),
+    { action: RESUME_RECOVERY.GIVE_UP, reason: "this applicant's reloads are spent", owed: 2, reloads: 0 },
+    "one applicant may not reload the page for ever");
 
-  // The same spent reload, when it DID work: the second reload exists precisely
-  // for the case where the first landed while a scan genuinely had not finished.
-  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 1, recovered: 3 }),
-    { action: RESUME_RECOVERY.RELOAD, reason: "resumes-still-owed", owed: 4, reloads: 1 },
-    "a reload that recovered three resumes earns the second one");
+  // Reloads that recovered nothing, three deep. Replaces 3.10.0's rule, which
+  // gave up after ONE fruitless reload and is what "at last it was not even
+  // reloading" actually was.
+  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 3, fruitless: 3 }),
+    { action: RESUME_RECOVERY.GIVE_UP, reason: "the last reloads recovered no resume", owed: 4, reloads: 3 },
+    "a page that reloading is not helping is eventually left alone");
 
   // And the caller's veto, which carries the rules this pure file cannot see.
-  // It is a CONTINUE with a REASON rather than a silent skip, so the refusal is
-  // visible in the verdict the run reports — see the dedicated test below for
-  // why that string is load-bearing.
   assert.deepEqual(plan({ phase: "finished", owed: 4, canReload: false }),
     { action: RESUME_RECOVERY.CONTINUE, reason: "the page may not be reloaded right now", owed: 4, reloads: 0 },
     "the refusal names itself instead of disappearing");
+
+  // `recovered` WAS the input that decided this and is now ignored entirely: a
+  // per-run counter cannot say whether reloads help ACROSS a reload, because the
+  // reload destroys the run holding it. Passing it must change nothing.
+  assert.deepEqual(plan({ phase: "finished", owed: 4, reloads: 1, recovered: 0 }),
+    plan({ phase: "finished", owed: 4, reloads: 1 }),
+    "the retired parameter cannot influence the verdict from beyond the grave");
 });
 
-test("3.10.0: PERMANENT — a quiet walk never reloads the page under the recruiter", () => {
+test("3.11.0: PERMANENT — a quiet walk never reloads the page under the recruiter", () => {
   const { planResumeRecovery: plan, RESUME_RECOVERY, RESUME_SCAN_STREAK_LIMIT } = Applicants;
 
-  // THE INVARIANT THAT PROTECTS EVERY HEALTHY RUN. Delete this and a policy
-  // built to rescue a broken page is free to reload a working one — mid-walk,
-  // throwing away the list position and the pager page of a run that had nothing
-  // wrong with it, on a tab the recruiter is reading.
-  assert.equal(RESUME_SCAN_STREAK_LIMIT, 3, "three, and the sweep below depends on it");
-  for (let streak = 0; streak < RESUME_SCAN_STREAK_LIMIT; streak += 1) {
-    for (const owed of [0, 1, 4, 25]) {
-      const verdict = plan({ phase: "walking", streak, owed });
-      assert.equal(verdict.action, RESUME_RECOVERY.CONTINUE,
-        `a streak of ${streak} is below the limit and must never reload`);
-      assert.equal(verdict.reason, "", "and it is the ordinary no-op, not a refusal");
+  // THE INVARIANT THAT PROTECTS EVERY HEALTHY RUN, and it did not move when the
+  // limit did. Delete this and a policy built to rescue a broken page is free to
+  // reload a working one — mid-walk, throwing away the list position and the
+  // pager page of a run that had nothing wrong with it, on a tab the recruiter
+  // is reading.
+  //
+  // AMENDED FROM 3.10.0: the limit was 3, so the old sweep ran over streaks 0, 1
+  // and 2. With a limit of 1 only streak 0 is below it, and a sweep over one
+  // value is the kind of test that looks like coverage and is not. It is
+  // rewritten to assert the thing it was always protecting — A WALK THAT HAS MET
+  // NO NOTICE AT ALL MUST NEVER RELOAD — against every other input that could
+  // possibly excuse one.
+  assert.equal(RESUME_SCAN_STREAK_LIMIT, 1,
+    "one: the notice is answered on the applicant that shows it (3.11.0)");
+
+  for (const owed of [0, 1, 4, 25]) {
+    for (const reloads of [0, 1, 11]) {
+      for (const applicantReloads of [0, 1, 2]) {
+        for (const fruitless of [0, 1, 3]) {
+          const verdict = plan({ phase: "walking", streak: 0, owed, reloads, applicantReloads, fruitless });
+          assert.equal(verdict.action, RESUME_RECOVERY.CONTINUE,
+            `no notice means no reload, whatever else is true (${owed}/${reloads}/${applicantReloads}/${fruitless})`);
+          assert.equal(verdict.reason, "",
+            "and it is the ordinary no-op, not a refusal — the caller branches on that reason");
+        }
+      }
     }
   }
 
   // `owed` is deliberately inert mid-walk: applicants still owed a CV are the
   // NORMAL state of a walk in progress — nobody is owed a resume until they have
-  // been opened — so only the streak may trigger a reload before the end.
+  // been opened — so only a notice may trigger a reload before the end.
   assert.equal(plan({ phase: "walking", owed: 99, streak: 0 }).action, RESUME_RECOVERY.CONTINUE,
     "a long list of not-yet-opened applicants is not evidence of anything");
 
-  // The limit itself still bites, or the sweep above would pass vacuously.
+  // AND THE SWEEP MUST NOT PASS VACUOUSLY. If someone raises the limit back to
+  // 3 to "calm it down", the assertion above fails first and this one says what
+  // the limit is for. Both halves are needed: the constant, and the behaviour.
+  assert.equal(plan({ phase: "walking", streak: 1 }).action, RESUME_RECOVERY.RELOAD,
+    "one notice reloads, or the recruiter's report is back");
   assert.equal(plan({ phase: "walking", streak: RESUME_SCAN_STREAK_LIMIT }).action, RESUME_RECOVERY.RELOAD);
+
+  // A caller may still raise its own bar without touching the constant, and a
+  // streak below THAT is just as quiet.
+  assert.equal(plan({ phase: "walking", streak: 2, streakLimit: 3 }).action, RESUME_RECOVERY.CONTINUE,
+    "the limit is the caller's to raise, and below it nothing happens");
 });
 
-test("3.10.0: PERMANENT — the reload budget is a hard ceiling, whatever the page still owes", () => {
+test("3.11.0: PERMANENT — the reload budget is a hard ceiling, whatever the page still owes", () => {
   const { planResumeRecovery: plan, RESUME_RECOVERY, MAX_RESUME_RELOADS } = Applicants;
 
   // THE ASSERTION THAT FORBIDS A BROWSER THAT WILL NOT STOP MOVING. An unbounded
   // reload is the classic way a transient failure becomes a page that reloads
-  // forever, and the trigger here — resumes still owed — is one a genuinely
-  // broken page satisfies after EVERY reload. Nothing else in the policy stops
-  // that; only this does. It is swept rather than sampled on purpose: a single
-  // case would let a later "just one more when it recovered a lot" slip past.
-  assert.equal(MAX_RESUME_RELOADS, 2, "two: a stale document is cured by its first, the second covers a slow scan");
+  // forever, and the trigger — resumes still owed — is one a genuinely broken
+  // page satisfies after EVERY reload. It is swept rather than sampled on
+  // purpose: a single case would let a later "just one more" slip past.
+  //
+  // AMENDED FROM 3.10.0: the ceiling was 2, sized for a world where a reload
+  // needed three notices to earn, so six applicants had to fail before it was
+  // reached. Answering the notice where it appears would exhaust two by the
+  // second applicant and walk past every applicant after that with the notice on
+  // screen — which is exactly the "6 profiles without even reloading" being
+  // fixed. It is 12, and it is deliberately NO LONGER THE BINDING CONSTRAINT:
+  // the per-applicant bound and the fruitless breaker both bite long before it,
+  // each with its own test. This one only asserts that the ceiling is absolute.
+  assert.equal(MAX_RESUME_RELOADS, 12,
+    "twelve: the backstop, not the bound — see MAX_APPLICANT_RESUME_RELOADS and MAX_FRUITLESS_RESUME_RELOADS");
   for (const phase of ["walking", "finished"]) {
     for (const owed of [0, 1, 4, 25]) {
-      for (const recovered of [0, 1, 7]) {
+      for (const applicantReloads of [0, 1]) {
         for (let reloads = MAX_RESUME_RELOADS; reloads <= MAX_RESUME_RELOADS + 3; reloads += 1) {
-          for (const streak of [0, 3, 9]) {
-            const verdict = plan({ phase, owed, recovered, reloads, streak });
-            const triggering = phase === "finished" ? owed > 0 : streak >= 3;
+          for (const streak of [0, 1, 9]) {
+            const verdict = plan({ phase, owed, applicantReloads, reloads, streak });
+            const triggering = phase === "finished" ? owed > 0 : streak >= 1;
             if (!triggering) {
               assert.equal(verdict.action, RESUME_RECOVERY.CONTINUE,
                 `nothing is wrong here, so nothing happens (${phase}/${owed}/${streak})`);
               continue;
             }
             assert.equal(verdict.action, RESUME_RECOVERY.GIVE_UP,
-              `spent ${reloads} of ${MAX_RESUME_RELOADS} — recovering ${recovered} buys no third reload`);
+              `spent ${reloads} of ${MAX_RESUME_RELOADS} — nothing buys a thirteenth reload`);
             assert.equal(verdict.reason, "reload-budget-spent",
               "and the run must be able to say WHY it stopped chasing them");
           }
@@ -9432,32 +9496,53 @@ test("3.10.0: PERMANENT — the reload budget is a hard ceiling, whatever the pa
     "a budget of none spends none");
 });
 
-test("3.10.0: PERMANENT — a remedy that changed nothing does not get another turn", () => {
-  const { planResumeRecovery: plan, RESUME_RECOVERY } = Applicants;
+test("3.11.0: PERMANENT — reloads that keep recovering nothing stop, but not on the first", () => {
+  const { planResumeRecovery: plan, RESUME_RECOVERY, MAX_FRUITLESS_RESUME_RELOADS } = Applicants;
 
-  // The second reload exists for one case only: the first landed while a scan
-  // genuinely had not finished. If the first recovered NOTHING, that is not the
-  // case it exists for — it is a page whose resumes are unavailable for a reason
-  // reloading does not touch, and spending the second is a reload bought with
-  // nothing but hope. This is the guard that stops the ceiling from being the
-  // only thing between a broken page and two full walks of the list.
-  for (const owed of [1, 4, 25]) {
-    const stuck = plan({ phase: "finished", owed, reloads: 1, recovered: 0 });
-    assert.equal(stuck.action, RESUME_RECOVERY.GIVE_UP, "budget left, but the last reload achieved nothing");
-    assert.equal(stuck.reason, "the last reload recovered no resume");
-    // The same judgement mid-walk: the trigger differs, the reasoning does not.
-    assert.equal(plan({ phase: "walking", streak: 3, reloads: 1, recovered: 0 }).action, RESUME_RECOVERY.GIVE_UP,
-      "a stale-page streak does not resurrect a reload that already failed to help");
+  // THE CIRCUIT BREAKER. Its guarantee is unchanged and still permanent: a page
+  // that reloads and recovers nothing must eventually be left alone, or the
+  // ceiling is the only thing between a broken page and twelve walks of the
+  // list. What moved is the threshold, and moving it IS the third bug fix.
+  //
+  // AMENDED FROM 3.10.0, WHICH GAVE UP AFTER ONE. The old rule read `recovered`
+  // — this run's own count of resumes read — and treated a single reload that
+  // recovered nothing as the page having answered the question. One reload
+  // landing while a scan genuinely had not finished therefore disarmed the
+  // feature for EVERY APPLICANT AFTER IT, for the rest of the run. That is
+  // precisely the recruiter's "at last it was not even reloading, it kept going
+  // through 6 profiles without even reloading", and it is the worst of the three
+  // defects because it was permanent within the run.
+  //
+  // Two changes: the count is three rather than one, and it lives on the LEASE
+  // rather than in the run, because a per-run counter cannot measure anything
+  // across the act that destroys the run.
+  assert.equal(MAX_FRUITLESS_RESUME_RELOADS, 3, "three, and the sweep below depends on it");
+
+  // ONE AND TWO STILL RELOAD. This is the fix; assert it directly rather than
+  // leaving it implied by the give-up case.
+  for (const fruitless of [0, 1, 2]) {
+    assert.equal(plan({ phase: "finished", owed: 4, reloads: fruitless, fruitless }).action,
+      RESUME_RECOVERY.RELOAD,
+      `${fruitless} fruitless reload(s) must not disarm the feature for the applicants after it`);
+    assert.equal(plan({ phase: "walking", streak: 1, reloads: fruitless, fruitless }).action,
+      RESUME_RECOVERY.RELOAD,
+      "and the same mid-walk, where the trigger differs but the reasoning does not");
   }
 
-  // `recovered` is consulted ONLY after a reload has been spent. Before the
-  // first one there is nothing for a reload to have recovered, and reading zero
-  // as failure there would mean the policy could never fire at all.
-  assert.equal(plan({ phase: "finished", owed: 4, reloads: 0, recovered: 0 }).action, RESUME_RECOVERY.RELOAD,
-    "having recovered nothing YET is the state every first reload starts from");
+  // THREE STOPS IT, in both phases, and says so.
+  for (const owed of [1, 4, 25]) {
+    const stuck = plan({ phase: "finished", owed, reloads: 3, fruitless: 3 });
+    assert.equal(stuck.action, RESUME_RECOVERY.GIVE_UP, "budget left, but three reloads achieved nothing");
+    assert.equal(stuck.reason, "the last reloads recovered no resume");
+    assert.equal(plan({ phase: "walking", streak: 1, reloads: 3, fruitless: 4 }).action, RESUME_RECOVERY.GIVE_UP,
+      "and past the threshold it stays given up rather than wrapping around");
+  }
 
-  // And a reload that worked keeps its second turn.
-  assert.equal(plan({ phase: "walking", streak: 3, reloads: 1, recovered: 2 }).action, RESUME_RECOVERY.RELOAD);
+  // The counter resets on any recovery, so this can only ever fire on a page
+  // that reloading is genuinely not helping — a page still giving resumes up
+  // arrives here with zero however many reloads it has spent.
+  assert.equal(plan({ phase: "finished", owed: 4, reloads: 9, fruitless: 0 }).action, RESUME_RECOVERY.RELOAD,
+    "nine reloads that each recovered something is a page worth reloading again");
 });
 
 test("3.10.0: PERMANENT — canReload:false beats every trigger, because it carries three rules at once", () => {
@@ -9472,15 +9557,28 @@ test("3.10.0: PERMANENT — canReload:false beats every trigger, because it carr
   // pure file through this one flag, because none of them is visible from here.
   // Delete this sweep and any of the three can be reintroduced by a change that
   // only looks like it is about resumes.
+  //
+  // SWEPT OVER THE BOUNDS THAT EXIST NOW (3.11.0). This loop used to sweep
+  // `recovered`, which the policy no longer reads at all, so a third of its
+  // nesting was exercising one value dressed up as three. `applicantReloads` and
+  // `fruitless` replace it, and the veto must beat both of them in either
+  // direction — including the cases where a bound would have said GIVE_UP, which
+  // is the interesting half: a refusal is not a settlement.
   for (const phase of ["walking", "finished"]) {
     for (const owed of [0, 1, 4, 25]) {
-      for (const recovered of [0, 1, 7]) {
-        for (const reloads of [0, 1, 2, 5]) {
-          for (const streak of [0, 3, 9]) {
-            const verdict = plan({ phase, owed, recovered, reloads, streak, canReload: false });
-            assert.equal(verdict.action, RESUME_RECOVERY.CONTINUE,
-              `no combination may reload while the caller forbids it (${phase}/${owed}/${streak}/${reloads})`);
-            assert.notEqual(verdict.action, RESUME_RECOVERY.RELOAD);
+      for (const applicantReloads of [0, 2, 9]) {
+        for (const fruitless of [0, 3]) {
+          for (const reloads of [0, 1, 12, 20]) {
+            for (const streak of [0, 1, 9]) {
+              const verdict = plan({
+                phase, owed, applicantReloads, fruitless, reloads, streak, canReload: false
+              });
+              assert.equal(verdict.action, RESUME_RECOVERY.CONTINUE,
+                `no combination may reload while the caller forbids it (${phase}/${owed}/${streak}/${reloads})`);
+              assert.notEqual(verdict.action, RESUME_RECOVERY.RELOAD);
+              assert.notEqual(verdict.action, RESUME_RECOVERY.GIVE_UP,
+                "and a page that was never allowed to try has settled nothing");
+            }
           }
         }
       }
@@ -9522,9 +9620,15 @@ test("3.10.0: PERMANENT — a refused reload is distinguishable from a healthy p
   // Every trigger refused this way answers the same way, whichever rule sent it.
   for (const input of [
     { phase: "finished", owed: 1 },
-    { phase: "finished", owed: 25, reloads: 1, recovered: 4 },
-    { phase: "walking", streak: 3 },
-    { phase: "walking", streak: 9, reloads: 1, recovered: 2 }
+    { phase: "finished", owed: 25, reloads: 1 },
+    // A single notice, which IS the trigger from 3.11.0 onwards.
+    { phase: "walking", streak: 1 },
+    { phase: "walking", streak: 9, reloads: 1 },
+    // And the cases where a bound would otherwise have answered GIVE_UP: the
+    // veto outranks them, and CONTINUE-with-a-reason is what keeps the job
+    // re-armable when the tab comes back.
+    { phase: "walking", streak: 1, applicantReloads: 2 },
+    { phase: "finished", owed: 4, fruitless: 3 }
   ]) {
     const vetoed = plan({ ...input, canReload: false });
     assert.equal(vetoed.action, RESUME_RECOVERY.CONTINUE);
@@ -9533,7 +9637,7 @@ test("3.10.0: PERMANENT — a refused reload is distinguishable from a healthy p
   }
 });
 
-test("3.10.0: PERMANENT — give-up and reload are different answers, and only one of them is terminal", () => {
+test("3.11.0: PERMANENT — give-up and reload are different answers, and only one is terminal", () => {
   const { RESUME_RECOVERY, planResumeRecovery: plan } = Applicants;
 
   // WHY THIS IS WORTH ASSERTING AT ALL. `give-up` means the job is finished with
@@ -9550,9 +9654,22 @@ test("3.10.0: PERMANENT — give-up and reload are different answers, and only o
   assert.ok(Object.isFrozen(RESUME_RECOVERY), "and no caller may add a fourth at runtime");
 
   // The two terminals really are produced by different inputs, so a caller
-  // branching on them is branching on something real.
+  // branching on them is branching on something real. Each of the three bounds
+  // 3.11.0 added or moved produces the terminal one, and each names itself —
+  // "it stopped reloading" is the report this release exists to answer, and it
+  // is unanswerable if the three collapse into one string.
   assert.equal(plan({ phase: "finished", owed: 4, reloads: 0 }).action, RESUME_RECOVERY.RELOAD);
-  assert.equal(plan({ phase: "finished", owed: 4, reloads: 2 }).action, RESUME_RECOVERY.GIVE_UP);
+  const reasons = [
+    plan({ phase: "walking", streak: 1, applicantReloads: 2 }),
+    plan({ phase: "finished", owed: 4, reloads: 12 }),
+    plan({ phase: "finished", owed: 4, fruitless: 3 })
+  ];
+  for (const verdict of reasons) {
+    assert.equal(verdict.action, RESUME_RECOVERY.GIVE_UP);
+    assert.ok(verdict.reason, "a terminal answer always says which bound produced it");
+  }
+  assert.equal(new Set(reasons.map((verdict) => verdict.reason)).size, 3,
+    "and the three bounds stay distinguishable in the run's diagnostics");
 });
 
 test("3.10.0: the spent budget is counted where the reload cannot erase it", () => {
@@ -9604,14 +9721,27 @@ test("3.10.0: PERMANENT — the lease carries the spent budget through a claim a
   const now = "2026-08-25T10:00:00.000Z";
   const spent = noteResumeReload(
     createAutoRunEntry({ options: { recollect: false }, now, runId: "r9", tabId: 12 }),
-    { now }
+    { now, applicantKey: "alice", recovered: 0 }
   ).entry;
   assert.equal(spent.resumeReloads, 1);
+  // THE THREE 3.11.0 COUNTERS RIDE ON THE SAME LEASE FOR THE SAME REASON, and
+  // are asserted through the same claim and settle. A spread that dropped these
+  // would leave the per-applicant bound reading zero for ever — every reload
+  // would look like this applicant's first, which is the loop the bound exists
+  // to prevent — and it would fail silently, on a live page only.
+  assert.equal(spent.resumeReloadKey, "alice");
+  assert.equal(spent.resumeReloadKeyCount, 1);
+  assert.equal(spent.resumeReloadFruitless, 1);
 
   // The successor document in the same tab takes the lease over.
   const claimed = claimAutoRun(spent, { now, tabId: 12 });
   assert.equal(claimed.armed, true, "an unfinished run is picked up after the reload");
   assert.equal(claimed.entry.resumeReloads, 1, "and it inherits what has already been spent");
+  assert.deepEqual(
+    Applicants.readResumeReloadState(claimed.entry, { applicantKey: "alice" }),
+    { reloads: 1, applicantReloads: 1, fruitless: 1 },
+    "including which applicant it was spent on, which only matters across a reload"
+  );
   assert.equal(claimed.entry.attempt, 2, "on a new attempt token, as every claim does");
 
   // And a terminal report — either terminal report — leaves the count alone, so
@@ -9620,6 +9750,8 @@ test("3.10.0: PERMANENT — the lease carries the spent budget through a claim a
     ...claimed.tracking, state: AUTO_RUN_STATE.INTERRUPTED, now
   });
   assert.equal(interrupted.entry.resumeReloads, 1, "an interruption is not a fresh budget");
+  assert.equal(interrupted.entry.resumeReloadKeyCount, 1, "nor a fresh turn for this applicant");
+  assert.equal(interrupted.entry.resumeReloadFruitless, 1, "nor a fresh circuit breaker");
   const completed = settleAutoRun(claimed.entry, {
     ...claimed.tracking, state: AUTO_RUN_STATE.COMPLETED, now
   });
@@ -9628,37 +9760,269 @@ test("3.10.0: PERMANENT — the lease carries the spent budget through a claim a
   // Re-arming from scratch DOES start over, and that is deliberate rather than
   // an oversight: the recruiter pressing Collect again is a new instruction, not
   // a runaway.
-  assert.equal(createAutoRunEntry({ options: {}, now, runId: "r10", tabId: 12 }).resumeReloads, 0);
+  const rearmed = createAutoRunEntry({ options: {}, now, runId: "r10", tabId: 12 });
+  assert.equal(rearmed.resumeReloads, 0);
+  assert.deepEqual(Applicants.readResumeReloadState(rearmed, { applicantKey: "alice" }),
+    { reloads: 0, applicantReloads: 0, fruitless: 0 },
+    "every counter starts over, because the recruiter asking again is a new instruction");
 });
 
-test("3.10.0: junk input never invents a reload", () => {
+test("3.11.0: junk input never invents a reload, and never disables a bound", () => {
   const { planResumeRecovery: plan, RESUME_RECOVERY } = Applicants;
 
-  // This policy is fed by counters that come from a live walk, and a walk that
-  // went wrong is exactly when they arrive as undefined, as a string, or as
-  // something decremented past zero. Erring towards CONTINUE is the safe
-  // direction in every one of those cases: the cost of not reloading is resumes
-  // this run could have had, and the cost of reloading on nonsense is the
-  // recruiter's page moving under them for no reason at all.
+  // This policy is fed by counters that come from a live walk and from a lease
+  // that crossed a message boundary, and a walk that went wrong is exactly when
+  // they arrive as undefined, as a string, or as something decremented past
+  // zero. Erring towards CONTINUE is the safe direction in every one of those
+  // cases: the cost of not reloading is resumes this run could have had, and the
+  // cost of reloading on nonsense is the recruiter's page moving under them for
+  // no reason at all.
   assert.equal(plan().action, RESUME_RECOVERY.CONTINUE, "no arguments at all");
   assert.equal(plan(undefined).action, RESUME_RECOVERY.CONTINUE);
   assert.equal(plan({}).action, RESUME_RECOVERY.CONTINUE, "an empty verdict request is not a trigger");
 
   // Negative counters clamp to zero rather than reading as "less than none".
-  assert.deepEqual(plan({ phase: "finished", owed: -4, reloads: -2, recovered: -1 }),
+  assert.deepEqual(plan({ phase: "finished", owed: -4, reloads: -2, fruitless: -1, applicantReloads: -9 }),
     { action: RESUME_RECOVERY.CONTINUE, reason: "", owed: 0, reloads: 0 },
     "owing minus four resumes is owing none");
 
   // Unparseable counters are none, not NaN — a comparison against NaN is false
-  // in both directions and would make the ceiling unenforceable.
-  assert.equal(plan({ phase: "nonsense", owed: "many", streak: "lots", reloads: "x", recovered: "y" }).action,
+  // in both directions and would make every ceiling unenforceable.
+  assert.equal(
+    plan({ phase: "nonsense", owed: "many", streak: "lots", reloads: "x", fruitless: "y", applicantReloads: "z" }).action,
     RESUME_RECOVERY.CONTINUE, "and an unknown phase is not the end of the walk");
 
   // Numeric strings, which is how a counter arrives from storage or a message,
   // are read as the numbers they are.
-  assert.deepEqual(plan({ phase: "finished", owed: "4", reloads: "1", recovered: "2" }),
+  assert.deepEqual(plan({ phase: "finished", owed: "4", reloads: "1", fruitless: "0" }),
     { action: RESUME_RECOVERY.RELOAD, reason: "resumes-still-owed", owed: 4, reloads: 1 },
     "a counter that crossed a message boundary still counts");
-  assert.equal(plan({ phase: "finished", owed: "4", reloads: "2" }).action, RESUME_RECOVERY.GIVE_UP,
+  assert.equal(plan({ phase: "finished", owed: "4", reloads: "12" }).action, RESUME_RECOVERY.GIVE_UP,
     "including against the ceiling");
+  assert.equal(plan({ phase: "walking", streak: "1", applicantReloads: "2" }).action, RESUME_RECOVERY.GIVE_UP,
+    "and against this applicant's own share of it");
+  assert.equal(plan({ phase: "finished", owed: "1", fruitless: "3" }).action, RESUME_RECOVERY.GIVE_UP,
+    "and against the fruitless streak");
+
+  // A JUNK *LIMIT* MUST FAIL CLOSED, WHICH IS THE OPPOSITE DIRECTION FROM A JUNK
+  // COUNTER AND IS WORTH ITS OWN ASSERTION. A counter that cannot be read is
+  // "nothing has happened yet"; a LIMIT that cannot be read is a bound that has
+  // gone missing, and reading it as infinity would quietly delete the only thing
+  // standing between this feature and a page that reloads for ever. Every one of
+  // them clamps to zero, which spends nothing.
+  for (const limits of [
+    { maxReloads: "x" },
+    { maxApplicantReloads: "x" },
+    { maxFruitless: "x" },
+    { maxReloads: null },
+    { maxApplicantReloads: NaN },
+    { maxFruitless: -3 }
+  ]) {
+    const verdict = plan({ phase: "walking", streak: 1, owed: 1, ...limits });
+    assert.equal(verdict.action, RESUME_RECOVERY.GIVE_UP,
+      `an unreadable bound spends nothing (${JSON.stringify(limits)})`);
+    assert.notEqual(verdict.action, RESUME_RECOVERY.RELOAD,
+      "a missing bound must never read as an unlimited one");
+  }
+});
+
+test("3.11.0: PERMANENT — one applicant may not reload the page for ever", () => {
+  const { planResumeRecovery: plan, RESUME_RECOVERY, MAX_APPLICANT_RESUME_RELOADS } = Applicants;
+
+  // THE BOUND THAT MAKES RELOAD-ON-SIGHT SAFE, and the one that took over the
+  // job the streak of three used to do badly.
+  //
+  // The failure it prevents is a loop, and the loop is real rather than
+  // theoretical: LinkedIn is genuinely still scanning one applicant's file, the
+  // notice appears, the page reloads, the resumed run goes straight back to the
+  // applicants it still owes — which is that applicant — the file is STILL being
+  // scanned, and the trigger is satisfied again. Nothing in the job ceiling or
+  // the fruitless breaker stops that quickly; both are job-wide and would let
+  // one stubborn file spend everyone else's budget first.
+  assert.equal(MAX_APPLICANT_RESUME_RELOADS, 2,
+    "two: the first covers a stale attachment session, the second a scan that had not finished");
+
+  for (let spent = 0; spent < MAX_APPLICANT_RESUME_RELOADS; spent += 1) {
+    assert.equal(plan({ phase: "walking", streak: 1, owed: 3, applicantReloads: spent }).action,
+      RESUME_RECOVERY.RELOAD,
+      `${spent} spent on this applicant still leaves them a turn`);
+  }
+  for (const spent of [MAX_APPLICANT_RESUME_RELOADS, MAX_APPLICANT_RESUME_RELOADS + 5]) {
+    const verdict = plan({ phase: "walking", streak: 1, owed: 3, applicantReloads: spent });
+    assert.equal(verdict.action, RESUME_RECOVERY.GIVE_UP, "and then the walk moves past them");
+    assert.equal(verdict.reason, "this applicant's reloads are spent",
+      "named specifically, because 'the job is out of budget' would be the wrong thing to tell the user");
+  }
+
+  // GIVING UP ON THE RELOAD IS NOT GIVING UP ON THE APPLICANT. The verdict still
+  // reports what is owed, the caller leaves them in `resumesOwed`,
+  // `hasPendingResume` keeps them out of the collected index, and the next run
+  // goes back for them. This assertion is the one that stops a future reading of
+  // "give up" as "mark them done".
+  assert.equal(plan({ phase: "walking", streak: 1, owed: 7, applicantReloads: 2 }).owed, 7,
+    "the debt survives the refusal to reload again for this person");
+
+  // It is asked BEFORE the job ceiling, so the run reports the specific cause
+  // rather than the general one when both are true.
+  assert.equal(plan({ phase: "walking", streak: 1, applicantReloads: 2, reloads: 12 }).reason,
+    "this applicant's reloads are spent",
+    "the most specific bound that fired is the one reported");
+});
+
+test("3.11.0: PERMANENT — the end of the walk is exempt from the per-applicant bound", () => {
+  const { planResumeRecovery: plan, RESUME_RECOVERY } = Applicants;
+
+  // WHY THE EXEMPTION EXISTS. An end-of-walk reload is not FOR anybody in
+  // particular — it is for everyone still owed a CV after the whole list has
+  // been walked. There is no applicant to charge it to, and charging it to
+  // whoever happened to be last would let ONE stubborn file veto the reload the
+  // other twenty applicants needed. The caller sends no key for this reason; the
+  // policy ignores the bound for the same one.
+  for (const applicantReloads of [0, 2, 99]) {
+    assert.equal(plan({ phase: "finished", owed: 4, applicantReloads }).action, RESUME_RECOVERY.RELOAD,
+      "a finished walk still goes back for everyone it owes");
+  }
+
+  // The job ceiling and the fruitless breaker are NOT exempt — they are job-wide
+  // and mean the same thing in both phases. Without this the exemption would
+  // read as "the end of the walk answers to nothing".
+  assert.equal(plan({ phase: "finished", owed: 4, applicantReloads: 99, reloads: 12 }).reason,
+    "reload-budget-spent");
+  assert.equal(plan({ phase: "finished", owed: 4, applicantReloads: 99, fruitless: 3 }).reason,
+    "the last reloads recovered no resume");
+
+  // And the same inputs mid-walk DO hit the bound, so the exemption is really
+  // about the phase rather than about the numbers.
+  assert.equal(plan({ phase: "walking", streak: 1, owed: 4, applicantReloads: 2 }).action,
+    RESUME_RECOVERY.GIVE_UP, "mid-walk the same applicant is out of turns");
+});
+
+test("3.11.0: the lease counts reloads per applicant, and forgets nothing across the reload", () => {
+  const { noteResumeReload, readResumeReloadState, createAutoRunEntry } = Applicants;
+
+  // THE BOOKKEEPING THE POLICY ABOVE IS ONLY AS GOOD AS. Every counter it reads
+  // lives on the auto-run lease, because the thing they bound — a page reload —
+  // destroys the document and every counter inside it.
+  const fresh = createAutoRunEntry({ options: {}, now: "2026-08-25T09:00:00.000Z", runId: "r1", tabId: 7 });
+  assert.deepEqual(readResumeReloadState(fresh, { applicantKey: "alice" }),
+    { reloads: 0, applicantReloads: 0, fruitless: 0 },
+    "a new instruction starts with its whole budget");
+
+  // The same applicant's count climbs.
+  let entry = noteResumeReload(fresh, { now: "n1", applicantKey: "alice", recovered: 0 }).entry;
+  assert.deepEqual(readResumeReloadState(entry, { applicantKey: "alice" }),
+    { reloads: 1, applicantReloads: 1, fruitless: 1 });
+  entry = noteResumeReload(entry, { now: "n2", applicantKey: "alice", recovered: 0 }).entry;
+  assert.deepEqual(readResumeReloadState(entry, { applicantKey: "alice" }),
+    { reloads: 2, applicantReloads: 2, fruitless: 2 },
+    "two reloads charged to the same person, which is exactly their limit");
+
+  // ...AND ONLY THEIRS. Read as somebody else, the per-applicant count is zero:
+  // the next applicant starts with their own full turn, or one stale file would
+  // silently disarm the remedy for the whole rest of the list.
+  assert.equal(readResumeReloadState(entry, { applicantKey: "bob" }).applicantReloads, 0,
+    "a different applicant is not charged for this one's reloads");
+  assert.equal(readResumeReloadState(entry, { applicantKey: "bob" }).reloads, 2,
+    "while the JOB total is shared by everybody, because the ceiling is job-wide");
+
+  // A different key restarts the count at one rather than continuing it.
+  entry = noteResumeReload(entry, { now: "n3", applicantKey: "bob", recovered: 0 }).entry;
+  assert.equal(readResumeReloadState(entry, { applicantKey: "bob" }).applicantReloads, 1);
+  assert.equal(readResumeReloadState(entry, { applicantKey: "alice" }).applicantReloads, 0,
+    "one key and one count — alice is forgotten once bob is the one being reloaded for");
+
+  // ANY RECOVERY RESETS THE FRUITLESS STREAK. This is what makes it measure
+  // "reloads that are not helping" rather than "reloads that have happened", and
+  // it is the difference between 3.10.0 disarming itself after one unlucky
+  // reload and this release surviving one.
+  assert.equal(readResumeReloadState(entry, { applicantKey: "bob" }).fruitless, 3);
+  entry = noteResumeReload(entry, { now: "n4", applicantKey: "bob", recovered: 2 }).entry;
+  assert.equal(readResumeReloadState(entry, { applicantKey: "bob" }).fruitless, 0,
+    "a reload that recovered two resumes is a page worth reloading again");
+
+  // An END-OF-WALK reload passes no key. It must CLEAR the key rather than
+  // charge itself to whoever was last, or a sweep for everybody would count
+  // against one person's limit.
+  const swept = noteResumeReload(entry, { now: "n5", applicantKey: "", recovered: 0 }).entry;
+  assert.equal(readResumeReloadState(swept, { applicantKey: "bob" }).applicantReloads, 0,
+    "the sweep is nobody's fault in particular");
+  assert.equal(readResumeReloadState(swept, { applicantKey: "" }).applicantReloads, 0,
+    "and an empty key never matches an empty key either, or every applicant would share one count");
+  assert.equal(swept.resumeReloads, 5, "while the job total still counts it, because it is a reload");
+
+  // Monotonic in the job total: this is the last thing standing between the
+  // ceiling and an unbounded reload, so it must never go down or stand still.
+  assert.equal(noteResumeReload(swept, { now: "n6" }).entry.resumeReloads, 6,
+    "it keeps counting past the ceiling rather than saturating at it");
+
+  // A lease that is not a lease is refused rather than invented.
+  for (const junk of [null, undefined, 0, "", "entry", 5, true]) {
+    const missed = noteResumeReload(junk);
+    assert.equal(missed.changed, false, `${JSON.stringify(junk)} is not a lease`);
+    assert.equal(missed.reason, "missing", "and it says so rather than inventing one");
+  }
+  // Reading one, on the other hand, must answer zeroes rather than throw: the
+  // worker asks this of whatever storage gave back.
+  assert.deepEqual(readResumeReloadState(null, { applicantKey: "alice" }),
+    { reloads: 0, applicantReloads: 0, fruitless: 0 });
+});
+
+test("3.11.0: PERMANENT — a hopeless page costs three reloads, not twelve", () => {
+  const {
+    planResumeRecovery: plan, noteResumeReload, readResumeReloadState, createAutoRunEntry,
+    RESUME_RECOVERY, MAX_RESUME_RELOADS, MAX_FRUITLESS_RESUME_RELOADS
+  } = Applicants;
+
+  // THE ASSERTION THAT SHOWS RELOADING ON SIGHT DID NOT BECOME UNBOUNDED, and it
+  // is DRIVEN rather than reasoned about, because the three bounds interact and
+  // the interaction is the whole safety argument. Reasoning about it is how
+  // 3.10.0 shipped a comment claiming a flat budget of two when the progress
+  // rule actually made the second reload conditional.
+  //
+  // The page here is the worst realistic case: every applicant shows the notice,
+  // no reload ever recovers anything, and the walk keeps finding new applicants
+  // to be refused on — so the per-applicant bound never ends it, and only the
+  // fruitless breaker can.
+  let lease = createAutoRunEntry({ options: {}, now: "n", runId: "r", tabId: 1 });
+  const applicants = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10"];
+  let reloads = 0;
+  let index = 0;
+  let stopped = "";
+  let guard = 0;
+
+  while (guard < 500) {
+    guard += 1;
+    const key = applicants[index % applicants.length];
+    const state = readResumeReloadState(lease, { applicantKey: key });
+    const verdict = plan({
+      phase: "walking",
+      streak: 1,
+      owed: applicants.length,
+      reloads: state.reloads,
+      applicantReloads: state.applicantReloads,
+      fruitless: state.fruitless,
+      canReload: true
+    });
+    if (verdict.action === RESUME_RECOVERY.RELOAD) {
+      // The run pays BEFORE it reloads, and the walk comes back to the same
+      // people because none of them was ever collected.
+      lease = noteResumeReload(lease, { now: "n", applicantKey: key, recovered: 0 }).entry;
+      reloads += 1;
+      continue;
+    }
+    if (verdict.reason === "this applicant's reloads are spent") {
+      index += 1;              // the walk moves on; they stay owed
+      continue;
+    }
+    stopped = verdict.reason;  // a job-wide bound: the run is done trying
+    break;
+  }
+
+  assert.ok(guard < 500, "the cycle must terminate on its own, not by running out of iterations");
+  assert.equal(stopped, "the last reloads recovered no resume",
+    "the fruitless breaker is what ends a hopeless page — not the ceiling");
+  assert.equal(reloads, MAX_FRUITLESS_RESUME_RELOADS,
+    "three reloads, barely more than 3.10.0's whole budget of two");
+  assert.ok(reloads < MAX_RESUME_RELOADS,
+    `a hopeless page must never approach the ceiling of ${MAX_RESUME_RELOADS}`);
 });

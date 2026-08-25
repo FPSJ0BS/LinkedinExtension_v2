@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.10.0";
+  const BUILD_ID = "2026-08-25-react-v3.11.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -6932,19 +6932,34 @@
    * being too cautious here is one page not refreshed; the failure mode of being
    * too trusting is a browser that will not stop moving.
    */
-  async function readResumeReloadBudget(jobId, spend = false) {
-    if (!cleanText(jobId)) return { ok: false, reloads: 0 };
+  async function readResumeReloadBudget(jobId, spend = false, { applicantKey = "", recovered = 0 } = {}) {
+    const none = { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
+    if (!cleanText(jobId)) return none;
     try {
       // The same bounded send the resume cycle uses. A worker that is waking can
       // take a moment; a worker that is gone must not hold the run.
       const reply = await sendRuntimeMessageWithTimeout(
-        { type: "PV_APPLICANT_RESUME_RELOAD", jobId, spend: spend === true },
+        {
+          type: "PV_APPLICANT_RESUME_RELOAD",
+          jobId,
+          spend: spend === true,
+          // WHO this reload is for, and WHETHER the run that is about to be
+          // destroyed got anywhere. Both are counted on the lease, because both
+          // questions span the reload and nothing in this document does.
+          applicantKey: cleanText(applicantKey),
+          recovered: Math.max(0, Number(recovered) || 0)
+        },
         RESUME_RELOAD_BUDGET_TIMEOUT_MS
       );
-      if (!reply?.ok) return { ok: false, reloads: 0 };
-      return { ok: true, reloads: Math.max(0, Number(reply.reloads) || 0) };
+      if (!reply?.ok) return none;
+      return {
+        ok: true,
+        reloads: Math.max(0, Number(reply.reloads) || 0),
+        applicantReloads: Math.max(0, Number(reply.applicantReloads) || 0),
+        fruitless: Math.max(0, Number(reply.fruitless) || 0)
+      };
     } catch {
-      return { ok: false, reloads: 0 };
+      return none;
     }
   }
 
@@ -7898,19 +7913,27 @@
       state.run.index = processed.size;
       state.run.updatedAt = new Date().toISOString();
       /**
-       * ENOUGH IN A ROW MEANS THE PAGE, NOT THE FILES — so stop burning
-       * applicants on a document whose answer is already fixed.
+       * THE NOTICE IS ANSWERED WHERE IT APPEARS, ON THIS APPLICANT.
        *
-       * **Why this is not "reload the moment the notice appears"**, which is the
-       * obvious reading of LinkedIn's own wording and was the first design. On a
-       * stale page EVERY applicant shows the notice, so that is not one reload,
-       * it is one per applicant — twenty-five on the reported list — and each
-       * one throws away the walk's position in the list and its place in the
-       * pager. And when the scan genuinely IS still running on one file, an
-       * immediate reload comes back to the same notice and asks for another,
-       * which is a loop with a page reload inside it. So the trigger is either
-       * evidence about the document (here) or the end of the walk (below), by
-       * which time minutes have passed and every cheap remedy has had its turn.
+       * This block used to wait for three notices in a row, on the reasoning
+       * that one is an ordinary per-file scan and that reloading on sight would
+       * cost one reload per applicant on a stale page. The recruiter watched it
+       * run and reported the other side of that trade: *"it never reloads on the
+       * same profile it occurs — it is reloading after the 2nd or 3rd, and at
+       * last it was not even reloading, it kept going through 6 profiles."* A
+       * remedy that arrives two applicants after the page it is fixing is a
+       * remedy nobody can see working, and `RESUME_SCAN_STREAK_LIMIT` is now 1.
+       *
+       * **The loop that the streak was really preventing is prevented properly
+       * instead** — by `applicantReloads`, which counts against this applicant's
+       * own row key and is persisted on the lease. A file whose scan genuinely
+       * has not finished costs that applicant two reloads and then the walk goes
+       * past them, still owed. It cannot send the page round for ever, which is
+       * the only thing three-in-a-row was buying.
+       *
+       * `waitForResumeScan` still runs first and is untouched, so this is not
+       * "reload the instant the notice paints" — it is "reload once the cheap
+       * remedy has had its five seconds and the notice is still there".
        *
        * The budget is only asked for once this page has something to say, and
        * only when the page may be reloaded at all, so a quiet run never sends
@@ -7919,20 +7942,27 @@
        */
       if (scanStreak >= Applicants.RESUME_SCAN_STREAK_LIMIT) {
         const budget = mayReloadForResumes()
-          ? await readResumeReloadBudget(jobId)
-          : { ok: false, reloads: 0 };
+          ? await readResumeReloadBudget(jobId, false, { applicantKey: key })
+          : { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
         const verdict = Applicants.planResumeRecovery({
           phase: "walking",
           owed: resumesOwed.size,
           streak: scanStreak,
           reloads: budget.reloads,
-          recovered: resumesRecovered,
+          // This applicant's own share of the budget, and the job's run of
+          // reloads that recovered nothing — the two bounds that replaced the
+          // streak and the old give-up-after-one-fruitless-reload rule.
+          applicantReloads: budget.applicantReloads,
+          fruitless: budget.fruitless,
           // Both halves, folded: `ok` is true only when this page was allowed to
           // reload AND the worker actually answered with the budget.
           canReload: budget.ok
         });
         if (verdict.action === Applicants.RESUME_RECOVERY.RELOAD) {
-          resumeRecovery = verdict;
+          // The key travels with the verdict so the SPEND is charged to the same
+          // applicant the decision was made for. Charging it to anyone else
+          // would leave this one able to trigger a reload for ever.
+          resumeRecovery = { ...verdict, applicantKey: key, recovered: resumesRecovered };
           reloadRequested = true;
           // NOT `COMPLETED`. The walk is being cut short on purpose with rows
           // still unopened, and the line below this loop turns a RUNNING state
@@ -7940,17 +7970,22 @@
           // reloaded page would come back and do nothing at all.
           state.run.state = Applicants.RUN_STATE.STOPPED;
           state.run.lastError =
-            `${scanStreak} resumes in a row were still being virus-scanned, so it is this page and not `
-            + `those files (${verdict.owed} resume(s) owed). Reloading the hiring page, as LinkedIn's own `
-            + "notice asks, and continuing from the applicants that are not yet saved.";
+            "LinkedIn is still virus-scanning this applicant's resume and asked for the page to be "
+            + `refreshed (${verdict.owed} resume(s) owed). Reloading the hiring page now, as its own `
+            + "notice asks, and coming straight back to the applicants that are not yet saved.";
           state.run.updatedAt = new Date().toISOString();
           break;
         }
-        // Not reloading — the budget is spent, the last reload recovered
-        // nothing, or this page may not be reloaded right now. Start the
-        // evidence over rather than asking again on every applicant after this
-        // one: the walk carries on either way, and a page that is genuinely
-        // stale will have re-earned the answer within another few rows.
+        // Not reloading — this applicant's own reloads are spent, the job's
+        // ceiling is reached, the last three reloads recovered nothing, or the
+        // page may not be reloaded right now. The verdict is kept so the run can
+        // say WHICH of those it was; without it the diagnostics would report
+        // only the last applicant to be refused, and "it stopped reloading" is
+        // exactly the report this release exists to answer.
+        resumeRecovery = { ...verdict, applicantKey: key, recovered: resumesRecovered };
+        // Start the evidence over rather than asking the worker again on every
+        // applicant after this one: the walk carries on either way, and a page
+        // that is genuinely stale re-earns the answer on the very next row.
         scanStreak = 0;
       }
       // A breath before the next one, and a Stop lands on the next row's
@@ -7961,14 +7996,15 @@
     if (state.run.state === Applicants.RUN_STATE.RUNNING) state.run.state = Applicants.RUN_STATE.COMPLETED;
 
     /**
-     * THE END OF THE WALK IS THE SECOND TRIGGER, and it is the gentler one.
+     * THE END OF THE WALK IS THE SECOND TRIGGER, and it is now the WIDER one.
      *
-     * The streak above catches a page that went stale in the middle of a run.
-     * This catches the rest: resumes owed one or two at a time across pages,
-     * never three in a row, each of which the wait and the completion sweep both
-     * failed to get. By now every cheap remedy has had its turn and minutes have
-     * passed, so a scan that was genuinely still running has had every chance to
-     * finish and what is left is the document.
+     * The trigger above answers each notice where it appears, and bounded per
+     * applicant it necessarily leaves some behind: the applicant whose own two
+     * reloads were spent, everyone passed over while the page could not be
+     * reloaded, and everyone whose notice arrived after the job's ceiling. This
+     * is the sweep for all of them. By now every cheap remedy has had its turn
+     * and minutes have passed, so a scan that was genuinely still running has
+     * had every chance to finish and what is left is the document.
      *
      * `owed` is asked of the RUN's ledger rather than of the last page's, for
      * the reason `resumesOwed` records: a pager press clears `unfinished`, so
@@ -7984,16 +8020,22 @@
      */
     if (!reloadRequested) {
       const owedResumes = resumesOwed.size;
+      // NO APPLICANT KEY, deliberately. This reload is for everyone still owed
+      // rather than for one person, so charging it to whoever happened to be
+      // last would let one stubborn file veto the reload the other twenty need —
+      // and `planResumeRecovery` does not apply the per-applicant bound to a
+      // finished walk for the same reason.
       const budget = owedResumes > 0 && mayReloadForResumes()
         ? await readResumeReloadBudget(jobId)
-        : { ok: false, reloads: 0 };
-      resumeRecovery = Applicants.planResumeRecovery({
+        : { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
+      const finishedVerdict = Applicants.planResumeRecovery({
         phase: "finished",
         owed: owedResumes,
         reloads: budget.reloads,
-        recovered: resumesRecovered,
+        fruitless: budget.fruitless,
         canReload: budget.ok
       });
+      resumeRecovery = { ...finishedVerdict, applicantKey: "", recovered: resumesRecovered };
       if (resumeRecovery.action === Applicants.RESUME_RECOVERY.RELOAD) {
         // Same reason as the mid-walk break: reaching the end of the LIST is not
         // finishing the JOB while files are still owed, and a COMPLETED job is
@@ -8135,7 +8177,14 @@
        */
       if (result.resumeRecovery?.action === Applicants.RESUME_RECOVERY.RELOAD) {
         await report(Applicants.AUTO_RUN_STATE.INTERRUPTED);
-        const spent = await readResumeReloadBudget(jobId, true);
+        // Charged to the SAME applicant the decision was made for, and carrying
+        // what this run recovered so the lease can tell a reload that is helping
+        // from one that is not. Both cross the message boundary because both
+        // outlive this document, which is about to stop existing.
+        const spent = await readResumeReloadBudget(jobId, true, {
+          applicantKey: result.resumeRecovery.applicantKey || "",
+          recovered: result.resumeRecovery.recovered || 0
+        });
         /**
          * PAID FOR, AND PAID FOR EXACTLY ONCE.
          *
@@ -8161,9 +8210,11 @@
         }
         console.warn(
           `[Profile Vault ${BUILD_ID}] reloading the hiring page (${spent.reloads} of `
-          + `${Applicants.MAX_RESUME_RELOADS}): ${result.resumeRecovery.owed} resume(s) are still owed `
-          + `because LinkedIn was virus-scanning them (${result.resumeRecovery.reason}). Its own notice `
-          + "asks for a refresh; the run will pick up the applicants that are not yet saved."
+          + `${Applicants.MAX_RESUME_RELOADS}, ${spent.applicantReloads} of `
+          + `${Applicants.MAX_APPLICANT_RESUME_RELOADS} for this applicant): `
+          + `${result.resumeRecovery.owed} resume(s) are still owed because LinkedIn was virus-scanning `
+          + `them (${result.resumeRecovery.reason}). Its own notice asks for a refresh; the run will pick `
+          + "up the applicants that are not yet saved."
         );
         location.reload();
         return result;

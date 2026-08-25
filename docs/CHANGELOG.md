@@ -1,5 +1,130 @@
 # CHANGELOG.md
 
+## 3.11.0 — the reload arrives on the applicant that asked for it
+
+TASK-0192. **"Scanning resume for viruses. Please refresh the page now."** for
+the third release running — but this time the report is not that nothing
+refreshes the page. 3.10.0 taught the run to do that. The report is that the
+refresh arrives in the wrong place, then stops arriving at all:
+
+> *"I want to reload the page as soon as the error is seen. While checking it I
+> am seeing it never reload on the same profile it occurs — the extension is
+> reloading after the 2nd or 3rd, and at last it was not even reloading, it kept
+> going through 6 profiles without even reloading."*
+
+**That one sentence names three separate defects**, and each had its own cause in
+3.10.0's design. All three are fixed here, and the interesting part is that the
+first was not a bug at all — it was a judgement, made deliberately, argued for at
+length in the code, and wrong.
+
+**1. The reload never landed on the applicant showing the notice.**
+`RESUME_SCAN_STREAK_LIMIT` was **3**, and 3.10.0 explicitly considered reloading
+on sight and rejected it. Its reasoning is still in the diff: on a stale page
+every applicant shows the notice, so reloading on sight is one reload *per
+applicant* rather than one; and on a file whose scan genuinely has not finished,
+an immediate reload returns to the same notice and asks for another — a loop with
+a page reload in it. Both costs are real. What the reasoning missed is that the
+streak was **paying for them with the wrong currency**: it bought loop-safety by
+making two innocent applicants fail first, so the remedy could never be seen to
+work by the person watching it, and the applicant actually on screen — the one in
+the screenshot — was never the one it helped. The limit is now **1**.
+
+**The loop is closed properly instead, by `MAX_APPLICANT_RESUME_RELOADS = 2`.**
+Reloads are counted against the applicant's own row key, so a file that is
+genuinely still scanning costs *that applicant* two reloads and then the walk
+moves past them — still owed, still out of the collected index, still collected
+by the next run. That is precisely the failure the streak was standing in for,
+closed directly rather than by proxy, and closed without a tax on the two
+applicants either side. The cheap remedy is not skipped: `waitForResumeScan`
+still waits out a per-file scan first, so what reaches the policy is a notice
+that survived the wait.
+
+**2. The budget ran out after two.** `MAX_RESUME_RELOADS` was **2** — sized for a
+world where a reload needed three notices to earn, so six applicants had to fail
+before it was reached. On a policy that answers the notice where it appears, two
+is exhausted by the second applicant. It is now **12**, and it is deliberately no
+longer the binding constraint: the per-applicant bound and the fruitless breaker
+below both bite long before it. It remains the absolute ceiling.
+
+**3. "At last it was not even reloading" — and this is the worst of the three,
+because it was permanent.** 3.10.0 gave up on the whole job the moment a single
+reload recovered no resume, reasoning that a remedy which changed nothing has
+answered the question. One reload landing while a scan genuinely had not finished
+therefore disarmed the feature for **every applicant after it**, for the rest of
+the run, which is exactly the six profiles walked past with the notice on screen
+and nothing done. Replaced by `MAX_FRUITLESS_RESUME_RELOADS = 3`: the count
+climbs only on reloads that recover nothing and **resets to zero the moment any
+resume is read**, so it measures reloads that are not helping rather than reloads
+that have happened. A hopeless page now costs three reloads and stops — barely
+more than the old ceiling of two — while a page that keeps giving resumes up
+keeps its turn.
+
+**`recovered` is gone from the decision, and its removal is the point.** It was
+the *run's* count of resumes read, and a per-run counter cannot answer "are these
+reloads helping" across a reload, because the reload destroys the run holding it.
+It is now folded into the persisted `resumeReloadFruitless` streak at the moment
+a reload is paid for — the only place that survives the act it measures. The
+lease gained `resumeReloadKey`, `resumeReloadKeyCount` and `resumeReloadFruitless`
+for the same reason `resumeReloads` already lived there, and a test asserts all
+three survive `claimAutoRun` and `settleAutoRun`, because both rebuild the entry
+with a spread and a spread that dropped them would fail silently and only on a
+live page.
+
+**One key and one count, not a map.** Reloads for one applicant are consecutive
+by construction — a resumed run goes straight back to the people it still owes —
+and an unbounded map on a lease is a leak with a recruiter's applicant ids in it.
+
+**The spend is charged to the applicant the decision was made for**, which is
+load-bearing rather than tidy: charge it to the wrong key and this applicant's
+bound never climbs, and the one file that keeps scanning triggers a reload on
+every pass for ever. The existing permanent test that pins the reload to a paid
+budget was widened to pin the key as well.
+
+**THE END OF THE WALK IS EXEMPT FROM THE PER-APPLICANT BOUND**, deliberately.
+That reload is for everyone still owed rather than for one person, so charging it
+to whoever happened to be last would let a single stubborn file veto the reload
+the other twenty applicants needed. `planResumeRecovery` skips the bound when the
+phase is `finished`, and the caller sends no key.
+
+**A PERMANENT TEST AMENDED IN THE OPEN.** *"A quiet walk never reloads the page
+under the recruiter"* swept every streak below the limit; with a limit of 1 that
+sweep covers only zero. Its real guarantee — a walk that has met no notice at all
+must never reload the recruiter's page — is untouched and still asserted, now
+against every combination of owed, budget and fruitless count, and pinned so it
+cannot pass vacuously: the limit itself is asserted to be 1, and a streak of 1 is
+asserted to reload. *"A remedy that changed nothing does not get another turn"*
+keeps its guarantee and moves its threshold: one and two fruitless reloads now
+reload — that is the bug fix — and three gives up.
+
+**Nothing about `canReload` moved.** A hidden tab (rule 9), a Stop (rule 12) and
+a challenge (rule 10) still beat every trigger and all three bounds, still arrive
+as a `continue` carrying a reason, and still make the run report INTERRUPTED
+rather than settling COMPLETED — because a hidden tab is never a finished one,
+and a job settled COMPLETED is one `claimAutoRun` will not re-arm.
+
+**THE COST THIS RELEASE ACCEPTS, WRITTEN DOWN RATHER THAN DISCOVERED LATER.** A
+reload does not carry the walk's pager position — that ledger is built fresh per
+run and nothing persists it, which was already true in 3.10.0 and is simply
+reached more often now. Two things keep it from mattering much. `location.reload()`
+reloads the address as it stands, and opening a row puts that applicant's own
+`applicationId` in the address bar, so LinkedIn brings the run back to **that
+applicant and the pager page holding them** — which is exactly where the notice
+was seen. And a run landing back on page one re-walks nothing: already-collected
+rows are retired in bulk without being opened, so the cost is paging time, never
+a second collection. The case to watch on a live page is a pager that marks no
+current page in ARIA — `planPagerOrdinalStep` then assumes page one and presses
+two — which is a pre-existing property of the pager reader, not something this
+change introduces, and it is called out here because reloading on sight is what
+will find it first if it is real.
+
+**No new click (rule 5): a reload is not a control**, the nine remain nine, and
+the file still holds exactly one `location.reload()`, inside the recovery branch,
+after the INTERRUPTED report and after the budget is proven paid. No selector,
+schema, CSV column or permission was touched.
+
+**NO LIVE CLAIM (rule 20).** None of this has run against a live LinkedIn page;
+loading `dist/` in Chrome is the user's step.
+
 ## 3.10.0 — the notice asked for a refresh, and nothing ever gave it one
 
 TASK-0189. **"Scanning resume for viruses. Please refresh the page now."** —

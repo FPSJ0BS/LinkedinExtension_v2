@@ -20,7 +20,7 @@ const TabsCore: any = (globalThis as any).ProfileVaultTabs;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-25-react-v3.10.0";
+const BUILD_ID = "2026-08-25-react-v3.11.0";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -1861,9 +1861,14 @@ async function settleAutoRunFor(jobId: string, report: any): Promise<any> {
  * `autoRunFor` refuse one: an entry under a blank key would be read back by
  * every other job that has one.
  */
-async function resumeReloadFor(jobId: string, spend: boolean): Promise<any> {
+async function resumeReloadFor(
+  jobId: string,
+  spend: boolean,
+  applicantKey: string,
+  recovered: number
+): Promise<any> {
   const key = String(jobId || "").trim();
-  if (!key) return { ok: true, reloads: 0 };
+  if (!key) return { ok: true, reloads: 0, applicantReloads: 0, fruitless: 0 };
   const runs = await readAutoRuns();
   const entry = runs[key];
   /**
@@ -1885,19 +1890,29 @@ async function resumeReloadFor(jobId: string, spend: boolean): Promise<any> {
    * do not permit it.
    */
   if (!entry || typeof entry !== "object") {
-    return { ok: true, reloads: Number(Applicants.MAX_RESUME_RELOADS) || 2 };
+    // Every bound reported as already spent, not just the total: a caller that
+    // reads only one of them must not be able to find an allowance here.
+    return {
+      ok: true,
+      reloads: Number(Applicants.MAX_RESUME_RELOADS) || 12,
+      applicantReloads: Number(Applicants.MAX_APPLICANT_RESUME_RELOADS) || 2,
+      fruitless: Number(Applicants.MAX_FRUITLESS_RESUME_RELOADS) || 3
+    };
   }
-  const current = Number(entry.resumeReloads) || 0;
-  if (!spend) return { ok: true, reloads: current };
+  // The three counters this applicant's next reload is judged against. Read
+  // through the core so the "is this the same applicant" comparison is the same
+  // one `noteResumeReload` makes when it spends.
+  const current = Applicants.readResumeReloadState(entry, { applicantKey });
+  if (!spend) return { ok: true, ...current };
 
-  const noted = Applicants.noteResumeReload(entry, { now: nowIso() });
-  if (!noted.changed) return { ok: true, reloads: current };
+  const noted = Applicants.noteResumeReload(entry, { now: nowIso(), applicantKey, recovered });
+  if (!noted.changed) return { ok: true, ...current };
   runs[key] = noted.entry;
   // Persisted BEFORE the caller reloads, which is the whole point of the round
   // trip: the document that asked is about to stop existing, and its successor
   // reads this count to decide whether it may ask again.
   await chrome.storage.local.set({ [AUTO_RUN_KEY]: runs }).catch(() => undefined);
-  return { ok: true, reloads: Number(noted.entry.resumeReloads) || 0 };
+  return { ok: true, ...Applicants.readResumeReloadState(noted.entry, { applicantKey }) };
 }
 
 /**
@@ -2405,7 +2420,12 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     //
     // The worker decides nothing about *whether* to reload; it only keeps the
     // number the page cannot keep for itself.
-    return resumeReloadFor(String(message?.jobId || ""), message?.spend === true);
+    return resumeReloadFor(
+      String(message?.jobId || ""),
+      message?.spend === true,
+      String(message?.applicantKey || ""),
+      Number(message?.recovered) || 0
+    );
   }
 
   if (type === APPLICANT_MESSAGES.CLEAR) {

@@ -1,5 +1,115 @@
 # CHECKS.md
 
+## 3.11.0 — the reload arrives on the applicant that asked for it (TASK-0192)
+
+Executed in this environment on 2026-08-25. **Real results only.**
+
+### The suite
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | passed |
+| `npm run build` | Built Profile Vault React 3.11.0 into `dist` |
+| `npm test` | **682 tests, 0 fail** (678 at TASK-0191; this task amended 6 and added 4) |
+| `node scripts/check-doc-links.mjs` | Checked local links in 19 Markdown files |
+| `node scripts/validate-build.mjs` | Validated 31 build files, 4 React entry points, service-worker imports |
+
+### The policy, executed rather than reasoned about
+
+`planResumeRecovery` was called directly and its answers pasted here, because the
+three bounds interact and 3.10.0 shipped a comment that was wrong about exactly
+that kind of interaction:
+
+| Input | Answer |
+|---|---|
+| `{phase:"walking", streak:1, owed:1}` | `reload / page-stale` |
+| `{phase:"walking", streak:1, applicantReloads:2}` | `give-up / this applicant's reloads are spent` |
+| `{phase:"walking", streak:1, fruitless:3}` | `give-up / the last reloads recovered no resume` |
+| `{phase:"walking", streak:1, reloads:12}` | `give-up / reload-budget-spent` |
+
+### The lease, driven through a full persisted cycle
+
+`noteResumeReload` → `readResumeReloadState`, executed in sequence:
+
+| Step | `reloads` | `applicantReloads` | `fruitless` |
+|---|---|---|---|
+| spend for alice, recovered 0 | 1 | 1 | 1 |
+| spend for alice, recovered 0 | 2 | 2 | 2 |
+| same lease, read as bob | 2 | **0** | 2 |
+| spend for bob, recovered 3 | 3 | 1 | **0** |
+
+The third row is the one worth having: bob starts with his own full turn, so one
+stale file cannot silently disarm the remedy for the rest of the list. The fourth
+is the circuit breaker resetting on a page that is recovering.
+
+Carried through `claimAutoRun` and `settleAutoRun` unchanged — asserted, because
+both rebuild the entry with a spread and a spread that dropped these fields would
+fail silently and only on a live page.
+
+### A hopeless page, simulated end to end
+
+The full cycle was driven in a loop — plan, spend, come back, plan again — on a
+page where every applicant shows the notice and no reload ever recovers anything:
+
+**it terminates after 3 reloads**, stopped by `the last reloads recovered no
+resume`, having touched 2 applicants. Not 12. The ceiling is never approached,
+which is the whole safety argument for answering the notice on sight, and it is
+now a test rather than a claim.
+
+### The built artifact
+
+Checked in `dist/`, not in source:
+
+| Property | Result |
+|---|---|
+| `.click()` in `dist/applicants.js` | **9** — unchanged, no new click (rule 5) |
+| `location.reload()` | **1**, inside the recovery branch |
+| `location.assign` / `location.href =` | **0** |
+| `keyCode: 13` / `form.submit` / `requestSubmit` | **0** |
+| `RESUME_SCAN_STREAK_LIMIT` in `dist/src/applicants-core.js` | 1 |
+| `MAX_APPLICANT_RESUME_RELOADS` / `MAX_FRUITLESS_RESUME_RELOADS` / `MAX_RESUME_RELOADS` | 2 / 3 / 12 |
+| `dist/manifest.json` version | 3.11.0 |
+
+### One correction recorded rather than quietly dropped
+
+An earlier draft of this entry claimed the messaging-templates files had been
+lost from the working tree and restored from a checkpoint. They had not been
+lost: TASK-0192 was **aborted** at 13:24:23 with the reason "Rolled back at the
+user's request: messaging phase 1 never wanted", and that rollback removed them
+on purpose. Restoring them was a mistake and was reversed; they are parked in a
+git stash rather than deleted, and this release contains none of that work.
+
+### What was found while checking, that reading had missed
+
+- **The permanent click-budget test broke, and it was right to.** It pinned the
+  reload to a paid budget with a literal `readResumeReloadBudget(jobId, true)`,
+  which stopped matching once the spend gained arguments. It was restored and
+  **widened**: it now also pins the spend to `result.resumeRecovery.applicantKey`.
+  That is not decoration — charge the spend to the wrong key and this applicant's
+  bound never climbs, and the one file that keeps scanning triggers a reload on
+  every pass for ever.
+- **A junk *limit* had to fail in the opposite direction from a junk counter.** A
+  counter that cannot be read is "nothing has happened yet"; a bound that cannot
+  be read is a bound that has gone missing, and reading it as unlimited would
+  quietly delete the only thing standing between this feature and a page that
+  reloads for ever. Verified: every unreadable bound clamps to zero and spends
+  nothing.
+- **Three stale comments describing the old policy**, including the end-of-walk
+  block still calling itself "the gentler one" and explaining that it caught
+  resumes owed "never three in a row". With the streak at 1 that trigger is now
+  the *wider* of the two, not the gentler.
+
+### Not verified, and not claimed
+
+**Rule 20 stands.** None of this has run against a live LinkedIn page; loading
+`dist/` in Chrome is the user's step. In particular, whether LinkedIn's pager
+marks its current page in ARIA after a reload is unknown and is the thing most
+worth watching on the first live run — a reload does not carry the walk's pager
+position, and a pager that marks nothing makes the restarted run assume page one.
+That is a pre-existing property of the pager reader rather than something this
+change introduced, but answering the notice on sight is what will find it first
+if it is real.
+
 ## 3.10.0 — applicant messaging (TASK-0188, TASK-0190)
 
 Executed in this environment on 2026-08-25. **Real results only.**

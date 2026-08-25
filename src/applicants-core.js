@@ -3736,6 +3736,28 @@
        * budget: that is a new deliberate instruction, not a runaway.
        */
       resumeReloads: 0,
+      /**
+       * Which applicant the last reload was spent ON, and how many it has cost.
+       *
+       * The per-applicant bound is the thing that lets the page be reloaded the
+       * moment the notice appears without a still-scanning file sending it round
+       * for ever, so it has to survive the reload exactly as the job total does.
+       * One key and one count rather than a map: reloads for one applicant are
+       * consecutive by construction — the resumed run goes straight back to the
+       * people it still owes — and an unbounded map on a lease is a leak with a
+       * recruiter's applicant ids in it.
+       */
+      resumeReloadKey: "",
+      resumeReloadKeyCount: 0,
+      /**
+       * How many reloads IN A ROW have recovered no resume at all.
+       *
+       * Reset to zero by any reload that is followed by a resume actually being
+       * read, so it only ever climbs on a page that reloading is not helping.
+       * A per-run counter could not do this job: the reload destroys the run
+       * that would be holding it.
+       */
+      resumeReloadFruitless: 0,
       state: AUTO_RUN_STATE.RUNNING
     };
   }
@@ -3801,14 +3823,67 @@
    *
    * An entry written before 3.10.0 has no counter at all, which reads as zero and
    * is correct: it has never reloaded.
+   *
+   * **THREE COUNTERS NOW, NOT ONE**, because reloading on sight needs to know
+   * more than a total. `applicantKey` is the row key of the applicant this
+   * reload is being spent for, and `recovered` is how many resumes the run that
+   * is about to be destroyed managed to read:
+   *
+   *   - `resumeReloadKeyCount` continues while the key is the same applicant and
+   *     starts over the moment it is somebody else. That is what stops one
+   *     still-scanning file from looping, and it is why the key is stored beside
+   *     the count rather than the count alone.
+   *   - `resumeReloadFruitless` climbs when the run recovered nothing and resets
+   *     to zero when it recovered anything, so it measures reloads that are not
+   *     helping rather than reloads that have happened.
+   *
+   * An end-of-walk reload passes no key — it is for everyone still owed rather
+   * than for one person — which clears the key and its count rather than
+   * charging it to whoever happened to be last.
    */
-  function noteResumeReload(entry, { now = "" } = {}) {
+  function noteResumeReload(entry, { now = "", applicantKey = "", recovered = 0 } = {}) {
     if (!entry || typeof entry !== "object") return { changed: false, reason: "missing", entry };
     const spent = Math.max(0, Number(entry.resumeReloads) || 0) + 1;
+    const key = cleanText(applicantKey);
+    const sameApplicant = Boolean(key) && key === cleanText(entry.resumeReloadKey);
+    const forApplicant = sameApplicant
+      ? Math.max(0, Number(entry.resumeReloadKeyCount) || 0) + 1
+      : (key ? 1 : 0);
+    // Any resume read at all is proof the reloads are getting somewhere: a
+    // resumed run opens only the applicants it still OWES, so it cannot have
+    // read one by accident.
+    const fruitless = Math.max(0, Number(recovered) || 0) > 0
+      ? 0
+      : Math.max(0, Number(entry.resumeReloadFruitless) || 0) + 1;
     return {
       changed: true,
       reason: "reloaded",
-      entry: { ...entry, resumeReloads: spent, updatedAt: cleanText(now) }
+      entry: {
+        ...entry,
+        resumeReloads: spent,
+        resumeReloadKey: key,
+        resumeReloadKeyCount: forApplicant,
+        resumeReloadFruitless: fruitless,
+        updatedAt: cleanText(now)
+      }
+    };
+  }
+
+  /**
+   * How much of the resume-reload budget this lease has left, for one applicant.
+   *
+   * The read half of the pair above, kept here rather than in the worker so the
+   * "is this the same applicant" comparison is written once and cannot drift
+   * from the one `noteResumeReload` makes when it spends.
+   */
+  function readResumeReloadState(entry, { applicantKey = "" } = {}) {
+    const key = cleanText(applicantKey);
+    const source = entry && typeof entry === "object" ? entry : {};
+    const sameApplicant = Boolean(key) && key === cleanText(source.resumeReloadKey);
+    return {
+      reloads: Math.max(0, Number(source.resumeReloads) || 0),
+      applicantReloads: sameApplicant ? Math.max(0, Number(source.resumeReloadKeyCount) || 0) : 0,
+      fruitless: Math.max(0, Number(source.resumeReloadFruitless) || 0)
     };
   }
 
@@ -3915,8 +3990,8 @@
   }
 
   /**
-   * How many applicants in a row must meet the scan notice before the PAGE, and
-   * not the file, is the thing that is broken.
+   * How many applicants in a row must meet the scan notice before the page is
+   * reloaded. **One. The notice is answered where it appears.**
    *
    * **THE SIGNATURE THAT NAMES THE CAUSE.** Two live reports of this defect
    * share a shape that a per-file virus scan cannot produce. 3.9.1: "the first
@@ -3932,43 +4007,110 @@
    * by TASK-0180 never cleared it either: both stay on a document whose answer
    * is already decided. Only a reload changes it.
    *
-   * Three, not one. One notice is an ordinary per-file scan and is worth the
-   * cheap remedies first — it is the case the wait and the re-open exist for,
-   * and it usually clears. Three consecutive is not a coincidence on a list
-   * whose applicants uploaded at unrelated times. The cost of being wrong is
-   * bounded and self-repairing in both directions: too high spends resumes this
-   * run could have had, too low spends a reload, and every applicant passed over
-   * is recorded as still owed, so the reload goes back for all three anyway.
+   * **THREE BECAME ONE, AND THE USER WATCHED IT TO GET HERE.** 3.10.0 demanded
+   * three consecutive notices before reloading, on the reasoning that one notice
+   * is an ordinary per-file scan worth the cheap remedies first. Watching the
+   * live run says that reasoning bought nothing and cost the thing it was
+   * protecting: *"it never reloads on the same profile it occurs — the extension
+   * is reloading after the 2nd or 3rd, and at last it was not even reloading, it
+   * kept going through 6 profiles without even reloading."* Three separate
+   * failures in one sentence, and only the first is this constant:
+   *
+   *   1. **The reload never landed on the applicant that showed the notice.**
+   *      By the time the streak was earned the walk was two applicants past the
+   *      one the recruiter was looking at, so the remedy never visibly answered
+   *      the complaint even when it fired.
+   *   2. The budget was two, so a third notice could not be answered at all.
+   *      See `MAX_RESUME_RELOADS`.
+   *   3. One reload that recovered nothing ended recovery for the whole job,
+   *      permanently — which is what "6 profiles without even reloading" is.
+   *      See `MAX_FRUITLESS_RESUME_RELOADS`.
+   *
+   * **What replaced the streak as the loop-breaker is `MAX_APPLICANT_RESUME_RELOADS`,
+   * and that swap is the whole design.** The streak was never really about
+   * evidence; it was a crude way of making sure one still-scanning file could
+   * not send the page round and round. Bounding the reloads *per applicant* does
+   * that job exactly, and does it without making the innocent applicant in front
+   * of the recruiter wait for two more people to fail before anything happens.
+   * The cheap remedies are not skipped either — `waitForResumeScan` still waits
+   * out a genuine per-file scan before any of this is consulted, so what reaches
+   * here is a notice that survived the wait.
    */
-  const RESUME_SCAN_STREAK_LIMIT = 3;
+  const RESUME_SCAN_STREAK_LIMIT = 1;
+
+  /**
+   * How many reloads ONE applicant may cost before the walk moves past them.
+   *
+   * **This is the bound that makes reload-on-sight safe, and it is the one the
+   * streak used to stand in for.** The failure a streak of three was really
+   * guarding against is not "we reloaded too eagerly", it is *a loop*: a file
+   * that is genuinely still being scanned shows the notice, the page reloads,
+   * the run comes back to that same applicant, the file is still being scanned,
+   * and the page reloads again — forever, because the trigger is satisfied every
+   * time round. Counting the reloads against the applicant closes that directly.
+   * Two: the first covers a stale attachment session, the second covers a scan
+   * that really had not finished when the first one landed.
+   *
+   * Once spent, the applicant is not abandoned — they stay in `resumesOwed`,
+   * `hasPendingResume` keeps them out of the collected index, and the walk
+   * carries on to people it can still help. The next run comes back for them.
+   *
+   * Persisted on the lease with the job total, and keyed by the applicant's own
+   * row key, because the reload destroys the document that would otherwise be
+   * counting.
+   */
+  const MAX_APPLICANT_RESUME_RELOADS = 2;
+
+  /**
+   * How many reloads in a row may recover NOTHING before the job stops trying.
+   *
+   * **THE CIRCUIT BREAKER, and it replaces a strictly worse one.** Until now a
+   * single reload that recovered no resume ended recovery for the entire job,
+   * on the reasoning that a remedy which changed nothing has answered the
+   * question. On a page that reloads on sight that rule is far too sharp, and it
+   * is the direct cause of the third complaint above — *"at last it was not even
+   * reloading, it kept going through 6 profiles"*. One unlucky reload, landing
+   * while a scan genuinely had not finished, disarmed the feature for every
+   * applicant after it.
+   *
+   * Three consecutive is a real answer rather than one sample: a page that is
+   * recovering resets this to zero every time it gives one up, so the count only
+   * ever climbs on a page that reload after reload produces nothing. That bounds
+   * the hopeless case at three reloads — barely more than the old ceiling of two
+   * — while leaving a page that IS recovering free to keep going.
+   */
+  const MAX_FRUITLESS_RESUME_RELOADS = 3;
 
   /**
    * How many times one job may reload the hiring page chasing resumes.
    *
    * A reload is the strongest thing this extension does to a page the recruiter
    * is sitting in front of, and an unbounded one is the classic way to turn a
-   * transient failure into a browser that will not stop moving.
+   * transient failure into a browser that will not stop moving. So there is
+   * still a ceiling, and it is still absolute.
    *
-   * **The second reload is EARNED, not granted, and that is the interesting
-   * part.** Driving the whole cycle rather than reasoning about it showed the
-   * two bounds here are not independent: the progress rule below gives up as
-   * soon as a reload recovers nothing, so a page that does not improve stops
-   * after ONE reload and never reaches this ceiling. The budget is only ever
-   * spent in full by a page that IS recovering and simply has more to give —
-   * some resumes came back, some are still owed.
+   * **TWO BECAME TWELVE, because two was a ceiling on the wrong thing.** When a
+   * reload could only be triggered by three-in-a-row, a budget of two meant six
+   * applicants had to fail before it ran out, and reaching it was rare. Now that
+   * the notice is answered where it appears, two would be exhausted by the
+   * second applicant, and every applicant after that would be walked past with
+   * the notice on screen and nothing done about it — which is precisely the
+   * *"it kept going through 6 profiles without even reloading"* the recruiter
+   * reported, made worse rather than better by the more responsive trigger.
    *
-   * That is the right way round. A page that came back exactly as broken has
-   * answered the question, and asking it twice more is how a bounded remedy
-   * still ends up feeling like a loop to the person watching it. A page that
-   * gave up half its resumes has earned another turn. So the effective cost is
-   * one reload in the hopeless case and two in the improving one, which is the
-   * opposite of what a flat budget would spend.
+   * **What actually bounds this now is not the ceiling.** Two other rules bite
+   * long before twelve: `MAX_APPLICANT_RESUME_RELOADS` stops one applicant from
+   * looping, and `MAX_FRUITLESS_RESUME_RELOADS` stops a page that is recovering
+   * nothing after three tries. A hopeless page therefore costs three reloads,
+   * not twelve; the ceiling is only ever approached by a page that keeps giving
+   * resumes up and keeps going stale again, which is a page worth reloading.
+   * Twelve is the backstop for the case none of that anticipated.
    *
    * Persisted on the auto-run entry rather than held in the run, because the
    * reload destroys the document and every counter in it. A budget that resets
    * on the thing it is bounding is not a budget.
    */
-  const MAX_RESUME_RELOADS = 2;
+  const MAX_RESUME_RELOADS = 12;
 
   const RESUME_RECOVERY = Object.freeze({
     CONTINUE: "continue",
@@ -3979,54 +4121,76 @@
   /**
    * What to do about resumes LinkedIn was still virus-scanning.
    *
-   * **THE LIVE COMPLAINT, twice: "Scanning resume for viruses. Please refresh
-   * the page now."** 3.9.1 taught the run to recognise the notice, wait, and
-   * record `NOT_ATTEMPTED` rather than a wrong `UNAVAILABLE`. TASK-0183 taught
-   * it to come back — `hasPendingResume` keeps those applicants out of the collected
-   * index so a later run returns for them. Both were right and neither is
-   * touched here. **What was missing is that nothing ever did what the notice
-   * asks.** The run waited five seconds on a document whose answer was already
-   * decided, re-opened the panel on that same document, and then told the
-   * recruiter to refresh and run again by hand — which is the one step a person
-   * has to be watching to take, and the runs that hit this are the long
-   * unattended ones.
+   * **THE LIVE COMPLAINT, three times now: "Scanning resume for viruses. Please
+   * refresh the page now."** 3.9.1 taught the run to recognise the notice, wait,
+   * and record `NOT_ATTEMPTED` rather than a wrong `UNAVAILABLE`. TASK-0183
+   * taught it to come back — `hasPendingResume` keeps those applicants out of
+   * the collected index so a later run returns for them. 3.10.0 taught it to
+   * reload the page itself, which is what the notice actually asks for. All
+   * three were right and none of them is undone here.
    *
-   * So the reload becomes the extension's, and this decides when.
+   * **WHAT THIS RELEASE CHANGES IS WHEN, AND IT REVERSES 3.10.0'S CENTRAL
+   * JUDGEMENT.** That release considered reloading on sight, named it the
+   * obvious reading of the notice, and rejected it for two costs: on a stale
+   * page every applicant shows the notice, so it is one reload per applicant
+   * rather than one; and on a file whose scan genuinely has not finished, an
+   * immediate reload returns to the same notice and asks for another, which is a
+   * loop with a page reload in it. It chose a streak of three instead.
    *
-   * **WHY NOT RELOAD THE MOMENT THE NOTICE APPEARS**, which is the obvious
-   * reading of the notice and was the first design. Two costs, both real. On a
-   * stale page every applicant shows the notice, so it is not one reload, it is
-   * one per applicant — twenty-five on the reported list — and each throws away
-   * the walk's position in the list and its page in the pager. And when the scan
-   * IS genuinely still running on one file, an immediate reload returns to the
-   * same notice and asks for another, which is a loop with a page reload in it.
-   * Every trigger here is therefore either **evidence the document is at fault**
-   * (the streak) or **the end of the walk**, by which time minutes have passed
-   * and the cheap remedies have all had their turn.
+   * Then the recruiter watched it run: *"it never reloads on the same profile it
+   * occurs. The extension is reloading after the 2nd or 3rd, and at last it was
+   * not even reloading, it kept going through 6 profiles without even
+   * reloading."*
+   *
+   * The first cost was real and was accepted deliberately — a page that is
+   * genuinely stale SHOULD be reloaded, and being told about it two applicants
+   * late helps nobody. The second cost was real and is now paid for properly
+   * rather than avoided: **the loop is closed by bounding reloads per applicant
+   * (`applicantReloads`), which is exactly the failure the streak was standing
+   * in for, and closes it without making two innocent applicants fail first.**
+   * A still-scanning file costs that applicant its own two reloads and then the
+   * walk moves past them, still owed, for the next run to collect.
+   *
+   * **THREE BOUNDS NOW, EACH ANSWERING A DIFFERENT WAY THIS COULD RUN AWAY**,
+   * and the ceiling is deliberately the least important of them:
+   *
+   *   - `applicantReloads` vs `maxApplicantReloads` — one applicant may not send
+   *     the page round for ever. The loop-breaker.
+   *   - `fruitless` vs `maxFruitless` — a page that reloads and recovers nothing,
+   *     three times running, has answered the question. The circuit breaker,
+   *     and it replaces the old rule that gave up after a single fruitless
+   *     reload; that rule is what disarmed the feature for the last six
+   *     applicants of the reported run.
+   *   - `reloads` vs `maxReloads` — the absolute ceiling, which the two bounds
+   *     above should mean is never reached.
    *
    * `canReload` is the caller's, and it carries the rules this file cannot see:
    * a hidden tab (rule 9), a Stop (rule 12), a challenge (rule 10). Passed in
    * rather than assumed, so a refusal there is visible in the verdict instead of
-   * silently skipping the whole policy.
+   * silently skipping the whole policy. It outranks all three bounds, because a
+   * page that may not be reloaded may not be reloaded for any reason.
    *
-   * `recovered` is consulted **only after a reload has already been spent**, and
-   * it is exact there: a resumed run opens only the applicants it still owes —
-   * everyone finished is retired in bulk from the collected index — so any
-   * resume it reads at all is a resume the reload recovered. Zero means the
-   * reload changed nothing, and a remedy that changed nothing does not earn a
-   * second turn merely because the budget would allow it.
+   * **`recovered` is gone from the decision and that is not an oversight.** It
+   * was this run's own count of resumes read, and a per-run counter cannot say
+   * whether reloads are helping *across* reloads — the reload destroys the run
+   * that was counting. It is now folded into the persisted `fruitless` streak at
+   * the moment a reload is paid for, which is the only place that survives the
+   * act it is measuring.
    *
    * No click is added by any of this (rule 5): a reload is not a control, and
-   * the eight remain eight.
+   * the nine remain nine.
    */
   function planResumeRecovery({
     phase = "walking",
     owed = 0,
     streak = 0,
     reloads = 0,
-    recovered = 0,
+    applicantReloads = 0,
+    fruitless = 0,
     canReload = true,
     maxReloads = MAX_RESUME_RELOADS,
+    maxApplicantReloads = MAX_APPLICANT_RESUME_RELOADS,
+    maxFruitless = MAX_FRUITLESS_RESUME_RELOADS,
     streakLimit = RESUME_SCAN_STREAK_LIMIT
   } = {}) {
     const count = (value) => Math.max(0, Number(value) || 0);
@@ -4041,9 +4205,24 @@
     if (!wanted) return verdict(RESUME_RECOVERY.CONTINUE, "");
 
     if (!canReload) return verdict(RESUME_RECOVERY.CONTINUE, "the page may not be reloaded right now");
+
+    /**
+     * The per-applicant bound is asked FIRST, and only mid-walk.
+     *
+     * First, because it is the most specific answer available: "this person's
+     * file is not coming back however often the page is reloaded" is a better
+     * reason to stop than "the job is out of budget", and the run prints the
+     * reason it was given. Only mid-walk, because at the end of the walk there
+     * is no single applicant the reload is FOR — it is for everyone still owed,
+     * and charging that to whichever applicant happened to be last would let one
+     * stubborn file veto a reload the other twenty needed.
+     */
+    if (!finished && count(applicantReloads) >= count(maxApplicantReloads)) {
+      return verdict(RESUME_RECOVERY.GIVE_UP, "this applicant's reloads are spent");
+    }
     if (spent >= count(maxReloads)) return verdict(RESUME_RECOVERY.GIVE_UP, "reload-budget-spent");
-    if (spent > 0 && count(recovered) === 0) {
-      return verdict(RESUME_RECOVERY.GIVE_UP, "the last reload recovered no resume");
+    if (count(fruitless) >= count(maxFruitless)) {
+      return verdict(RESUME_RECOVERY.GIVE_UP, "the last reloads recovered no resume");
     }
     return verdict(RESUME_RECOVERY.RELOAD, finished ? "resumes-still-owed" : "page-stale");
   }
@@ -4838,14 +5017,15 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, hasPendingResume,
     isFullyCollectedApplicant, createCollectedIndex,
-    RESUME_SCAN_STREAK_LIMIT, MAX_RESUME_RELOADS, RESUME_RECOVERY, planResumeRecovery,
+    RESUME_SCAN_STREAK_LIMIT, MAX_RESUME_RELOADS, MAX_APPLICANT_RESUME_RELOADS,
+    MAX_FRUITLESS_RESUME_RELOADS, RESUME_RECOVERY, planResumeRecovery,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop, CONCLUSIVE_PAGER_REASONS, isConclusivePagerReason,
     pagerSearchReason,
     MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
-    AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun, noteResumeReload,
+    AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun, noteResumeReload, readResumeReloadState,
     // capturing a layout nobody has seen, with nobody's details in it
     CAPTURE_SCHEMA_VERSION, CAPTURE_LINK_RELATIONS, createCapturePseudonyms,
     captureLinkRelation, sanitizeCaptureText, buildApplicantCapture,

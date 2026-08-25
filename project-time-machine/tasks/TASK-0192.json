@@ -1,0 +1,18 @@
+{
+  "schema": 2,
+  "id": "TASK-0192",
+  "name": "Messaging phase 1: a templates page in the dashboard, wired to the dormant template store",
+  "request": "Messaging phase 1: a templates page in the dashboard, wired to the dormant template store",
+  "type": "change",
+  "status": "aborted",
+  "startedAt": "2026-08-25T13:06:59.947Z",
+  "completedAt": null,
+  "startCommit": "fd97cf348a3dfc924cee5b40b1f0c20f2c7301eb",
+  "commit": null,
+  "gitRef": "task/TASK-0192",
+  "files": [],
+  "checks": [],
+  "result": null,
+  "abortedAt": "2026-08-25T13:24:23.813Z",
+  "abortReason": "Rolled back at the user's request: messaging phase 1 never wanted"
+}
