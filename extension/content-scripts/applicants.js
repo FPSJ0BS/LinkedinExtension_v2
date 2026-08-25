@@ -3742,7 +3742,14 @@
       diagnostics.resume.descriptor = `http-${response.status}`;
       return url;
     }
-    if (!/json/i.test(String(response.headers.get("content-type") || ""))) {
+    // **The server states the type, and until 3.9.3 we discarded it.** This
+    // header was fetched, tested for the single word "json", and dropped - so
+    // the one authoritative statement of what the file IS never reached the
+    // record, and a LinkedIn media id (no extension in the path, no filename
+    // in the viewer) saved as a bare stem that will not open by double-click.
+    const contentType = String(response.headers.get("content-type") || "");
+    if (contentType) diagnostics.resume.contentType = contentType;
+    if (!/json/i.test(contentType)) {
       diagnostics.resume.descriptor = "document";
       return url;
     }
@@ -4047,7 +4054,13 @@
     // in them at all.
     const card = details.filename ? { filename: "", fileType: "" } : readDocumentCardDetails(panel);
     const filename = details.filename || card.filename || fileNameFrom(url);
-    const fileType = details.fileType || card.fileType || fileTypeFrom(url, filename);
+    // ...and the media type the server stated, LAST. A name the page actually
+    // painted is stronger evidence than a header, so all three observed
+    // sources still win ahead of it; this only speaks when they said nothing,
+    // which on a LinkedIn media id is every time. It cannot invent a type: an
+    // unmapped media type yields "" and the file keeps no suffix.
+    const fileType = details.fileType || card.fileType || fileTypeFrom(url, filename)
+      || (Applicants.resumeExtensionForMediaType(diagnostics.resume.contentType) ? diagnostics.resume.contentType : "");
 
     // Is this still the applicant we were asked for?
     //

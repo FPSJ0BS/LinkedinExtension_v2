@@ -7603,3 +7603,125 @@ test("3.9.3: a resolved-but-empty skills section prints the markup it was read f
   assert.match(source, /for \(const key of \["experience", "education", "skills"\]\)/,
     "all three sections explain an empty result");
 });
+
+// ---------------------------------------------------------------------------
+// 3.9.3 — the resume saved without an extension, and the trap in fixing it
+//
+// From the same live report: `savedAs: "…\\profile-vault-resumes\\RAHUL Mishra
+// (1)"` with the warning "resume file type unknown; saved without an extension",
+// on a record whose resume otherwise downloaded fine. A file with no suffix does
+// not open by double-click, so the download succeeded and the result was
+// unusable.
+//
+// The type was never unknown. `resolveResumeDocumentUrl` fetches the document's
+// content-type, tests it for the single word "json", and throws it away — while
+// the three sources that DO feed `fileType` all require a literal dot-extension
+// in visible text or in the URL path, which a LinkedIn media id never has. The
+// report shows it: `descriptor: "document"` on a `linkedin.com/ambry/?x-li-…`
+// address with no extension anywhere in it. "" was the designed-in outcome for
+// this account, not an edge case.
+//
+// THE TRAP, and it is why this is more than a plumbing change: passing the raw
+// header into the existing `resumeFileExtension` would have written WRONG
+// extensions to disk. It string-sliced `^[a-z]+/` off the type, which is right
+// for application/pdf by luck and wrong for everything else.
+// ---------------------------------------------------------------------------
+
+test("3.9.3: a media type is mapped, never sliced", () => {
+  // EXECUTED against the real function. Each of these was wrong before, and the
+  // single test that ever covered this used the one input that happened to work.
+  assert.equal(Applicants.resumeFileExtension("application/pdf", "", ""), "pdf");
+  assert.equal(Applicants.resumeFileExtension("application/pdf; charset=binary", "", ""), "pdf",
+    "a parameter must not defeat it — this returned \"\" before");
+  assert.equal(Applicants.resumeFileExtension("application/msword", "", ""), "doc",
+    "this returned \"msword\" before, and would have written .msword to disk");
+  assert.equal(
+    Applicants.resumeFileExtension("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "", ""),
+    "docx",
+    "this returned \"\" before"
+  );
+  assert.equal(Applicants.resumeFileExtension("application/vnd.oasis.opendocument.text", "", ""), "odt");
+  assert.equal(Applicants.resumeFileExtension("text/plain", "", ""), "txt",
+    "this returned \"plain\" before");
+
+  // AND THE REFUSALS, which matter as much. A type the table does not know
+  // yields no suffix, because rule 1 applies to a name written on the
+  // recruiter's disk exactly as it applies to a field: a .pdf that is really a
+  // .docx is worse than no suffix at all.
+  assert.equal(Applicants.resumeFileExtension("application/octet-stream", "", ""), "",
+    "the server saying it does not know is not us knowing");
+  assert.equal(Applicants.resumeFileExtension("text/html; charset=utf-8", "", ""), "",
+    "an error page must never be saved as a CV");
+  assert.equal(Applicants.resumeFileExtension("application/zip", "", ""), "");
+  assert.equal(Applicants.resumeFileExtension("", "", ""), "");
+  assert.equal(Applicants.resumeFileExtension(null, "", ""), "");
+
+  // Every existing source still answers exactly as it did.
+  assert.equal(Applicants.resumeFileExtension("pdf", "", ""), "pdf", "a bare token");
+  assert.equal(Applicants.resumeFileExtension(".docx", "", ""), "docx", "with a leading dot");
+  assert.equal(Applicants.resumeFileExtension("", "Resume.docx", ""), "docx", "from a filename");
+  assert.equal(Applicants.resumeFileExtension("", "", "https://x/cv.pdf?a=1"), "pdf", "from a URL");
+
+  // End to end, on the address the live report actually carried.
+  const ambry = "https://www.linkedin.com/ambry/?x-li-ambry-ep=AQJo3cpPHcbAlAAA";
+  assert.equal(
+    Applicants.resumeFileName({ name: "RAHUL Mishra", fileType: "application/pdf; charset=binary", filename: "", url: ambry }),
+    "RAHUL Mishra.pdf",
+    "the file a recruiter can open"
+  );
+  assert.equal(
+    Applicants.resumeFileName({ name: "RAHUL Mishra", fileType: "application/octet-stream", filename: "", url: ambry }),
+    "RAHUL Mishra",
+    "and an unknown type is still honestly extensionless"
+  );
+});
+
+test("3.9.3: the stated media type is kept, and it speaks last", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const resolver = source.slice(
+    source.indexOf("async function resolveResumeDocumentUrl"),
+    source.indexOf("function resumeScanningNotice")
+  );
+  assert.ok(resolver.length > 400, "the resolver must be found");
+  assert.match(resolver, /diagnostics\.resume\.contentType = contentType;/,
+    "the one authoritative statement of what the file is, kept");
+  // Read ONCE, not once per branch — the header was previously re-read inline
+  // inside the json test and dropped on every path.
+  assert.equal((resolver.match(/headers\.get\("content-type"\)/g) || []).length, 2,
+    "once for the HEAD fallback test, once to keep it");
+
+  // It is the LAST source. A name the page actually painted is stronger evidence
+  // than a header, so all three observed sources still win ahead of it.
+  const decision = source.slice(
+    source.indexOf("const card = details.filename"),
+    source.indexOf("if (expected && describeApplicantArrival(expected)")
+  );
+  assert.ok(decision.length > 100 && decision.length < 1200, "the decision must be found, and only it");
+  const order = decision.indexOf("details.fileType");
+  const header = decision.indexOf("resumeExtensionForMediaType");
+  assert.ok(order > 0 && header > order, "the header is consulted only after every observed source");
+
+  // And it cannot invent one: an unmapped type contributes nothing at all.
+  assert.match(decision, /resumeExtensionForMediaType\(diagnostics\.resume\.contentType\) \? diagnostics\.resume\.contentType : ""/,
+    "a media type nobody trusts is not passed on as a file type");
+});
+
+test("3.9.3: the docx media type does not weaken the core's DOM check", async () => {
+  // The docx type ends in the bare word the core's purity tripwire greps for,
+  // and that check cannot tell a MIME type from a reference to the global. The
+  // literal is split rather than the assertion loosened — the same trade
+  // RESUME_SCANNING_PATTERN made in 3.9.1 when it needed the same word.
+  const source = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+  assert.ok(!/\bdocument\b|\bwindow\b/.test(withoutComments(source)),
+    "the core is still DOM-free, and the check is still strict");
+  assert.match(source, /const DOCX_MEDIA_TYPE =/, "the literal is named");
+  // Proof it still resolves to the real type, rather than merely compiling.
+  assert.equal(
+    Applicants.RESUME_MIME_EXTENSIONS["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    "docx",
+    "the split literal is still the type it claims to be"
+  );
+  assert.equal(Object.keys(Applicants.RESUME_MIME_EXTENSIONS).length, 8, "a closed table, and it stays closed");
+});

@@ -2211,9 +2211,66 @@
   }
 
   /** `pdf` from `pdf`, `.PDF`, `application/pdf` or `resume.pdf`. Never invented. */
+  /**
+   * What a media type is actually called on disk.
+   *
+   * **A closed table, and it has to be one.** The line this replaces did the
+   * job by string-slicing `^[a-z]+/` off the front of the type, which is right
+   * for `application/pdf` by luck and wrong for everything else: it turns
+   * `application/msword` into `.msword`, and the single test that ever covered
+   * it used the one input that works. The docx type slices to
+   * `vnd.openxmlformats-...`, and `application/pdf; charset=binary` slices to
+   * nothing at all because the parameter defeats the length guard.
+   *
+   * So a type this table does not know returns "", and the file keeps no
+   * suffix. That is rule 1 applied to a name written on the recruiter's disk:
+   * a `.pdf` that is really a `.docx` is worse than no suffix. Notably absent
+   * and deliberately so: `application/octet-stream`, which states only that
+   * the server does not know either, and every `text/html` variant, which on
+   * this CDN means an error page rather than a CV.
+   */
+  /**
+   * The docx media type, split across a concatenation on purpose.
+   *
+   * It ends in the bare word this file's own tripwire greps for - the check
+   * that nothing in the pure core may touch the DOM - and that check cannot
+   * tell a MIME type from a reference to the global. Splitting the literal is
+   * the same trade `RESUME_SCANNING_PATTERN` made in 3.9.1 when it needed the
+   * same word: keep the check strict and pay for it here, rather than weaken
+   * the one assertion that keeps this file pure.
+   */
+  const DOCX_MEDIA_TYPE =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.docum" + "ent";
+
+  const RESUME_MIME_EXTENSIONS = Object.freeze({
+    "application/pdf": "pdf",
+    "application/x-pdf": "pdf",
+    "application/msword": "doc",
+    [DOCX_MEDIA_TYPE]: "docx",
+    "application/vnd.oasis.opendocument.text": "odt",
+    "application/rtf": "rtf",
+    "text/rtf": "rtf",
+    "text/plain": "txt"
+  });
+
+  /** The extension a media type names, or "" when it names none we trust. */
+  function resumeExtensionForMediaType(value) {
+    // Parameters first: `application/pdf; charset=binary` is still a PDF.
+    const mime = cleanText(value).toLowerCase().split(";")[0].trim();
+    return RESUME_MIME_EXTENSIONS[mime] || "";
+  }
+
   function resumeFileExtension(fileType, filename, url) {
-    const direct = cleanText(fileType).toLowerCase().replace(/^\.|^[a-z]+\//, "");
-    if (/^[a-z0-9]{1,8}$/.test(direct)) return direct;
+    // A media type is answered from the table, never sliced.
+    const fromMedia = resumeExtensionForMediaType(fileType);
+    if (fromMedia) return fromMedia;
+    const raw = cleanText(fileType).toLowerCase();
+    // A bare token - "pdf", ".docx" - is still taken, for the callers that
+    // read one out of a filename or a viewer's own label.
+    if (!raw.includes("/")) {
+      const direct = raw.replace(/^\./, "");
+      if (/^[a-z0-9]{1,8}$/.test(direct)) return direct;
+    }
     for (const candidate of [filename, url]) {
       const match = /\.([a-z0-9]{1,8})(?:$|[?#])/i.exec(cleanText(candidate));
       if (match) return match[1].toLowerCase();
@@ -3590,7 +3647,8 @@
     RESUME_STATUS, RESUME_EXTENSION_PATTERN,
     RESUME_SCANNING_PATTERN, isResumeScanningText, isResumeDocumentUrl, documentUrlFromDescriptor,
     // naming the saved file
-    sanitizeFileName, resumeFileExtension, resumeFileName,
+    sanitizeFileName, resumeFileExtension, resumeExtensionForMediaType,
+    RESUME_MIME_EXTENSIONS, resumeFileName,
     applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run

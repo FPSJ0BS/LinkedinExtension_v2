@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "TASK-0175",
+  "name": "Resume saves without an extension though the server states its type",
+  "request": "Resume saves without an extension though the server states its type",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:13:43.868Z",
+  "completedAt": "2026-08-25T08:17:11.785Z",
+  "startCommit": "49a9cece96e30ef4613a358ca863deb3bf61c82a",
+  "gitRef": "task/TASK-0175",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 561 tests passed / 0 failed (558 before), docs:check 18 files, validate 31 build files",
+    "executed the real resumeFileExtension and resumeFileName over every media type in the table plus octet-stream, text/html, zip, empty and null"
+  ],
+  "result": "TASK-0175: the resume downloaded and then would not open, because it was saved with no extension. From the same live report: savedAs 'RAHUL Mishra (1)' with the warning 'resume file type unknown; saved without an extension', on a record whose resume otherwise downloaded fine - so the download succeeded and the result was unusable. THE TYPE WAS NEVER UNKNOWN. resolveResumeDocumentUrl fetches the document's content-type, tests it for the single word 'json', and throws it away, while the three sources that DO feed fileType all require a literal dot-extension in visible text or in the URL path - which a LinkedIn media id never has. The report proves it: descriptor 'document' on a linkedin.com/ambry/?x-li-ambry-ep= address with no extension anywhere in it. Empty was the designed-in outcome for this account, not an edge case. THE TRAP, and it is why this is more than plumbing: passing the raw header into the existing resumeFileExtension would have written WRONG extensions to disk. That function did the job by string-slicing ^[a-z]+/ off the front of the type, which is right for application/pdf by luck and wrong for everything else - application/msword became .msword, the docx type sliced to vnd.openxmlformats-... and yielded nothing, 'application/pdf; charset=binary' yielded nothing because the parameter defeated the length guard, and text/plain became .plain. The one test that ever covered this used the single input that happens to work. So a CLOSED TABLE, checked by execution against the real function: pdf, x-pdf, msword, the docx type, opendocument text, rtf both ways and text/plain, with parameters stripped first. A type the table does not know returns empty and the file keeps no suffix - rule 1 applied to a name written on the recruiter's disk, because a .pdf that is really a .docx is worse than no suffix. Deliberately absent: application/octet-stream, which states only that the server does not know either, and every text/html variant, which on this CDN means an error page rather than a CV. Every existing source still answers exactly as it did - a bare token, a leading dot, a filename, a URL - and that is asserted rather than assumed. THE HEADER SPEAKS LAST. All three observed sources still win ahead of it, because a name the page actually painted is stronger evidence than a header; it only speaks when they said nothing, which on a media id is every time. And it cannot invent one: an unmapped media type contributes the empty string rather than being passed on as a file type. End to end on the address the report actually carried, 'application/pdf; charset=binary' now produces 'RAHUL Mishra.pdf' and 'application/octet-stream' still produces 'RAHUL Mishra' with no suffix. ONE OBSTACLE WORTH RECORDING: the docx media type ends in the bare word the core's own purity tripwire greps for, and that check cannot tell a MIME type from a reference to the global. The literal is split across a concatenation and named DOCX_MEDIA_TYPE rather than the assertion being loosened - the same trade RESUME_SCANNING_PATTERN made in 3.9.1 when it needed the same word - and a test proves the split literal still resolves to the real type rather than merely compiling. No new click, no new resume status, no CSV or table column, no permission. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}
