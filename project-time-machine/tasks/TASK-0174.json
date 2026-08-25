@@ -1,0 +1,27 @@
+{
+  "schema": 2,
+  "id": "TASK-0174",
+  "name": "Expanders never run on a list run, so Education saves one of two",
+  "request": "Expanders never run on a list run, so Education saves one of two",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:09:30.491Z",
+  "completedAt": "2026-08-25T08:13:29.590Z",
+  "startCommit": "57c31a648860328b367e322382c8e6263a7d7bec",
+  "gitRef": "task/TASK-0174",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 558 tests passed / 0 failed (555 before), docs:check 18 files, validate 31 build files",
+    "read docs/applicant-collector-speed-guide.md before changing this, as CLAUDE.md requires: its main rule is keep all current data collection working and it lists Education; nothing in it mandates expand:false"
+  ],
+  "result": "TASK-0174: the section expander never ran on a whole-job run, so Education saved one entry of two. THE EVIDENCE IS THE LIVE REPORT, and it is the plainest reading in the file: diagnostics.expansions was ABSENT. That object is written on the FIRST line of expandCollapsedSections, unconditionally, so its absence proves the function was never called - and the same report shows the cost, education: 1 from a panel whose own captured markup carries two entries, the second <li class='... visually-hidden'> waiting behind 'Show 2 more educations'. THE CAUSE was one frozen literal: VISIBLE_ONLY_OPTIONS = { expand: false }, passed by the list run for every applicant of every job, and because that one flag reaches BOTH expansion passes through a single shared budget it switched off the whole thing. The reasoning behind it was sound - up to eight clicks per applicant on a walk that is already the slow part - but the price was never measured against what it cost, and what it cost was the collapsed half of Education, Experience and Skills. Experience is the sole source of current_role, current_company and total_experience, the three columns CHECKS.md has recorded as empty for four consecutive releases. Turning it off saved a click and lost the data the click was for, which is the wrong side of the speed guide's own main rule - keep all current data collection working - and that rule names Education explicitly. Read the guide before changing this, as CLAUDE.md requires; it says nothing that mandates expand:false. THE FIX BOUNDS IT RATHER THAN REFUSING IT. createExpansionBudget now takes a limit, the loop reads budget.limit, and a list run gets LIST_RUN_EXPANSIONS = 4 while a single collection keeps MAX_EXPANSIONS = 8: a recruiter collecting one applicant will wait for everything, a run walking six hundred rows pays it six hundred times. Four covers the three sections a panel actually collapses with one spare. The ordinary cost on the captured layout is one click and about a third of a second; the worst case is bounded by waitForDomQuiet(280, 2000) per click. Still ONE budget per applicant shared by both passes, so the bound is on the applicant and not on a pass, and a caller that does set expand:false still gets a null budget. TWO SILENT FAILURES IN THE SAME FUNCTION, both confirmed by the trace and both fixed here because the diagnostics are now the instrument everything else is being answered with. (a) An exhausted budget said nothing, so a panel whose expanders were never REACHED looked exactly like a panel that had none - the difference between 'this applicant has one degree' and 'we stopped looking', and rule 1 says a blank must not be passed off as a fact. diagnostics.expansions.exhausted is recorded and declared, with the limit it was measured against beside it. (b) The refusal counter saw only verdict.forbidden and re-counted the same controls on every outer pass, so it both inflated and hid: navigates-away and overflow-menu-not-a-disclosure, the two verdicts 3.9.1 added and the two worth reading, never appeared at all. It is a reason tally now, deduplicated per element across every pass. AND skills joined experience and education in the resolved-but-empty markup dump, so 'skills: 0' is explainable from a report for the first time - the same discipline, applied to the third section a recruiter actually reads. NO NEW CLICK SITE: still exactly eight, still the DISCLOSURE allowlist, still proven inside the panel, still one press per control. Files: extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

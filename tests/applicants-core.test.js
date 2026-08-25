@@ -1098,8 +1098,10 @@ test("the panel is re-resolved and the whole column is walked, not one screenful
   // Sections below the fold only exist once the walk has reached them, so the
   // expander runs again there — inside one shared budget, not a second eight.
   assert.match(scan, /await expandCollapsedSections\(live, diagnostics, budget\)/, "what mounted late may still be collapsed");
-  assert.match(source, /function createExpansionBudget\(\)/, "the expansion budget must be shared");
-  assert.match(source, /for \(; budget\.used < MAX_EXPANSIONS; \)/, "and it must still be eight clicks in total");
+  assert.match(source, /function createExpansionBudget\(limit = MAX_EXPANSIONS\)/,
+    "the expansion budget must be shared, and its size must be the caller's to set");
+  assert.match(source, /for \(; budget\.used < \(budget\.limit \?\? MAX_EXPANSIONS\); \)/,
+    "one shared budget still bounds every pass; only its size moved");
 
   // `scrollHeight` is live, so `clientHeight` has to be too.
   const max = source.slice(source.indexOf("function maxScrollPosition"), source.indexOf("function scrollPanelTo"));
@@ -1670,9 +1672,13 @@ test("the list pass opens every applicant across every page and takes what the p
   // from the contact info button given in the profile AND I WANT THE RESUME TO
   // BE DOWNLOADED IN THE DISK WITH THE NAME OF THE PROFILE OWNER." Both steps
   // were already built and both were switched OFF here, which is the whole of
-  // why neither happened. Only the section expander stays off.
-  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: false \}\)/,
-    "the contact disclosure and the resume are on; only the section expander is not");
+  // why neither happened. The section expander was the last one still off, and
+  // the first live diagnostics report is what turned it on: `expansions` was
+  // ABSENT from the report entirely, so it had never run — and the applicant
+  // saved ONE education while their own panel's markup carried two, the second
+  // `visually-hidden` behind `Show 2 more educations`.
+  assert.match(reveal, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: true, maxExpansions: LIST_RUN_EXPANSIONS \}\)/,
+    "and since 3.9.3 the section expander too, on a budget smaller than a single collection's");
   assert.match(reveal, /await extractApplicant\(\{ \.\.\.VISIBLE_ONLY_OPTIONS, expectApplicationId: rowId \}\)/,
     "and the reading rule is the shared one, told which applicant it is for");
   assert.match(reveal, /await selectApplicantRow\(row\)/, "through the one gated row control (rule 9g)");
@@ -1680,9 +1686,9 @@ test("the list pass opens every applicant across every page and takes what the p
     "and not re-clicked when the PANEL says it already shows them — never when only the address bar does");
   assert.match(source, /const LIST_PROFILE_PACE_MS = \d+/, "and a pass paces itself between applicants");
 
-  // `expand: false` is also the flag `extractApplicant` turns into a null
-  // expansion budget, so the second expander pass at the bottom of the walk is
-  // skipped too — one flag, both passes.
+  // The flag still reaches BOTH passes — one budget, both of them — which is
+  // what makes `maxExpansions` a bound on the applicant rather than on a pass.
+  // A caller that does set `expand: false` still gets a null budget.
   const extract = source.slice(source.indexOf("async function extractApplicant"), source.indexOf("// ------------------------------------------------------- every applicant"));
   assert.match(extract, /options\.expand === false \? null : expansion/,
     "expand:false must reach the scan's expansion budget, not only the first pass");
@@ -2727,7 +2733,8 @@ test("a section that produced nothing prints the markup it was read from", async
   assert.match(source, /SECTION_HTML_LIMIT/, "bounded — a panel's outerHTML is hundreds of kilobytes");
   assert.match(source, /html: sectionMarkup\(section\)/, "and carried on the diagnostics, not only the console");
   const log = source.slice(source.indexOf("function logSectionScan"), source.indexOf("/** Visible entity blocks"));
-  assert.match(log, /for \(const key of \["experience", "education"\]\)/, "both sections that came back empty");
+  assert.match(log, /for \(const key of \["experience", "education", "skills"\]\)/,
+    "every section that came back empty, skills included since 3.9.3");
   assert.match(log, /if \(diagnostics\?\.totals\?\.\[key\]\) continue;/, "and only when they actually produced nothing");
   assert.match(log, /no section resolved\. Headings seen:/, "not-found and found-but-empty are different reports");
 });
@@ -7503,4 +7510,96 @@ test("3.9.3: a failed contact step now says what was on the panel, and presses n
     "recorded exactly where the live report said no-contact-menu");
   assert.match(contact, /closed: false, controlsSeen: \[\]/,
     "and both keys are declared, so an early return reports false rather than nothing");
+});
+
+// ---------------------------------------------------------------------------
+// 3.9.3 — the expander never ran on a whole-job run
+//
+// From the same live report as the contact fix, and it is the plainest reading
+// in the whole file: `diagnostics.expansions` was **absent**. That object is
+// written on the FIRST line of `expandCollapsedSections`, unconditionally, so
+// its absence is proof the function was never called.
+//
+// The cause was one frozen literal: a list run passed `expand: false`, so both
+// expansion passes were skipped for every applicant of every job. The cost is in
+// the same report — `education: 1`, from a panel whose own captured markup holds
+// two entries, the second `<li class="... visually-hidden">` waiting behind
+// `Show 2 more educations`.
+//
+// The reasoning for turning it off was sound (up to eight clicks per applicant
+// on a walk that is already the slow part) and the price was simply never
+// measured. It is bounded now instead of refused: `LIST_RUN_EXPANSIONS`.
+// ---------------------------------------------------------------------------
+
+test("3.9.3: a whole-job run expands collapsed sections, on a smaller budget than a single collection", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+
+  // The flag that skipped it. `expand: false` reached BOTH passes through one
+  // budget, so one literal switched off the whole thing.
+  assert.match(source, /const VISIBLE_ONLY_OPTIONS = Object\.freeze\(\{ expand: true, maxExpansions: LIST_RUN_EXPANSIONS \}\)/,
+    "a list run expands again");
+  assert.ok(!/\{ expand: false \}/.test(source), "and nothing still turns it off wholesale");
+
+  // Bounded, and by a NAMED constant smaller than a single collection's eight —
+  // a run pays this once per row and a job can be six hundred rows.
+  assert.match(source, /const LIST_RUN_EXPANSIONS = 4;/, "the list-run bound is named");
+  assert.match(source, /const MAX_EXPANSIONS = 8;/, "and a single collection still gets eight");
+
+  // One budget for the applicant, still shared by both passes, so the bound is
+  // on the applicant and not on a pass.
+  assert.match(source, /function createExpansionBudget\(limit = MAX_EXPANSIONS\)/, "the caller sets the size");
+  assert.match(source, /const expansion = createExpansionBudget\(options\.maxExpansions\)/,
+    "and the reading rule passes the caller's own bound through");
+  assert.match(source, /options\.expand === false \? null : expansion/,
+    "the same one budget still reaches the scan's second pass");
+
+  // No new click site. The budget moved; the places that press did not.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight sites");
+});
+
+test("3.9.3: an expander budget that runs out says so, and a refusal says why", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const expand = source.slice(
+    source.indexOf("async function expandCollapsedSections"),
+    source.indexOf("const DOCUMENT_EXTENSION_PATTERN")
+  );
+  assert.ok(expand.length > 600 && expand.length < 4000, "the function must be found, and only it");
+
+  // A panel whose expanders were never REACHED looked exactly like a panel that
+  // had none. That is the difference between "this applicant has one degree" and
+  // "we stopped looking", and rule 1 says a blank must not be passed off as fact.
+  assert.match(expand, /diagnostics\.expansions\.exhausted = true;/, "exhaustion is recorded");
+  assert.match(expand, /exhausted: false/, "and declared, so its absence is never the answer");
+  assert.match(expand, /limit: 0/, "with the bound it was measured against");
+
+  // A REASON tally rather than a bare count of denylist hits. The old counter saw
+  // only `forbidden` and re-counted the same controls on every outer pass, so it
+  // inflated AND hid: `navigates-away` and `overflow-menu-not-a-disclosure` —
+  // the two verdicts 3.9.1 added, and the two worth reading — never appeared.
+  assert.match(expand, /refusals\[reason\] = \(diagnostics\.expansions\.refusals\[reason\] \|\| 0\) \+ 1/,
+    "every refusal is counted under its own reason");
+  assert.match(expand, /refusedOnce\.add\(element\)/, "each control at most once, across every pass");
+  assert.ok(!/if \(verdict\.forbidden\) diagnostics\.expansions\.refused \+= 1;/.test(expand),
+    "the counter that saw only the denylist is gone");
+
+  // Nothing about the accounting changed what may be pressed.
+  assert.match(expand, /purpose: Applicants\.CONTROL_PURPOSE\.DISCLOSURE/, "still the disclosure allowlist");
+  assert.match(expand, /inContainer: panel\.contains\(element\)/, "still proven inside the panel");
+  assert.equal((expand.match(/\.click\(\)/g) || []).length, 1, "and still one press per control");
+});
+
+test("3.9.3: a resolved-but-empty skills section prints the markup it was read from", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  // Experience and Education have had this since the section-scan work; skills
+  // never did, which is why "skills: 0" has never been explainable from a
+  // report. It is the same discipline, applied to the third section a recruiter
+  // actually reads.
+  assert.match(source, /for \(const key of \["experience", "education", "skills"\]\)/,
+    "all three sections explain an empty result");
 });

@@ -1640,7 +1640,7 @@
     // out of. A block count of 0 with a heading that was found is precisely the
     // case where the next question is "what was in that root?" — so answer it
     // here instead of asking for another round of guessing.
-    for (const key of ["experience", "education"]) {
+    for (const key of ["experience", "education", "skills"]) {
       if (diagnostics?.totals?.[key]) continue;
       const section = scan.resolved.find((entry) => entry.key === key);
       if (!section) {
@@ -3100,9 +3100,32 @@
    */
   const MAX_EXPANSIONS = 8;
 
-  /** One budget for the whole extraction, shared by every expansion pass. */
-  function createExpansionBudget() {
-    return { clicked: new WeakSet(), used: 0 };
+  /**
+   * What a whole-job run may spend per applicant.
+   *
+   * Lower than a single collection's eight, because a run pays it once per row
+   * and a job can be six hundred rows. Four is enough for the three sections a
+   * panel actually collapses - Experience, Education, Skills - with one spare,
+   * and every click costs `waitForDomQuiet(280, 2000)`, so the worst case is a
+   * few seconds and the ordinary case on the captured layout is one click and
+   * about a third of a second.
+   *
+   * When it runs out, `diagnostics.expansions.exhausted` says so.
+   */
+  const LIST_RUN_EXPANSIONS = 4;
+
+  /**
+   * One budget for the whole extraction, shared by every expansion pass.
+   *
+   * The limit is a parameter now because a whole-job run and a single
+   * collection want different answers to the same question. A recruiter
+   * collecting one applicant will wait for everything; a run walking six
+   * hundred rows pays the cost six hundred times. Before this it was resolved
+   * by switching the expander OFF for list runs entirely, which cost the whole
+   * of the collapsed data rather than the tail of it.
+   */
+  function createExpansionBudget(limit = MAX_EXPANSIONS) {
+    return { clicked: new WeakSet(), used: 0, limit: Math.max(0, Number(limit) || 0) };
   }
 
   /**
@@ -3112,10 +3135,15 @@
    *   running this again after the walk costs the same eight clicks in total.
    */
   async function expandCollapsedSections(panel, diagnostics, budget) {
-    diagnostics.expansions = diagnostics.expansions || { clicked: 0, revealed: 0, refused: 0, passes: 0 };
+    diagnostics.expansions = diagnostics.expansions || {
+      clicked: 0, revealed: 0, refused: 0, passes: 0, limit: 0, exhausted: false, refusals: {}
+    };
     diagnostics.expansions.passes += 1;
+    diagnostics.expansions.limit = budget.limit ?? MAX_EXPANSIONS;
     const clicked = budget.clicked;
-    for (; budget.used < MAX_EXPANSIONS; ) {
+    budget.refusedOnce = budget.refusedOnce || new WeakSet();
+    const refusedOnce = budget.refusedOnce;
+    for (; budget.used < (budget.limit ?? MAX_EXPANSIONS); ) {
       assertRunnable();
       const control = (() => {
         for (const element of panel.querySelectorAll("button,a,[role='button']")) {
@@ -3126,7 +3154,17 @@
             purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE,
             inContainer: panel.contains(element)
           });
-          if (verdict.forbidden) diagnostics.expansions.refused += 1;
+          // A REASON tally, not a bare count of denylist hits. The old counter
+          // saw only `forbidden` and re-counted the same controls on every
+          // outer pass, so it both inflated and hid: `navigates-away` and
+          // `overflow-menu-not-a-disclosure` - the two verdicts 3.9.1 added
+          // and the ones worth reading - never appeared at all.
+          if (!verdict.allowed && !refusedOnce.has(element)) {
+            refusedOnce.add(element);
+            const reason = verdict.reason || "unknown";
+            diagnostics.expansions.refusals[reason] = (diagnostics.expansions.refusals[reason] || 0) + 1;
+            diagnostics.expansions.refused += 1;
+          }
           if (!verdict.allowed || !isVisible(element)) continue;
           return { element, verdict };
         }
@@ -3146,6 +3184,11 @@
       await waitForDomQuiet(280, 2000);
       if (cleanText(panel.innerText || "").length > before) diagnostics.expansions.revealed += 1;
     }
+    // Said out loud. A panel whose expanders were never reached because the
+    // budget ran out looked exactly like a panel that had none, which is the
+    // difference between "this applicant has one degree" and "we stopped
+    // looking" - and rule 1 says a blank must not be passed off as a fact.
+    if (budget.used >= (budget.limit ?? MAX_EXPANSIONS)) diagnostics.expansions.exhausted = true;
   }
 
   // ---------------------------------------------------------------- resume
@@ -4963,7 +5006,7 @@
     const accumulator = Applicants.createApplicantAccumulator();
     // One budget for every expansion pass this extraction makes, so running the
     // expander again after the walk costs the same eight clicks in total.
-    const expansion = createExpansionBudget();
+    const expansion = createExpansionBudget(options.maxExpansions);
 
     if (options.expand !== false) {
       await attempt("expand sections", accumulator, () => expandCollapsedSections(panel, diagnostics, expansion));
@@ -5975,10 +6018,24 @@
    * nothing on this surface ever asked for the file.
    *
    * So the two flags are gone and the steps they gated are the ones rule 9
-   * already names and gates individually. `expand` stays **off**: it is the one
-   * remaining flag, it opens collapsed sections rather than revealing a field
-   * this pass is for, and it is worth up to `MAX_EXPANSIONS` (8) clicks per
-   * applicant on a walk that is already the slow part.
+   * already names and gates individually.
+   *
+   * **`expand` was off, and the first live diagnostics report is what changed
+   * it.** The reasoning was sound - up to eight clicks per applicant on a walk
+   * that is already the slow part - but the price was never measured against
+   * what it cost, and the report showed the cost: `diagnostics.expansions` was
+   * ABSENT, so the expander had not run at all, and the applicant saved ONE
+   * education while their own panel's markup carried two. The second was
+   * `<li class="... visually-hidden">`, waiting behind `Show 2 more
+   * educations`. The same is true of Experience, which is the sole source of
+   * `current_role`, `current_company` and `total_experience` - the three
+   * columns CHECKS.md has recorded as empty for four consecutive releases.
+   *
+   * Turning it off saved a click and lost the data the click was for, which is
+   * the wrong side of the speed guide's own main rule: *keep all current data
+   * collection working*, and it names Education. So it is on, with a budget of
+   * `LIST_RUN_EXPANSIONS` rather than the full eight - the tail is bounded
+   * instead of the whole thing being refused.
    *
    * `current_role`, `current_company` and `total_experience` are still
    * `deriveCurrentPosition` and `totalExperienceFrom` over the Experience cards
@@ -5986,7 +6043,7 @@
    * **one** definition of "current role" on this surface rather than a second
    * that can drift from it.
    */
-  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: false });
+  const VISIBLE_ONLY_OPTIONS = Object.freeze({ expand: true, maxExpansions: LIST_RUN_EXPANSIONS });
 
   /**
    * Is the detail panel **already showing this row's applicant**, so that opening
