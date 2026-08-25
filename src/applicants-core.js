@@ -567,6 +567,107 @@
     return named ? Number(named[1]) : null;
   }
 
+  /**
+   * Does this accessible name SAY it is the page being shown?
+   *
+   * **The second reader for "which page is current", and it exists because the
+   * first one has now guessed wrong twice.** 3.9.3 read `aria-current` off the
+   * numbered control; 3.9.4 widened that to the two ancestors above it, on the
+   * reasoning that a pager marks the `li` rather than the `button`. Neither was
+   * ever run against the live pager, the recruiter reported after both that the
+   * run still would not leave page one, and a third guess about WHERE the
+   * attribute sits would be the same mistake a third time.
+   *
+   * So this asks a different question. A pager that does not use `aria-current`
+   * still has to tell a screen reader which page is showing, and it does that in
+   * the accessible name: `Page 1, current page`. That is ARIA too — the
+   * accessible name is exactly what rule 7 means by reading the page's own
+   * semantics — and it is nothing like a class name: `active` and `selected` are
+   * how the page LOOKS, this is what the page SAYS.
+   *
+   * A word that only means "current" counts. `page 2` on its own never does,
+   * because every member of a pager says that about itself.
+   */
+  const CURRENT_PAGE_NAME_PATTERN =
+    /(?:\bcurrent(?:ly)?\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*current\b|\byou(?:'re|\s+are)\s+on\s+page\b|\bselected\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*selected\b)/i;
+
+  function saysCurrentPage(value) {
+    const text = normalizeLabel(value);
+    return Boolean(text) && CURRENT_PAGE_NAME_PATTERN.test(text);
+  }
+
+  /**
+   * The next page to press when the pager will not say which page it is on.
+   *
+   * **The third reader, and the one that needs no mark at all.** Both readers
+   * above depend on the pager volunteering something. This one depends only on
+   * an arithmetic fact that no layout can take away: *pressing the control
+   * labelled N leaves you on page N*. So a pager that says nothing is walked
+   * from its lowest offered number, one step at a time, and each press tells the
+   * next one where it is.
+   *
+   * `visited` is what this walk has pressed, in order. Empty means nothing has
+   * been pressed yet, and the assumption is then the lowest number the pager
+   * offers — 1 on every pager that renders one, and on an elided pager the
+   * lowest it renders. That assumption can only ever be too LOW, never too high,
+   * which is the direction that is safe: too low costs a page this run walks
+   * again for nothing (the identity ledger skips everyone on it), while too high
+   * costs a page of applicants nobody ever opens.
+   *
+   * **Exactly one step, always.** The returned page is `current + 1` and must be
+   * one the pager actually offers, so an elided pager showing `1 … 25 26 27` can
+   * never be used to jump from 1 to 25. When `current + 1` is not offered the
+   * answer is `walked-out` — on a pager walked to its end that is the genuine
+   * end of the list, and it is deliberately a different answer from
+   * `not-a-pager`, which means only that this reader could not see.
+   *
+   * Pure, and separated from the DOM for exactly the reason the guide gives:
+   * this is the arithmetic that decides which control gets pressed, and it is
+   * the one part of a pager that can be executed in a test rather than reasoned
+   * about.
+   */
+  function planPagerOrdinalStep({ offered = [], visited = [] } = {}) {
+    const decline = (reason) => ({ ok: false, reason, current: null, next: null });
+
+    // THE SHAPE PROOF, and it is what earns the right to press a control the
+    // page never marked. Without a current-page mark, "these numbers are a
+    // pager" is the only thing standing between this and pressing an arbitrary
+    // numeric button, so the shape is required to be a pager's exactly:
+    //
+    //   - every member offers a page number, and nothing else is in the group;
+    //   - they ASCEND in the order the page rendered them, because a pager is a
+    //     row of pages in order and an accidental collection of numbers is not;
+    //   - the lowest is page ONE. Every pager LinkedIn renders offers page one,
+    //     including an elided one (`1 … 25 26 27`), and a rating, a count or a
+    //     year that happens to sit in a row does not start at one and ascend.
+    //
+    // A group that fails any of these is declined as `not-a-pager`, which the
+    // caller must treat as "this reader could not see" — never as the end of the
+    // list, because a job completed by mistake can never restart itself.
+    const pages = [];
+    for (const value of offered || []) {
+      if (!Number.isInteger(value) || value <= 0) return decline("not-a-pager");
+      if (pages.length && value <= pages[pages.length - 1]) return decline("not-a-pager");
+      pages.push(value);
+    }
+    if (pages.length < 2) return decline("not-a-pager");
+    if (pages[0] !== 1) return decline("not-a-pager");
+
+    const walked = [];
+    for (const value of visited || []) {
+      if (Number.isInteger(value) && value > 0) walked.push(value);
+    }
+    const current = walked.length ? walked[walked.length - 1] : pages[0];
+    const next = current + 1;
+    // Nothing after the page being shown. On a pager walked to its end this is
+    // the genuine end of the list, and the caller may complete the run on it.
+    if (!pages.includes(next)) return { ok: false, reason: "walked-out", current, next: null };
+    // Never twice. A pager already asked for page 4 and asked again is not
+    // making progress, and repeating the press is how a walk stops terminating.
+    if (walked.includes(next)) return { ok: false, reason: "already-visited", current, next: null };
+    return { ok: true, reason: "ordinal", current, next };
+  }
+
   function normalizeLabel(value) {
     const core = CORE();
     if (core?.cleanText) return core.cleanText(value).toLowerCase();
@@ -3867,6 +3968,29 @@
    */
   const LIST_STOP_CONCLUSIVE = Object.freeze(["settled", "pagination-retired"]);
 
+  /**
+   * Which "no pager was pressed" answers are the end of the list, and which are
+   * only the end of what this reader can see.
+   *
+   * The distinction was written down in 3.9.4 and then not acted on: every
+   * reason arrived at the caller as `settled`, which is CONCLUSIVE, so a pager
+   * this build could not read completed the job exactly as a page with no pager
+   * at all did — and a completed job is one `claimAutoRun` refuses to re-arm, so
+   * the run could not even restart itself to try again.
+   *
+   * `no-pager` and `no-next-number` are verdicts about the LIST: nothing offers
+   * another page, or the pager offers no page after the one being shown. Both
+   * are the genuine end. Everything else — a pager that marks two pages current,
+   * a control the click policy refused — is a verdict about the READER, and a
+   * reader that cannot see must leave the run restartable rather than declare
+   * the job done.
+   */
+  const CONCLUSIVE_PAGER_REASONS = Object.freeze(["no-pager", "no-list", "no-next-number"]);
+
+  function isConclusivePagerReason(reason = "") {
+    return CONCLUSIVE_PAGER_REASONS.includes(cleanText(reason));
+  }
+
   function isConclusiveListStop(stoppedBy = "") {
     return LIST_STOP_CONCLUSIVE.includes(cleanText(stoppedBy));
   }
@@ -4075,6 +4199,7 @@
     isApplicantMenuOpenerLabel,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
     APPLICANT_PAGINATION_PATTERN, classifyApplicantControl, pageNumberFrom, paginationLabel,
+    saysCurrentPage, planPagerOrdinalStep,
     // qualifications and screening
     QUALIFICATION_CATEGORY, QUALIFICATION_RESULT, QUALIFICATION_SOURCE,
     qualificationCategoryOf, classifyQualificationResult, classifyQualificationSource,
@@ -4118,7 +4243,7 @@
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
-    LIST_STOP_CONCLUSIVE, isConclusiveListStop,
+    LIST_STOP_CONCLUSIVE, isConclusiveListStop, CONCLUSIVE_PAGER_REASONS, isConclusivePagerReason,
     MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // capturing a layout nobody has seen, with nobody's details in it

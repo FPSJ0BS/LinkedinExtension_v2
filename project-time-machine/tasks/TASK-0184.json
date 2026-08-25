@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0184",
+  "name": "Page forward on a pager that will not say which page it is on",
+  "request": "Page forward on a pager that will not say which page it is on",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T10:31:18.227Z",
+  "completedAt": "2026-08-25T10:46:00.408Z",
+  "startCommit": "c8d4eba191492b02b0c3627209acd75dfbfe9ba0",
+  "gitRef": "task/TASK-0184",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 638 tests, doc links, 31 build files validated"
+  ],
+  "result": "Page forward on a pager that will not say which page it is on. THE REPORT, after the row fix landed: 'it is working, but it is not moving onto the next page after completing the first page.' TWO BUILDS HAD ALREADY GUESSED AT THE SAME ATTRIBUTE - 3.9.3 read aria-current off the numbered control, 3.9.4 widened that to the two ancestors above it on the reasoning that a pager marks the wrapping li - and neither was ever run against the live pager. A third guess about WHERE aria-current sits would be the same mistake a third time, so this stops depending on it. THREE READERS FOR 'WHICH PAGE IS BEING SHOWN', each added after the working one (the multiple-UI guide's one rule) and each answering where the last could not. (1) aria-current / aria-selected on the control or the two items above it - unchanged, still first, still the only thing believed when it answers. (2) THE ACCESSIBLE NAME SAYS SO: a pager that sets no aria-current still has to tell a screen reader where it is, and it does that in the name - 'Page 1, current page'. That is ARIA too and is nothing like a class name: 'active' is how a control LOOKS, this is what it SAYS. The negative is what makes it safe and is asserted - a bare 'Page 2' proves nothing, because every member of a pager says that about itself. (3) THE WALK'S OWN HISTORY, which needs no mark at all, and it stands on one fact no layout can take away: PRESSING THE CONTROL LABELLED N LEAVES YOU ON PAGE N. So a silent pager is walked from the lowest number it offers, one step at a time, and each press tells the next one where it is. planPagerOrdinalStep is pure and executed rather than reasoned about: exactly current+1, and only a number the pager actually renders, so an elided '1 ... 25 26 27' can never be used to jump twenty-five pages - the precise harm 3.9.4 refused a bare number over. Assuming the lowest offered page can only ever be too LOW, which is the safe direction: too low costs a page walked again for nothing and the identity ledger skips everyone on it; too high costs a page nobody opens. THE SHAPE PROOF IS WHAT EARNS THE RIGHT TO PRESS SOMETHING UNMARKED, and every clause is a refusal: the members must ascend in the order rendered, must start at page one, must be two or more, and none may sit inside an applicant row or inside the mounted detail panel - a star rating is a row of numeric controls ascending from one sharing a parent, and it would otherwise satisfy every other proof. mountedApplicantPanel deliberately, not applicantPanel, whose fallback is the widest main and would swallow the pager itself. THE CLASSIFIER IS UNTOUCHED: currentPage now comes from the walk's history instead of from ARIA, and a number is still only ever accepted as exactly current+1, still only inside the list, with the denylist still running before all of it - re-asserted against Reject, Shortlist, Message, Good fit, Archive and 'Add a note'. Rule 5 holds and NO CLICK IS ADDED: still exactly eight, the pager press is the one that already existed. TWO DEFECTS FOUND WHILE PROVING IT. A press was scored only on whether it revealed a row the run still OWED, so a resumed run walking back through pages it had already collected scored three working presses as fruitless and retired the pager three pages in; 'did the pager work' (are different people on the list, by identity) and 'is there anything to do here' are now two questions, and only the second ends the call. And 3.9.4 recorded WHY no pager was pressed and then threw the distinction away - every reason arrived as 'settled', which is CONCLUSIVE, so a pager this build could not read completed the job exactly as a list with no pager did, and claimAutoRun refuses to re-arm a completed job, which is that failure in its most permanent form. isConclusivePagerReason now names the two answers that are verdicts about the LIST; everything else is a verdict about the READER and leaves the run restartable. The reason reaches the recruiter in the run's own error line and on the first line of the console summary rather than only inside an object - not knowing which of them it was is what produced two rounds of guessing. Also fixed: paging forward is progress even onto a page with no work, so a resumed run no longer spends its inconclusive allowance walking back to where it left off; and walk.pages no longer counts a numbered page twice. 7 new tests, 10 existing assertions updated where they pinned the old shapes. NO live claim: rule 20 stands. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

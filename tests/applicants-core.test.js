@@ -2241,16 +2241,25 @@ test("the applicant list is grown when the run needs a row, never walked up fron
   assert.ok(grow.length > 200, "growing the list on demand must be its own step");
   assert.match(grow, /LIST_GROW_PASSES/, "one attempt must be bounded");
   assert.match(grow, /walk\.fruitless < MAX_FRUITLESS_PAGINATION/, "a settled page is still not a settled list");
-  assert.match(grow, /walk\.fruitless = produced \? 0 : walk\.fruitless \+ 1/, "growth must mean new rows, never a click");
+  // 3.9.5: two questions, not one. `movedOn` is "did the pager work" — are
+  // DIFFERENT people on the list — and `produced` is "is there anything here to
+  // do". A resumed run pages through work it has already done, and scoring
+  // those presses as fruitless retired a working pager three pages in.
+  assert.match(grow, /walk\.fruitless = \(movedOn \|\| stepped\) \? 0 : walk\.fruitless \+ 1;/,
+    "growth must mean new rows, never a click");
+  assert.match(grow, /const movedOn = swapped\(\);\s*\n\s*const produced = wanted\(\);/,
+    "and the two questions are asked separately");
   // And "produced" is the CALLER's question — is there a row the run has not
-  // done — so a pager that replaces a page is scored as the progress it is.
-  // `arrived` is the same question asked with a deadline: `waitFor(() => wanted())`.
+  // done — so only that ends the call and hands a row back.
   // Quiet was the wrong thing to wait on in both directions — the DOM is quiet
   // while the next page is still in flight, and a re-mount never falls quiet
-  // inside the timeout at all — so the rows are waited for directly.
-  assert.match(grow, /const produced = Boolean\(arrived\) \|\| wanted\(\);/,
+  // inside the timeout at all — so the rows are waited for directly. 3.9.5 waits
+  // on EITHER a row still owed OR simply different people, because on a resumed
+  // run the page that arrives may be one the last run already collected and the
+  // wait would otherwise spend its whole timeout on every such page.
+  assert.match(grow, /if \(produced\) return walk\.rows;/,
     "the pager is judged by what the run can now collect");
-  assert.match(grow, /const arrived = await waitFor\(\(\) => wanted\(\), \{[\s\S]{0,160}?PAGE_ARRIVAL_TIMEOUT_MS/,
+  assert.match(grow, /await waitFor\(\(\) => wanted\(\) \|\| swapped\(\), \{[\s\S]{0,160}?PAGE_ARRIVAL_TIMEOUT_MS/,
     "and the page is waited for by its rows, not by the DOM falling quiet");
   assert.match(grow, /async function growApplicantList\(diagnostics, hasWork\)/, "the caller supplies the question");
   assert.match(grow, /assertRunnable\(\)/, "and Stop must end it");
@@ -3979,7 +3988,7 @@ test("the run collects every page of the applicant list, not only the first", as
   assert.match(walk, /if \(!pager\) \{/, "and a list with no pager still ends");
 
   // Three bounds, each of which alone stops a run that never terminates.
-  assert.match(walk, /fruitless = gained > 0 \? 0 : fruitless \+ 1;/,
+  assert.match(walk, /fruitless = \(gained > 0 \|\| stepped\) \? 0 : fruitless \+ 1;/,
     "growth counts NEW ROWS, never a click that happened");
   // NEW ROWS by identity. A pager that swaps page one's 25 people for page two's
   // 25 leaves the count untouched, so a count-based test scored a whole page of
@@ -4456,7 +4465,12 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
   // number is only trusted inside it. All three conditions, each of which alone
   // would let something that is not a pager through.
   assert.match(finder, /members\.length < 2/, "one numeric button is a button; a row of them is a pager");
-  assert.match(finder, /marked\.length !== 1/, "exactly one control marked as the page being shown");
+  // 3.9.5: one control marked current is still the answer WHENEVER THERE IS
+  // ONE. What changed is the other branch — `marked.length !== 1` used to skip
+  // the group, and skipping it is why a pager that marks its current page with
+  // a class rather than with ARIA was never pressed at all.
+  assert.match(finder, /if \(marked\.length === 1\) \{/, "exactly one control marked as the page being shown");
+  assert.match(finder, /note\.currentPageFrom = "aria";/, "and that reader is named in the record");
   assert.match(finder, /member\.page === current \+ 1/, "and only the one numbered next may be pressed");
   assert.match(finder, /currentPage: current/, "the page it is on is read off the pager, never counted by the run");
 
@@ -4473,7 +4487,7 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
 
   const markerAt = source.indexOf("function isCurrentPageControl");
   const marker = source.slice(markerAt, source.indexOf("\n  }", markerAt));
-  assert.ok(marker.length > 40 && marker.length < 900, "the slice is the function, not the file after it");
+  assert.ok(marker.length > 40 && marker.length < 1600, "the slice is the function, not the file after it");
   assert.ok(!/class/i.test(marker), "the climb to the wrapping item is ARIA-only too (rule 7)");
   assert.match(marker, /CURRENT_PAGE_MARK_LEVELS/, "and it is bounded rather than climbing to the pager");
 
@@ -4481,7 +4495,8 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
   // a reader added after the working one, not a replacement for it.
   const named = source.slice(source.indexOf("function findApplicantPaginationControl"), source.indexOf("const PAGER_SCOPE_LEVELS"));
   assert.match(named, /const scope = list\.parentElement \|\| list;/, "the named pager's scope is unchanged");
-  assert.match(named, /return findNumberedPagerControl\(list, note\);/, "and the numbered reader runs only when it found nothing");
+  assert.match(named, /return findNumberedPagerControl\(list, note, visited\);/,
+    "and the numbered reader runs only when it found nothing");
 
   // No new click site: the pager press is the one that already existed.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
@@ -8170,13 +8185,17 @@ test("3.9.4: a numbered pager may mark its current page on the item wrapping the
     "the group is what makes the wider search safe, so the group is passed in");
 
   // The group-level rule that catches everything the climb could get wrong is
-  // unchanged: exactly one current page, or no pager at all.
-  assert.match(adapter, /if \(marked\.length !== 1\) continue;/, "exactly one current page, still");
+  // unchanged: exactly one marked control is still what ARIA has to produce
+  // before it is believed. 3.9.5 added a THIRD reader for the case where
+  // nothing is marked at all — it does not loosen this one.
+  assert.match(adapter, /if \(marked\.length === 1\) \{\s*\n\s*current = marked\[0\]\.page;/,
+    "exactly one current page, still");
 
   // And a pager search that finds nothing now says WHICH nothing. "No pager at
   // all" is the last page; "a pager whose current page is unmarked" is a layout
   // this reader cannot see — and both used to arrive as the conclusive `settled`.
-  assert.match(adapter, /note\.reason = note\.numbered > 0/, "the search records why it found nothing");
+  assert.match(adapter, /note\.reason = note\.refused[\s\S]{0,240}?note\.numbered > 0/,
+    "the search records why it found nothing");
   assert.match(adapter, /walk\.pagerSearch = pagerSearch;/, "and the walk carries it into the report");
 });
 
@@ -8556,4 +8575,246 @@ test("3.9.5: one rule for 'may I skip this applicant', shared by the worker and 
     "and so does the index when it has to judge for itself");
   assert.match(core, /function isFullyCollectedApplicant\(record\) \{\s*\n\s*return isCollectedApplicant\(record\) && !hasPendingResume\(record\);/,
     "and the rule is stated once");
+});
+
+
+// --------------------------------------------------------------------------
+// 3.9.5 — page forward on a pager that will not say which page it is on.
+//
+// THE LIVE REPORT, after the row fix landed and applicants started being
+// collected again: "it is working, but the extension is not moving onto the
+// next page after completing the first page — it is still on the same page."
+//
+// Two builds had already guessed at WHERE the current-page mark sits (3.9.3 on
+// the control, 3.9.4 on the item wrapping it) and neither was ever run against
+// the live pager. A third guess about the same attribute would be the same
+// mistake a third time, so this stops depending on the attribute.
+// --------------------------------------------------------------------------
+
+test("3.9.5: the accessible name is a second way a pager says which page it is on", () => {
+  // A pager that does not set `aria-current` still has to tell a screen reader
+  // where it is, and this is how it does it. Still ARIA — the accessible name
+  // is the page's own semantics — and nothing like a class name: `active` is
+  // how a control LOOKS, this is what it SAYS.
+  for (const name of [
+    "Page 1, current page",
+    "Current page, page 1",
+    "You are on page 1",
+    "you're on page 4",
+    "Page 1 selected",
+    "Selected page 3",
+    "Currently page 6",
+    "Page 1, current"
+  ]) {
+    assert.equal(Applicants.saysCurrentPage(name), true, `"${name}" says it is the page being shown`);
+  }
+
+  // THE NEGATIVE THAT MATTERS. Every member of a pager says "Page N" about
+  // itself, so a name that only numbers itself proves nothing — reading it as
+  // the current page would make all of them current and the group is then
+  // refused for having no single answer.
+  for (const name of ["Page 1", "Page 2", "2", "Page 2 of 27", "Go to page 2", "Next page", "", null]) {
+    assert.equal(Applicants.saysCurrentPage(name), false, `"${name}" does not claim to be the current page`);
+  }
+});
+
+test("3.9.5: a pager that names no current page is walked one page at a time, never jumped", () => {
+  const step = Applicants.planPagerOrdinalStep;
+
+  // Nothing pressed yet: the assumption is the LOWEST page the pager offers,
+  // and the press is the one after it. Too low is the safe direction — it costs
+  // a page this run walks again for nothing, and the identity ledger skips
+  // everyone on it — while too high costs a page nobody ever opens.
+  assert.deepEqual(step({ offered: [1, 2] }), { ok: true, reason: "ordinal", current: 1, next: 2 });
+
+  // AN ELIDED PAGER IS THE WHOLE REASON FOR THE "ONE STEP" RULE. `1 … 25 26 27`
+  // offers 27, and pressing it from page one would skip twenty-five pages of
+  // applicants — which is exactly the harm 3.9.4 refused a bare number over.
+  assert.deepEqual(step({ offered: [1, 2, 3, 27] }), { ok: true, reason: "ordinal", current: 1, next: 2 });
+  assert.deepEqual(step({ offered: [1, 2, 3, 27], visited: [2] }),
+    { ok: true, reason: "ordinal", current: 2, next: 3 });
+  // 4 is not rendered, so there is nothing to press — and this is deliberately
+  // a DIFFERENT answer from "that was not a pager".
+  assert.deepEqual(step({ offered: [1, 2, 3, 27], visited: [2, 3] }),
+    { ok: false, reason: "walked-out", current: 3, next: null });
+
+  // The end of a pager walked to its end: the genuine end of the list.
+  assert.equal(step({ offered: [1, 26, 27], visited: [26, 27] }).reason, "walked-out");
+
+  // THE SHAPE PROOF, and it is what earns the right to press a control the page
+  // never marked. Each of these is a group this must refuse rather than treat
+  // as a pager, and refuse as `not-a-pager` — which the caller may never read
+  // as the end of the list.
+  for (const [what, input] of [
+    ["one number is a number, not a pager", { offered: [1] }],
+    ["nothing at all", { offered: [] }],
+    ["numbers that do not start at page one", { offered: [19, 20, 21] }],
+    ["numbers not in the order a pager renders them", { offered: [3, 2, 1] }],
+    ["a repeated number", { offered: [1, 1, 2] }],
+    ["something that is not a whole page number", { offered: [1, "2"] }],
+    ["a zero or a negative", { offered: [0, 1, 2] }]
+  ]) {
+    assert.equal(step(input).reason, "not-a-pager", what);
+    assert.equal(step(input).ok, false, what);
+  }
+  assert.equal(step().reason, "not-a-pager", "and no arguments at all");
+
+  // Never the same page twice: a walk that presses 4 again is not progressing,
+  // and repeating a press is how a walk stops terminating.
+  assert.equal(step({ offered: [1, 2, 3], visited: [2, 1] }).reason, "already-visited",
+    "page two has been walked already, so page one does not lead back to it");
+  assert.equal(step({ offered: [1, 2, 3], visited: [1, 2, 3] }).reason, "walked-out",
+    "and a pager walked to its last rendered page has nothing left to press");
+});
+
+test("3.9.5: only two answers about a pager may finish a job", () => {
+  // `claimAutoRun` refuses to re-arm a job whose execution reported COMPLETED,
+  // so a run that completes on "I could not read the pager" does not merely
+  // stop — it permanently disables its own restart. That is the reported
+  // failure in its most durable form, and this is where it is prevented.
+  for (const reason of ["no-pager", "no-list", "no-next-number"]) {
+    assert.equal(Applicants.isConclusivePagerReason(reason), true,
+      `${reason} is a verdict about the LIST`);
+  }
+  for (const reason of ["unreadable-pager", "pagination-refused", "many-marked-current", "no-current-page", "", "settled"]) {
+    assert.equal(Applicants.isConclusivePagerReason(reason), false,
+      `${reason} is a verdict about the READER, so the run must stay restartable`);
+  }
+
+  // And the stop those inconclusive reasons produce is itself inconclusive, so
+  // the run stops rather than completing and the standing instruction survives.
+  assert.equal(Applicants.isConclusiveListStop("pagination-unreadable"), false);
+  assert.equal(Applicants.isConclusiveListStop("settled"), true);
+});
+
+test("3.9.5: PERMANENT — an unmarked pager changes who may be pressed, never what", () => {
+  // The ordinal reader supplies `currentPage` from the walk's own history
+  // instead of from `aria-current`. The CLASSIFIER is untouched, and this is
+  // what proves the safety rule did not move with it: a number is still only
+  // ever accepted as exactly `current + 1`, still only inside the list, and the
+  // denylist still runs before any of it.
+  const press = (text, currentPage, extra = {}) => Applicants.classifyApplicantControl({
+    text,
+    purpose: Applicants.CONTROL_PURPOSE.PAGINATION,
+    inContainer: true,
+    currentPage,
+    ...extra
+  });
+
+  assert.equal(press("2", 1).allowed, true, "the next page may be pressed");
+  assert.equal(press("2", 1).page, 2);
+  assert.equal(press("1", 1).allowed, false, "the page being shown is not forward progress");
+  assert.equal(press("5", 1).allowed, false, "and a jump past three pages is still refused");
+  assert.equal(press("2", null).allowed, false, "a bare number with no proof at all is still refused");
+  assert.equal(press("2", 1, { inContainer: false }).allowed, false, "and it must be inside the list");
+
+  // Rule 5: the denylist beats everything, including a control that would
+  // otherwise be a perfectly well-proven next page.
+  for (const label of ["Reject", "Shortlist", "Message", "Good fit", "Archive", "Add a note"]) {
+    const verdict = press(label, 1);
+    assert.equal(verdict.allowed, false, `"${label}" must never be pressed as a pager`);
+    assert.equal(verdict.forbidden, true, `"${label}" must be refused by the denylist`);
+  }
+});
+
+test("3.9.5: the adapter asks three readers in order and presses no new control", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const adapter = withoutComments(source);
+
+  // Rule 5, first: this task adds no click. The pager press is the one that
+  // already existed; all that changed is which control it is handed.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+
+  // READER 1 — unchanged, and still ARIA only (rule 7).
+  assert.match(adapter, /function marksCurrentPage\(node\) \{[\s\S]{0,320}?aria-current[\s\S]{0,200}?aria-selected/);
+
+  // READER 2 — the accessible name, asked inside the same function so the
+  // group-level "exactly one current page" rule still judges the result.
+  const markerAt = source.indexOf("function isCurrentPageControl");
+  const marker = source.slice(markerAt, source.indexOf("\n  }", markerAt));
+  assert.match(marker, /Applicants\.saysCurrentPage\(accessibleName\(element\)\)/,
+    "the accessible name is read for a current-page claim");
+  assert.ok(!/class/i.test(marker), "and still no class name decides which page is current (rule 7)");
+
+  // READER 3 — the walk's own history, used ONLY where ARIA answered nothing.
+  // This is the multiple-UI guide's one rule: a reader added after the working
+  // one, never in place of it.
+  const finder = source.slice(source.indexOf("function numberedPagerWithin"), source.indexOf("async function loadEveryApplicantRow"));
+  assert.match(finder, /if \(marked\.length === 1\) \{[\s\S]{0,200}?note\.currentPageFrom = "aria";[\s\S]{0,120}?\} else \{/,
+    "ARIA first, and the ordinal walk only when it said nothing");
+  assert.match(finder, /Applicants\.planPagerOrdinalStep\(\{[\s\S]{0,120}?visited/,
+    "and the fallback is the pure step, with the pages this walk has pressed");
+
+  // A number painted inside somebody's row, or inside the panel showing one
+  // person, is never a page. Without this the ordinal reader — which no longer
+  // needs a mark — would be exposed to any ascending row of numeric buttons the
+  // widened scope happens to reach, a star rating first among them.
+  assert.match(finder, /if \(!outsideTheContent\(element\)\) continue;/, "a number inside a row is not a page");
+  const climb = source.slice(source.indexOf("function findNumberedPagerControl"), source.indexOf("function numberedPagerWithin"));
+  assert.match(climb, /const panel = mountedApplicantPanel\(\);/,
+    "the mounted panel is what is excluded, never the fallback that would swallow the pager");
+  assert.match(climb, /!rows\.some\(\(row\) => row\.contains\(element\)\)/, "and every applicant row with it");
+
+  // The press still carries the proof the classifier demands, whichever reader
+  // produced it.
+  assert.match(finder, /currentPage: current/, "the page it is on is still handed to the click policy");
+});
+
+test("3.9.5: pressing the control labelled N is what records reaching page N", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const note = source.slice(source.indexOf("function notePageReached"), source.indexOf("function rowKey"));
+
+  // The fact the whole ordinal walk stands on, recorded once where both walks
+  // read it back.
+  assert.match(note, /if \(movedOn\) \{[\s\S]{0,200}?walk\.visitedPages\.push\(page\)/,
+    "a press that changed who is on the list is unambiguous");
+  // A press that changed nothing is two different things — already on that
+  // page (step past it) or the click did not take (stepping past would skip a
+  // page of applicants) — so the first reading is not believed on sight.
+  assert.match(source, /const PAGER_SAME_PAGE_TRIES = 2;/, "it is tried again before it is believed");
+  assert.match(source, /const MAX_BLIND_PAGE_STEPS = 2;/, "and the inference itself is bounded");
+  assert.match(note, /if \(\(walk\.blindSteps \|\| 0\) >= MAX_BLIND_PAGE_STEPS\) return false;/,
+    "so a dead pager still reaches retirement rather than being reset forever");
+
+  // Both walks keep the same memory, so the ordinal reader answers the same way
+  // whichever one is driving.
+  assert.match(source, /visitedPages: \[\], pagerTries: 0, blindSteps: 0/,
+    "the on-demand walk carries the pages it has been on");
+  assert.match(source, /findApplicantPaginationControl\(applicantList\(\) \|\| list, \{\}, diagnostics\.listScroll\.visitedPages\)/,
+    "and so does the full walk");
+});
+
+test("3.9.5: a page already collected is progress, not a fruitless pager", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const grow = source.slice(source.indexOf("async function growApplicantList"), source.indexOf("function logListWalk"));
+
+  // THE DEFECT. `produced` — is there a row this run still owes — was the only
+  // question asked of a press, and on a RESUMED run the next few pages are ones
+  // the last run already collected. Three of those in a row retired a pager
+  // that was working perfectly, and the walk then reported the list finished.
+  assert.match(grow, /const showing = new Set\(applicantRows\(\)\.map\(rowKey\)\);/,
+    "who the list is showing is taken before the press");
+  assert.match(grow, /const swapped = \(\) => applicantRows\(\)\.some\(\(row\) => !showing\.has\(rowKey\(row\)\)\);/,
+    "and a page swap is 25 people replaced by 25 others, by identity");
+  assert.match(grow, /walk\.fruitless = \(movedOn \|\| stepped\) \? 0 : walk\.fruitless \+ 1;/,
+    "so the pager is judged on whether it worked");
+  assert.match(grow, /if \(produced\) return walk\.rows;/,
+    "while only work ends the call and hands a row back");
+
+  // And which nothing decides whether the job may be called finished.
+  assert.match(grow, /Applicants\.isConclusivePagerReason\(pagerSearch\.reason\) \? "settled" : "pagination-unreadable"/,
+    "a pager this build cannot read must never complete the job");
+
+  // The recruiter is told, in the extension's own words rather than only in a
+  // console object — two builds' worth of guessing came from not knowing which
+  // of these it was.
+  const run = withoutComments(source);
+  assert.match(run, /pager: \$\{pagerWhy\}/, "the pager's verdict reaches the run's own error line");
+  assert.match(run, /\(pager: \$\{walk\.pagerSearch\.reason\}\)/, "and the first line of the console summary");
+
+  // Paging forward is progress even when the page it reached had no work on it,
+  // or a resumed run spends its whole allowance walking back to where it left
+  // off and stops one page short of the first applicant it still owes.
+  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) continue;\s*\n\s*inconclusive \+= 1;/,
+    "a walk that paged does not spend the inconclusive allowance");
 });

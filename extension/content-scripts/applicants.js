@@ -5406,12 +5406,15 @@
    * page LinkedIn renders the pager and disables it, and clicking it forever is
    * how a walk stops terminating.
    */
-  function findApplicantPaginationControl(list, note = {}) {
+  function findApplicantPaginationControl(list, note = {}, visited = []) {
     note.named = false;
     note.groups = 0;
     note.numbered = 0;
     note.marked = 0;
     note.currentPage = null;
+    note.currentPageFrom = "";
+    note.ordinal = "";
+    note.refused = "";
     note.reason = "";
     if (!list) {
       note.reason = "no-list";
@@ -5432,7 +5435,7 @@
       note.reason = "named-pager";
       return { element, verdict };
     }
-    return findNumberedPagerControl(list, note);
+    return findNumberedPagerControl(list, note, visited);
   }
 
   /** How far above the list a pager may sit and still be this list's pager. */
@@ -5494,6 +5497,16 @@
    * manufactured.
    */
   function isCurrentPageControl(element, members = null) {
+    // THE SECOND READER, asked first because it is the cheapest and because it
+    // is about this control alone: a pager that does not set `aria-current`
+    // still has to tell a screen reader where it is, and it does that in the
+    // accessible name — "Page 1, current page". Added AFTER the working reader
+    // rather than in place of it, which is the multiple-UI guide's one rule.
+    if (Applicants.saysCurrentPage(accessibleName(element))
+      || Applicants.saysCurrentPage(cleanText(element.getAttribute("aria-label")))
+      || Applicants.saysCurrentPage(cleanText(element.getAttribute("title")))) {
+      return true;
+    }
     let node = element;
     for (let level = 0; level <= CURRENT_PAGE_MARK_LEVELS && node instanceof Element; level += 1) {
       if (marksCurrentPage(node)) return true;
@@ -5540,10 +5553,35 @@
    * searched, and (1)–(3) are what make a wider scope safe here when it would
    * not be for a control identified by the word "Next".
    */
-  function findNumberedPagerControl(list, note = {}) {
+  function findNumberedPagerControl(list, note = {}, visited = []) {
+    /**
+     * WHERE A PAGER IS NOT, resolved once for the whole climb.
+     *
+     * The scope widens by four ancestors so a pager rendered below the list is
+     * still found, and four levels up from the list on a two-column hiring page
+     * reaches the applicant's own detail panel as well. That was tolerable
+     * while a number had to be marked `aria-current` to be pressed; the ordinal
+     * reader below needs no mark at all, so the licence has to be made precise
+     * instead: **a pager is chrome AROUND the list — never something painted
+     * inside one person's row, and never something inside the panel showing one
+     * person.** A star rating is the shape this exists to refuse: a row of
+     * numeric controls ascending from one, sharing a parent, which would
+     * otherwise satisfy every proof the group makes.
+     *
+     * `mountedApplicantPanel` rather than `applicantPanel`, deliberately: the
+     * latter falls back to the widest `main` on the page when no panel is
+     * mounted, and that container is exactly where the pager lives.
+     */
+    const rows = applicantRows().map((row) => row.element).filter((row) => row instanceof Element);
+    const panel = mountedApplicantPanel();
+    const outsideTheContent = (element) => {
+      if (panel instanceof Element && panel.contains(element)) return false;
+      return !rows.some((row) => row.contains(element));
+    };
+
     let scope = list;
     for (let level = 0; level <= PAGER_SCOPE_LEVELS && scope; level += 1) {
-      const found = numberedPagerWithin(scope, note);
+      const found = numberedPagerWithin(scope, note, visited, outsideTheContent);
       if (found) {
         note.reason = "numbered-pager";
         return found;
@@ -5558,14 +5596,19 @@
     // pages left. Written down rather than reasoned about again from source —
     // 3.9.2 spent two rounds guessing at a defect one downloaded report settled.
     if (!note.reason) {
-      note.reason = note.numbered > 0
-        ? (note.marked === 1 ? "no-next-number" : note.marked > 1 ? "many-marked-current" : "no-current-page")
-        : "no-pager";
+      // Only two of these mean the LIST has ended, and `isConclusivePagerReason`
+      // is where that is decided — everything else means this reader could not
+      // see, and a run that completes on "I could not see" can never restart.
+      note.reason = note.refused
+        ? "pagination-refused"
+        : note.numbered > 0
+          ? (note.ordinal === "not-a-pager" ? "unreadable-pager" : "no-next-number")
+          : "no-pager";
     }
     return null;
   }
 
-  function numberedPagerWithin(scope, note = {}) {
+  function numberedPagerWithin(scope, note = {}, visited = [], outsideTheContent = () => true) {
     // Grouped by the parent the numeric controls share, so a pager is told from
     // numbers scattered through the list — a rating, a count, a year in a card.
     const groups = new Map();
@@ -5573,6 +5616,9 @@
       if (!isVisible(element)) continue;
       const page = pagerPageNumber(element);
       if (page === null) continue;
+      // A number painted inside somebody's row, or inside the panel showing one
+      // person, is never a page. See `findNumberedPagerControl`.
+      if (!outsideTheContent(element)) continue;
       const parent = element.parentElement?.parentElement || element.parentElement;
       if (!parent) continue;
       if (!groups.has(parent)) groups.set(parent, []);
@@ -5584,11 +5630,37 @@
       if (members.length < 2) continue;
       note.numbered = Math.max(note.numbered || 0, members.length);
       const marked = members.filter((member) => isCurrentPageControl(member.element, members));
-      // Exactly one current page. None means this is not a pager, or is one that
-      // will not say where it is — either way there is nothing to be next to.
       note.marked = Math.max(note.marked || 0, marked.length);
-      if (marked.length !== 1) continue;
-      const current = marked[0].page;
+
+      /**
+       * WHICH PAGE IS BEING SHOWN — by ARIA when the pager says, and by the
+       * walk's own history when it does not.
+       *
+       * Exactly one control marked current is still the answer whenever there
+       * is one, and nothing about that path changes. What changes is the other
+       * branch: `marked.length !== 1` used to skip the group, and skipping it
+       * is why the run never left page one on a pager that marks the current
+       * page with a class rather than with ARIA. Two builds guessed at where
+       * the attribute sits; this stops needing it.
+       *
+       * `planPagerOrdinalStep` carries the arithmetic and the shape proof, and
+       * `visited` is what this walk has pressed — the only history that can
+       * say where a silent pager has got to.
+       */
+      let current = null;
+      if (marked.length === 1) {
+        current = marked[0].page;
+        note.currentPageFrom = "aria";
+      } else {
+        const step = Applicants.planPagerOrdinalStep({
+          offered: members.map((member) => member.page),
+          visited
+        });
+        note.ordinal = step.reason || "";
+        if (!step.ok) continue;
+        current = step.current;
+        note.currentPageFrom = "ordinal";
+      }
       note.currentPage = current;
       const next = members.find((member) => member.page === current + 1);
       if (!next) continue;
@@ -5604,7 +5676,13 @@
         // page three, and a run must page forward from where it actually is.
         currentPage: current
       });
-      if (!verdict.allowed) continue;
+      if (!verdict.allowed) {
+        // Recorded rather than swallowed: "the click policy refused the pager"
+        // and "there is no next page" are the same silence otherwise, and only
+        // one of them may end a run.
+        note.refused = verdict.reason || "refused";
+        continue;
+      }
       return { element, verdict };
     }
     return null;
@@ -5629,7 +5707,10 @@
     // Waited for, exactly as the on-demand walk does: a missing list is far
     // more often a list being rebuilt than a list that is not there.
     const list = await waitForApplicantList();
-    diagnostics.listScroll = { passes: 0, rows: 0, pages: 1, paged: 0, stoppedBy: "no-list" };
+    diagnostics.listScroll = {
+      passes: 0, rows: 0, pages: 1, paged: 0, stoppedBy: "no-list",
+      visitedPages: [], pagerTries: 0, blindSteps: 0
+    };
     if (!list) return applicantRows();
 
     const target = chooseScrollTarget(list);
@@ -5681,7 +5762,7 @@
         if (atBottom && quiet >= LIST_QUIET_PASSES) {
           // Settled on THIS page. Is there another one?
           const pager = fruitless < MAX_FRUITLESS_PAGINATION
-            ? findApplicantPaginationControl(applicantList() || list)
+            ? findApplicantPaginationControl(applicantList() || list, {}, diagnostics.listScroll.visitedPages)
             : null;
           if (!pager) {
             diagnostics.listScroll.stoppedBy = fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
@@ -5702,7 +5783,8 @@
           // one. What arrived decides, never the click — and a page of 25 new
           // people is what arriving looks like, whatever the count does.
           const gained = takeNewRows();
-          fruitless = gained > 0 ? 0 : fruitless + 1;
+          const stepped = notePageReached(diagnostics.listScroll, pager, gained > 0);
+          fruitless = (gained > 0 || stepped) ? 0 : fruitless + 1;
           if (gained > 0) diagnostics.listScroll.pages += 1;
           quiet = 0;
           scrollPanelTo(0, target);
@@ -5747,6 +5829,61 @@
     walk.pagerReason = pager.verdict.reason || "";
     walk.pagerLabel = pager.verdict.label || "";
     if (pager.verdict.page) walk.pages = Math.max(walk.pages || 1, pager.verdict.page);
+  }
+
+  /**
+   * How many times a press that changed nothing may be tried again before it is
+   * believed. Two: once is a click that may simply not have registered.
+   */
+  const PAGER_SAME_PAGE_TRIES = 2;
+
+  /**
+   * How many pages the ordinal walk may claim to have stepped over without the
+   * list ever changing under it.
+   *
+   * In practice it needs one, and only at the very start: the assumed page is
+   * the lowest the pager offers, so the first press is a no-op exactly when the
+   * recruiter had already left the list on page two. Beyond that a pager that
+   * keeps changing nothing is not a pager that is working, and `fruitless` must
+   * be allowed to retire it rather than being reset forever by an inference.
+   */
+  const MAX_BLIND_PAGE_STEPS = 2;
+
+  /**
+   * Where the press left the run, which is the whole basis of the ordinal walk.
+   *
+   * **Pressing the control labelled N leaves you on page N.** That is true of
+   * every pager whatever it marks, and it is the fact the ordinal reader stands
+   * on — so it is recorded here, once, on the walk that the reader reads back.
+   *
+   * A press that changed which people are on the list is unambiguous. A press
+   * that changed nothing is two different things: the page was already showing
+   * (harmless, and the walk should step past it) or the click did not take
+   * (dangerous, because stepping past would skip a page of applicants nobody
+   * ever opens). It is tried `PAGER_SAME_PAGE_TRIES` times before the first
+   * reading is believed, and only `MAX_BLIND_PAGE_STEPS` of those inferences
+   * may be made in a row, so a dead pager still reaches retirement.
+   *
+   * Returns whether the walk advanced, which is what stops a page the run had
+   * already collected from counting against the pager.
+   */
+  function notePageReached(walk, pager, movedOn) {
+    const page = pager?.verdict?.page;
+    if (!walk || !Number.isInteger(page)) return false;
+    if (!Array.isArray(walk.visitedPages)) walk.visitedPages = [];
+    if (movedOn) {
+      if (!walk.visitedPages.includes(page)) walk.visitedPages.push(page);
+      walk.pagerTries = 0;
+      walk.blindSteps = 0;
+      return true;
+    }
+    walk.pagerTries = (walk.pagerTries || 0) + 1;
+    if (walk.pagerTries < PAGER_SAME_PAGE_TRIES) return false;
+    if ((walk.blindSteps || 0) >= MAX_BLIND_PAGE_STEPS) return false;
+    if (!walk.visitedPages.includes(page)) walk.visitedPages.push(page);
+    walk.pagerTries = 0;
+    walk.blindSteps = (walk.blindSteps || 0) + 1;
+    return true;
   }
 
   /**
@@ -5844,6 +5981,10 @@
     diagnostics.listScroll = {
       passes: 0, rows: applicantRows().length, pages: 1, paged: 0,
       fruitless: 0, mode: "on-demand", stoppedBy: "running",
+      // Every page this walk has pressed its way onto, in order. The ordinal
+      // reader's only memory, and the reason a pager that names no current page
+      // can still be walked one page at a time.
+      visitedPages: [], pagerTries: 0, blindSteps: 0,
       // Present from the start so a report that carries neither is telling you
       // the walk never reached the end of a page, rather than that the fields
       // are missing. `pagerSearch` says why nothing was pressed;
@@ -6125,13 +6266,30 @@
       // the list.
       const pagerSearch = {};
       const pager = walk.fruitless < MAX_FRUITLESS_PAGINATION
-        ? findApplicantPaginationControl(live, pagerSearch)
+        ? findApplicantPaginationControl(live, pagerSearch, walk.visitedPages)
         : null;
       walk.pagerSearch = pagerSearch;
       if (!pager) {
-        walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
+        // WHICH nothing, and it decides whether this job may be called finished.
+        //
+        // 3.9.4 recorded the reason and then threw the distinction away here:
+        // every reason arrived as `settled`, which is CONCLUSIVE, so a pager
+        // this build could not read completed the job exactly as a list with no
+        // pager did — and `claimAutoRun` refuses to re-arm a completed job, so
+        // the run could not restart itself to try again. That is the reported
+        // "it does not move to the next page" in its most permanent form.
+        walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION
+          ? "pagination-retired"
+          : Applicants.isConclusivePagerReason(pagerSearch.reason) ? "settled" : "pagination-unreadable";
         break;
       }
+      // WHO the list is showing, taken before the press. A page swap replaces 25
+      // people with 25 other people, and that is the only signal that says the
+      // pager worked — `wanted()` cannot, because a page the last run already
+      // collected is a page with no work on it and a pager scored on work alone
+      // is retired by three such pages in a row.
+      const showing = new Set(applicantRows().map(rowKey));
+      const swapped = () => applicantRows().some((row) => !showing.has(rowKey(row)));
       try {
         clickApplicantPager(pager);
         walk.paged += 1;
@@ -6148,22 +6306,32 @@
       // and a re-mount then mutates continuously, so the other outcome was the
       // 6 s timeout, spent whether or not the page had already arrived.
       //
-      // The rows answer directly, and they are the thing being waited for.
-      const arrived = await waitFor(() => wanted(), {
+      // The rows answer directly, and they are the thing being waited for —
+      // either a row this run still owes, or simply a different set of people,
+      // because on a resumed run the next page may be one it has already done.
+      pagerSearch.arrived = Boolean(await waitFor(() => wanted() || swapped(), {
         timeoutMs: PAGE_ARRIVAL_TIMEOUT_MS,
         pollMs: 250,
         label: "applicant-page"
-      });
+      }));
       // Then let the new page finish mounting before it is read or scrolled.
       await waitForDomQuiet(400, 3000);
-      // What the click revealed decides, never the click — and "revealed" is a
-      // row this run has not collected, not a bigger number. A pager that swaps
-      // 25 people for 25 different people moved the list forward by a whole
-      // page; scoring that as nothing is what collected one page of 665.
-      const produced = Boolean(arrived) || wanted();
-      walk.fruitless = produced ? 0 : walk.fruitless + 1;
-      if (produced) {
-        walk.pages += 1;
+      // TWO QUESTIONS, and answering them with one boolean was a defect of its
+      // own. "Did the pager work" is whether the list is showing different
+      // people; "is there anything to do here" is whether any of them is
+      // unprocessed. A resumed run walking back through pages it has already
+      // collected answers yes then no, and scoring that as a fruitless press
+      // retired a working pager three pages into the walk.
+      const movedOn = swapped();
+      const produced = wanted();
+      const stepped = notePageReached(walk, pager, movedOn);
+      walk.fruitless = (movedOn || stepped) ? 0 : walk.fruitless + 1;
+      if (movedOn) {
+        // `notePagerUsed` has already taken the page number off the control
+        // when there was one, so counting again would report page three on
+        // arriving at page two. Only an unnumbered pager — a `Next` — leaves
+        // nothing to read and has to be tallied.
+        if (!Number.isInteger(pager.verdict.page)) walk.pages += 1;
         walk.rows = applicantRows().length;
         // The container that was scrolled has been replaced along with the page
         // it belonged to, so the "start the new page at its top" has to address
@@ -6171,8 +6339,12 @@
         // nothing, and the next pass then starts half way down page two.
         const paged = applicantList();
         if (paged) scrollPanelTo(0, chooseScrollTarget(paged));
-        return walk.rows;
       }
+      // Only work ends the call. A page that turned out to be one this run had
+      // already collected is progress the caller cannot use, so the walk keeps
+      // going and pages again rather than handing back an empty list and being
+      // read as the end of one.
+      if (produced) return walk.rows;
       // A click that revealed nothing earns the same confirmation the first
       // verdict had to earn, rather than letting the next pass press again
       // immediately. `fruitless` still retires the control after three.
@@ -6194,7 +6366,12 @@
    */
   function logListWalk(walk) {
     if (!walk) return;
-    const label = `[Profile Vault ${BUILD_ID}] applicant list — ${walk.rows} row(s) across ${walk.pages} page(s), stopped: ${walk.stoppedBy}`;
+    // The pager's own verdict is on the first line rather than inside the
+    // object: "stopped: settled" and "stopped: settled (pager: no-pager)" are
+    // the same sentence with and without the cause, and only one of them can be
+    // acted on without opening anything.
+    const pagerNote = walk.pagerSearch?.reason ? ` (pager: ${walk.pagerSearch.reason})` : "";
+    const label = `[Profile Vault ${BUILD_ID}] applicant list — ${walk.rows} row(s) across ${walk.pages} page(s), stopped: ${walk.stoppedBy}${pagerNote}`;
     // "list-exhausted" is the on-demand walk's own clean ending: the run asked
     // for another row, the list could neither scroll nor page, so that was all
     // of them. It is a settled end, not a truncated one.
@@ -6939,14 +7116,21 @@
               state.run.state = Applicants.RUN_STATE.COMPLETED;
               break;
             }
+            // Paging forward IS progress, even when the page it reached was
+            // one this run had already collected — a resumed run walks several
+            // such pages to reach the first with work on it, and spending the
+            // allowance on them would stop it short of the work every time.
+            if (listDiagnostics.listScroll.paged !== pagedBefore) continue;
             inconclusive += 1;
             if (inconclusive < MAX_INCONCLUSIVE_GROWTHS) continue;
             // Out of retries and still unable to see the end of the list. This must
             // NOT be COMPLETED: stopping leaves the standing instruction armed, so
             // staying on the tab or reloading picks the run up again.
             state.run.state = Applicants.RUN_STATE.STOPPED;
+            const pagerWhy = listDiagnostics.listScroll.pagerSearch?.reason || "";
             state.run.lastError =
-              `Stopped after ${processed.size} applicant(s): the list would not reveal more rows (${stoppedBy}). `
+              `Stopped after ${processed.size} applicant(s): the list would not reveal more rows `
+              + `(${stoppedBy}${pagerWhy ? `, pager: ${pagerWhy}` : ""}). `
               + "The run is not complete — it will continue when this page is reloaded or reopened.";
             break;
           }
