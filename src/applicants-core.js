@@ -556,15 +556,101 @@
    * Accepts `2` and `page 2`, so the same reader answers for the text and for
    * the accessible name.
    */
+  /**
+   * A NEXT-PAGE CONTROL WHOSE NAME SAYS MORE THAN "Next".
+   *
+   * `APPLICANT_PAGINATION_PATTERN` above is anchored `^…$`, so it recognises a
+   * next-page control only when the label is `next` or `next page` and nothing
+   * else. Executed against real names:
+   *
+   *     "Go to next page"        -> refused
+   *     "Next page of applicants"-> refused
+   *     "Next, page 2 of 27"     -> refused
+   *
+   * Same defect as `pageNumberFrom`, same consequence: with neither reader
+   * finding anything, `note.reason` is `no-pager`, which is CONCLUSIVE, and the
+   * job completes at the bottom of page one.
+   *
+   * Added AFTER the working reader rather than replacing it (the multiple-UI
+   * guide's one rule), and deliberately NOT the obvious fix of un-anchoring
+   * `next`. **Every alternative here requires the word `page`**, and that is
+   * what keeps two real neighbours of a pager refused:
+   *
+   *     "Next applicant" / "Go to next applicant"  — moves the PANEL, not the
+   *       list. It would read as a working pager while collecting nobody new.
+   *     "Next: Message" / "Next steps"             — the shape the anchored
+   *       pattern was written to refuse in the first place.
+   *
+   * The denylist still runs before any of this, so an ATS action whose label
+   * happens to contain "next page" is refused before it is ever considered.
+   */
+  const APPLICANT_PAGINATION_PHRASE_PATTERN =
+    /\bnext\s+page\b|\bnext\s*[,;-]\s*page\s+\d{1,4}\b|\b(?:show|load|see)\s+more\s+(?:results?|applicants?)\b/i;
+
   function pageNumberFrom(value) {
     const text = normalizeLabel(value);
-    // A bare number, or a number the label calls a page. `25 of 665` is NOT a
-    // page — it is the range a list is showing, it is rendered right beside the
-    // pager, and reading it as page 25 would jump the run past 24 pages of
-    // applicants. The word `page` is what licenses the `of` form.
+    // A bare number is a page only when it is the WHOLE label: that is the
+    // number a pager paints, and anything around it means the string is a
+    // sentence rather than a page.
     if (/^\d{1,4}$/.test(text)) return Number(text);
-    const named = /^page\s+(\d{1,4})(?:\s+of\s+\d{1,4})?$/.exec(text);
-    return named ? Number(named[1]) : null;
+
+    /**
+     * A NUMBER THE LABEL CALLS A PAGE — found where it sits, not only when it is
+     * all the label says.
+     *
+     * **THE DEFECT (3.9.7), and it is the whole of "there are 2 pages and it
+     * stops at the first".** Both readings here were anchored `^…$`, so a page
+     * number was recognised only in a label that was `2` or `page 2` and nothing
+     * else. Every richer name a real pager gives its controls returned null:
+     *
+     *     "Page 1, current page"      -> null
+     *     "Go to page 2"              -> null
+     *     "Page 2, go to page 2"      -> null
+     *     "Page 3 of 27, go to page 3"-> null
+     *
+     * A control that offers no page number is not a member of the pager, so on
+     * such a layout the group has ZERO members, it is dropped for having fewer
+     * than two, and the search reports `no-pager` — which is CONCLUSIVE. The job
+     * is marked COMPLETED at the bottom of page one and `claimAutoRun` refuses
+     * to re-arm a completed job.
+     *
+     * **The three readers added for "which page is being shown" could not
+     * possibly have helped**, because all three run only on members of a group
+     * that was never formed. Worse, 3.9.5 added `saysCurrentPage` to recognise
+     * exactly the string `"Page 1, current page"` — the very string this
+     * function rejected — so the two readers contradicted each other and the
+     * newer one was unreachable. That contradiction is what this repairs, and
+     * the test below asserts the two agree.
+     *
+     * THE REFUSAL THAT MATTERS IS UNCHANGED AND IS WHY THE WORD IS REQUIRED.
+     * `25 of 665` is NOT a page — it is the range the list is showing, it is
+     * rendered right beside the pager, and reading it as page 25 would jump the
+     * run past 24 pages of applicants. The word `page` immediately before the
+     * number is what licenses reading it, so a bare `of` form still returns
+     * null. The FIRST occurrence is taken, so `page 2 of 27` is page two rather
+     * than page twenty-seven.
+     */
+    const named = /\bpage\s+(\d{1,4})\b/.exec(text);
+    if (named) return Number(named[1]);
+
+    /**
+     * The number a control leads with when the only thing beside it is a
+     * screen-reader note saying it is the page being shown — `textContent` of
+     * `<button>1<span class="visually-hidden">Current page</span></button>` is
+     * `1Current page`, with no space for the rule above to find.
+     *
+     * Deliberately gated on `saysCurrentPage` rather than on the mere presence
+     * of the word: it is the one phrase that proves the string is about paging,
+     * and it keeps `3 results per page` — a real control that sits beside a real
+     * pager — from being read as page three.
+     */
+    const leading = /^(\d{1,4})(\D[\s\S]*)?$/.exec(text);
+    // The note is asked of what follows the number rather than of the whole
+    // string, because there is no word boundary between `1` and `Current` — a
+    // digit and a letter are both word characters, so `saysCurrentPage` cannot
+    // see the phrase while the number is still stuck to the front of it.
+    if (leading && saysCurrentPage(leading[2] || "")) return Number(leading[1]);
+    return null;
   }
 
   /**
@@ -588,8 +674,15 @@
    * A word that only means "current" counts. `page 2` on its own never does,
    * because every member of a pager says that about itself.
    */
+  // `(?:^|[^a-z])` rather than `\b` in front of the two phrases that can follow a
+  // number directly: `textContent` of `<button>1<span
+  // class="visually-hidden">Current page</span></button>` is `1Current page`,
+  // and there is NO word boundary between `1` and `Current` — a digit and a
+  // letter are both word characters. `\b` therefore failed on the one shape a
+  // pager most often renders, which is the same class of defect as the anchored
+  // `pageNumberFrom` above: a reader that cannot see its own subject.
   const CURRENT_PAGE_NAME_PATTERN =
-    /(?:\bcurrent(?:ly)?\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*current\b|\byou(?:'re|\s+are)\s+on\s+page\b|\bselected\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*selected\b)/i;
+    /(?:(?:^|[^a-z])current(?:ly)?\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*current\b|\byou(?:'re|\s+are)\s+on\s+page\b|(?:^|[^a-z])selected\s+page\b|\bpage\s+\d{1,4}\s*[,;-]?\s*selected\b)/i;
 
   function saysCurrentPage(value) {
     const text = normalizeLabel(value);
@@ -836,7 +929,11 @@
       // `aria-label`, and `label` above prefers the text whenever there is one —
       // so the string that actually says what the control is was never read.
       const named = APPLICANT_PAGINATION_PATTERN.test(paginationLabel(normalizeLabel(text)))
-        || APPLICANT_PAGINATION_PATTERN.test(paginationLabel(normalizeLabel(ariaLabel)));
+        || APPLICANT_PAGINATION_PATTERN.test(paginationLabel(normalizeLabel(ariaLabel)))
+        // The same control, named in a full sentence. See the pattern for why
+        // every alternative in it requires the word `page`.
+        || APPLICANT_PAGINATION_PHRASE_PATTERN.test(normalizeLabel(text))
+        || APPLICANT_PAGINATION_PHRASE_PATTERN.test(normalizeLabel(ariaLabel));
 
       // THE NUMBER SECOND, and only ever with the caller's proof. A bare `2` is
       // still refused on its own — nothing about the string says it is a page.
@@ -4253,7 +4350,8 @@
     APPLICANT_MENU_OPENER_WITHIN_PATTERN,
     isApplicantMenuOpenerLabel,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
-    APPLICANT_PAGINATION_PATTERN, classifyApplicantControl, pageNumberFrom, paginationLabel,
+    APPLICANT_PAGINATION_PATTERN, APPLICANT_PAGINATION_PHRASE_PATTERN,
+    classifyApplicantControl, pageNumberFrom, paginationLabel,
     saysCurrentPage, planPagerOrdinalStep,
     // qualifications and screening
     QUALIFICATION_CATEGORY, QUALIFICATION_RESULT, QUALIFICATION_SOURCE,

@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.9.6";
+  const BUILD_ID = "2026-08-25-react-v3.9.7";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -5623,6 +5623,23 @@
     // `settled`, which is conclusive, so the second one completed a job that had
     // pages left. Written down rather than reasoned about again from source —
     // 3.9.2 spent two rounds guessing at a defect one downloaded report settled.
+    /**
+     * WHAT THE SEARCH ACTUALLY LOOKED AT, when it found no pager.
+     *
+     * Four rounds have now been spent on this one control, and every one of them
+     * ended the same way: a reason naming which rule declined, and no way to see
+     * WHICH STRING it declined. `no-pager` says "nothing here offers a page" —
+     * it cannot say that a control reading `Go to page 2` was sitting right
+     * there and was refused because the reader wanted the label to be `2` and
+     * nothing else. That is exactly the defect 3.9.7 fixes, and it would have
+     * been one line in a console report rather than four rounds of reading
+     * source.
+     *
+     * Read-only, capped, and only on the failing path: a short sample of the
+     * controls near the list that a pager could plausibly be, with the strings
+     * every rule above is judging. Nothing is pressed and nothing is stored.
+     */
+    if (!note.reason) note.candidates = describePagerCandidates(scope || list, outsideTheContent);
     if (!note.reason) {
       // Only some of these mean the LIST has ended, and `isConclusivePagerReason`
       // is where that is decided — everything else means this reader could not
@@ -5720,6 +5737,43 @@
       markers.push({ element, page, pressable: false });
     }
     return markers;
+  }
+
+  /** How many controls a failed pager search reports. Enough to see a pager. */
+  const PAGER_CANDIDATE_SAMPLE = 12;
+  /** Longer than this is a sentence, not a pager control. */
+  const PAGER_CANDIDATE_LABEL_MAX = 48;
+
+  /**
+   * The controls a failed pager search was choosing between, in the recruiter's
+   * own console. See the call site for why this exists.
+   */
+  function describePagerCandidates(scope, outsideTheContent = () => true) {
+    const seen = [];
+    if (!(scope instanceof Element)) return seen;
+    for (const element of scope.querySelectorAll("button,a,[role='button']")) {
+      if (seen.length >= PAGER_CANDIDATE_SAMPLE) break;
+      if (!isVisible(element)) continue;
+      if (!outsideTheContent(element)) continue;
+      const text = cleanText(element.textContent);
+      const aria = cleanText(element.getAttribute("aria-label"));
+      // A pager control is a number or a short phrase about one. Anything long
+      // is a row, a filter or a menu item, and listing them all would bury the
+      // one line this exists to show.
+      if (text.length > PAGER_CANDIDATE_LABEL_MAX && aria.length > PAGER_CANDIDATE_LABEL_MAX) continue;
+      if (!/\d/.test(text) && !/\d/.test(aria) && !/page|next|prev/i.test(`${text} ${aria}`)) continue;
+      seen.push({
+        tag: element.tagName.toLowerCase(),
+        text: text.slice(0, PAGER_CANDIDATE_LABEL_MAX),
+        aria: aria.slice(0, PAGER_CANDIDATE_LABEL_MAX),
+        // The three things every rule above is judging, so a report says which
+        // rule declined and which string it declined.
+        page: pagerPageNumber(element),
+        current: cleanText(element.getAttribute("aria-current")),
+        disabled: Boolean(element.disabled) || element.getAttribute("aria-disabled") === "true"
+      });
+    }
+    return seen;
   }
 
   function numberedPagerWithin(

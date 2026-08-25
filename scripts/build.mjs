@@ -45,8 +45,8 @@ await cp(path.join(extensionDir, "icons"), path.join(distDir, "icons"), { recurs
 await cp(path.join(extensionDir, "vendor"), path.join(distDir, "vendor"), { recursive: true });
 
 const buildMeta = {
-  version: "3.9.6",
-  buildId: "2026-08-25-react-v3.9.6",
+  version: "3.9.7",
+  buildId: "2026-08-25-react-v3.9.7",
   ui: "React + TypeScript",
   generatedAt: new Date().toISOString()
 };

@@ -1,5 +1,86 @@
 # CHANGELOG.md
 
+## 3.9.7 — the readers contradicted each other, so none of them ran
+
+TASK-0186. **"It is still not working. I want the extension to click 2, 3, or the
+next page number if Next is not available."** — reported against 3.9.6, which is
+the build that was loaded.
+
+Four builds had now worked on this control. 3.9.3, 3.9.4 and 3.9.5 each answered
+*which page is being shown* a different way; 3.9.6 fixed how the members of a
+pager are **grouped**. Every one of them operates on controls that offered a page
+number in the first place, and that is the step that was broken:
+
+```js
+if (/^\d{1,4}$/.test(text)) return Number(text);
+const named = /^page\s+(\d{1,4})(?:\s+of\s+\d{1,4})?$/.exec(text);
+```
+
+Both readings are anchored `^…$`, so a page was recognised **only in a label that
+was `2` or `page 2` and nothing else**. Executed against the names a real pager
+gives its controls:
+
+```
+"Page 1, current page"       -> null
+"Go to page 2"               -> null
+"Page 2, go to page 2"       -> null
+"Page 3 of 27, go to page 3" -> null
+```
+
+A control offering no page number is not a member of the pager. On such a layout
+the group has **zero** members, it is dropped for having fewer than two, and the
+search reports `no-pager` — which is CONCLUSIVE. The job is marked COMPLETED at
+the bottom of page one, and `claimAutoRun` refuses to re-arm a completed job.
+
+**The sharpest evidence that this was the defect is inside 3.9.5 itself.** That
+release added `saysCurrentPage` to recognise exactly `"Page 1, current page"` —
+the very string `pageNumberFrom` rejected. The two readers contradicted each
+other, and because the number is read *first* and gates membership, the newer one
+could never run. A test now asserts the invariant permanently: anything
+`saysCurrentPage` accepts must also yield that page's number.
+
+The word `page` is still what licenses reading a number that is not the whole
+label, and the refusal that matters is unchanged — `25 of 665` is the range the
+list is showing, rendered right beside the pager, and reading it as page 25 would
+jump the run past 24 pages of applicants. The **first** occurrence is taken, so
+`page 2 of 27` is page two. A number a control merely leads with is read only
+when what follows it says the control is the page being shown, which keeps
+`3 results per page` — a real control that sits beside a real pager — from being
+read as page three.
+
+**The NAMED reader — the one that looks for "Next" before any number is
+considered — had the identical defect**, and a parallel audit of every anchored
+label rule in the codebase is what surfaced it. `APPLICANT_PAGINATION_PATTERN` is
+also `^…$`, so `"Go to next page"`, `"Next page of applicants"` and
+`"Next, page 2 of 27"` were all refused. With *both* readers blind, a page with a
+perfectly ordinary Next button reports `no-pager` and completes the job. The fix
+is a phrase reader added after the anchored one, and it is deliberately **not**
+the obvious un-anchoring of `next`: every alternative in it requires the word
+`page`, which is what keeps `"Next applicant"` and `"Go to next applicant"`
+refused — those move the *panel*, not the list, so pressing one would read as a
+working pager while collecting nobody new. `"Next: Message"` and `"Next steps"`
+stay refused for the same reason, and the denylist still runs first.
+
+`saysCurrentPage` had the same class of defect at the same boundary and is fixed
+with it: `textContent` of `<button>1<span class="visually-hidden">Current
+page</span></button>` is `1Current page`, and there is **no word boundary between
+a digit and a letter**, so `\bcurrent` could not match the one shape a pager most
+often renders.
+
+**And a failed search now reports what it was looking at.** `no-pager` says
+"nothing here offers a page"; it could not say that a control reading
+`Go to page 2` was sitting right there and was declined for not being called `2`.
+A capped, read-only sample of the nearby controls — tag, text, `aria-label`, the
+page number each rule read from it, `aria-current`, disabled — is recorded on the
+failing path only. That is one line of a console report instead of a fifth round
+of reading source.
+
+No new click — still exactly eight. No selector, schema, CSV column or permission
+is touched. Two new tests, one of them a permanent invariant.
+
+**No live claim: rule 20 stands.** `npm run check` passed; loading `dist/` in
+Chrome is the user's step.
+
 ## 3.9.6 — the pager was never read, because the group was never formed
 
 TASK-0185. **"There are 2 pages but it stops at the first"**, reported a third

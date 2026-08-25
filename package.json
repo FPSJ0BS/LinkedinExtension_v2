@@ -1,6 +1,6 @@
 {
   "name": "profile-vault-react-extension",
-  "version": "3.9.6",
+  "version": "3.9.7",
   "private": true,
   "type": "module",
   "description": "React and TypeScript Manifest V3 extension for reviewing, storing, importing, and exporting visible LinkedIn profile data.",

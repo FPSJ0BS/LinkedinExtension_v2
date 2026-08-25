@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "id": "TASK-0186",
+  "name": "Read a page number wherever the label says it, not only when the label is nothing else",
+  "request": "Read a page number wherever the label says it, not only when the label is nothing else",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T11:29:14.867Z",
+  "completedAt": "2026-08-25T11:36:26.862Z",
+  "startCommit": "4875a8570f8383f28ccca4aeca83c8492bb7e448",
+  "gitRef": "task/TASK-0186",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build 3.9.7, 643 tests, doc links, validate)"
+  ],
+  "result": "3.9.7 — the readers of a pager label contradicted each other, so none of them ran. Proved by EXECUTION, not by reading: pageNumberFrom('Page 1, current page') was null while saysCurrentPage('Page 1, current page') was true. Both readings in pageNumberFrom were anchored ^...$, so a page was recognised only in a label that was '2' or 'page 2' and nothing else; every richer name a real pager gives returned null — 'Page 1, current page', 'Go to page 2', 'Page 2, go to page 2', 'Page 3 of 27, go to page 3'. A control offering no page number is not a member of the pager, so the group had ZERO members, was dropped for having fewer than two, and the search reported no-pager, which is CONCLUSIVE: COMPLETED at the bottom of page one and claimAutoRun refuses to re-arm it. That is why 3.9.3, 3.9.4, 3.9.5 and 3.9.6 could not help — all four work on members of a group that was never formed, and 3.9.5's saysCurrentPage was written to recognise the exact string pageNumberFrom rejected, so the newer reader was unreachable. A permanent test now asserts the invariant: anything saysCurrentPage accepts must also yield that page's number. The word 'page' still licenses a number that is not the whole label, so '25 of 665' — the range beside the pager, reading it as page 25 would jump 24 pages — is still refused, and the FIRST occurrence is taken so 'page 2 of 27' is page two. A leading number is read only when what follows says the control is the page being shown, keeping '3 results per page' from being page three. saysCurrentPage had the same defect at the same boundary and is fixed with it: there is no word boundary between a digit and a letter, so \\bcurrent could not match '1Current page', the textContent shape a pager most often renders. THE NAMED READER HAD THE IDENTICAL DEFECT, found by a parallel audit of every anchored label rule: APPLICANT_PAGINATION_PATTERN is also ^...$, so 'Go to next page', 'Next page of applicants' and 'Next, page 2 of 27' were refused — with both readers blind an ordinary Next button also completes the job. Fixed with a phrase reader added after the anchored one, deliberately NOT by un-anchoring 'next': every alternative requires the word 'page', which keeps 'Next applicant' and 'Go to next applicant' refused (they move the panel, not the list, and would read as a working pager while collecting nobody new), along with 'Next: Message' and 'Next steps'. Denylist unchanged and still first — re-asserted against Message, Reject, Shortlist, Move to next stage, Rate, Good fit, Add a note, Archive, Send InMail, Save. AND A FAILED SEARCH NOW REPORTS WHAT IT LOOKED AT: a capped read-only sample of nearby controls with tag, text, aria-label, the page number each rule read, aria-current and disabled, on the failing path only — four rounds were spent on a defect one console line would have settled. No new click, still exactly eight; no selector, schema, CSV column or permission touched. Version bumped to 3.9.7 in all six asserted places. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, six version locations."
+}

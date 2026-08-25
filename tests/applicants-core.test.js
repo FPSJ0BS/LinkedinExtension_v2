@@ -8690,6 +8690,138 @@ test("3.9.5: a pager that names no current page is walked one page at a time, ne
 // the bottom of page one and `claimAutoRun` refuses to re-arm it.
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// 3.9.7 — the readers contradicted each other, so none of them ran.
+//
+// "It is still not working. I want the extension to click 2, 3, or the next
+// page number if Next is not available."
+//
+// 3.9.3, 3.9.4 and 3.9.5 each answered "which page is being shown" a different
+// way, and 3.9.6 fixed how the members of a pager are GROUPED. All of it runs on
+// controls that offered a page number in the first place — and `pageNumberFrom`
+// was anchored `^…$`, so it recognised a page only in a label that was `2` or
+// `page 2` and nothing else. Every richer name a real pager gives returned null,
+// the group had zero members, and the search reported `no-pager`, which is
+// CONCLUSIVE.
+//
+// The sharpest evidence is that 3.9.5 added `saysCurrentPage` to recognise
+// exactly "Page 1, current page" — the very string `pageNumberFrom` rejected. A
+// control matching the newer reader could never reach it.
+// --------------------------------------------------------------------------
+
+test("3.9.7: a page number is read where the label says it, not only when it is all the label says", () => {
+  const page = Applicants.pageNumberFrom;
+
+  // THE DEFECT, one line per real accessible name that used to return null. Each
+  // of these is a control on a live pager, and a control offering no page number
+  // is not a member of the pager at all.
+  assert.equal(page("Page 1, current page"), 1, "the page being shown, named for a screen reader");
+  assert.equal(page("Current page, page 1"), 1, "and the same name the other way round");
+  assert.equal(page("Go to page 2"), 2, "the commonest name for a page you can press");
+  assert.equal(page("Page 2, go to page 2"), 2);
+  assert.equal(page("You are on page 1"), 1);
+  assert.equal(page("1Current page"), 1,
+    "textContent with a visually-hidden note welded to the number, which is what a pager renders");
+  assert.equal(page("1, current page"), 1);
+
+  // Unchanged, and still the plain cases.
+  assert.equal(page("1"), 1);
+  assert.equal(page("2"), 2);
+  assert.equal(page("Page 2"), 2);
+
+  // THE FIRST OCCURRENCE, so an elided pager naming its own length cannot be
+  // read as its last page. `page 2 of 27` is page two.
+  assert.equal(page("Page 2 of 27"), 2);
+  assert.equal(page("Page 3 of 27, go to page 3"), 3);
+
+  // THE REFUSAL THAT MATTERS IS UNCHANGED, and it is why the word `page` is
+  // required immediately before the number. `25 of 665` is the range the list is
+  // showing, it is rendered right beside the pager, and reading it as page 25
+  // would jump the run past 24 pages of applicants.
+  for (const not of [
+    "25 of 665", "1 of 25", "Showing 25 of 665",
+    // A real control that sits beside a real pager. It says "page", and it is
+    // not one — which is why the leading-number rule is gated on the phrase that
+    // means "the page being shown" rather than on the word alone.
+    "3 results per page", "25 per page",
+    "Next", "Next page", "page", "", null, undefined,
+    "Rate 4 out of 5", "1a"
+  ]) {
+    assert.equal(page(not), null, `"${not}" is not a page number`);
+  }
+});
+
+test("3.9.7: a Next control named in a sentence is still a Next control", () => {
+  // THE SAME DEFECT AS `pageNumberFrom`, in the reader that runs BEFORE it.
+  // `APPLICANT_PAGINATION_PATTERN` is anchored `^…$`, so it recognised a
+  // next-page control only when the label was exactly `next` or `next page`.
+  // With both readers blind the search reports `no-pager`, which is CONCLUSIVE.
+  const press = (text) => Applicants.classifyApplicantControl({
+    text,
+    purpose: Applicants.CONTROL_PURPOSE.PAGINATION,
+    inContainer: true
+  });
+
+  for (const label of [
+    "Next", "Next page", "Next \u203a", "Next 25 applicants",
+    // The names that used to be refused.
+    "Go to next page", "Go to the next page", "Next page of applicants",
+    "Next, page 2 of 27", "Show more results", "Show more applicants", "Load more results"
+  ]) {
+    assert.equal(press(label).allowed, true, `"${label}" is a next-page control`);
+  }
+
+  // THE NEIGHBOURS THAT MAKE THE WORD `page` MANDATORY, and this is the half
+  // that keeps the widening safe. "Next applicant" moves the PANEL, not the
+  // list: pressing it would read as a working pager while collecting nobody new.
+  for (const label of ["Next applicant", "Go to next applicant", "Next: Message", "Next steps", "Previous page"]) {
+    assert.equal(press(label).allowed, false, `"${label}" is not a next-page control`);
+  }
+
+  // Rule 5 is untouched and runs first, including against a label that would
+  // otherwise satisfy the new phrase reader.
+  for (const label of ["Message", "Reject", "Shortlist", "Move to next stage", "Rate", "Good fit", "Add a note", "Archive", "Send InMail", "Save"]) {
+    const verdict = press(label);
+    assert.equal(verdict.allowed, false, `"${label}" must never be pressed as a pager`);
+    assert.equal(verdict.forbidden, true, `"${label}" must be refused by the denylist`);
+  }
+
+  // A bare number is still refused without the proof the classifier demands —
+  // widening the NAMED reader must not create a second way in for a number.
+  assert.equal(press("2").allowed, false, "a bare number still needs a current page to be next to");
+});
+
+test("3.9.7: PERMANENT — the two readers of a pager label may never contradict each other", () => {
+  // THE INVARIANT, and its violation is what made 3.9.5's work unreachable.
+  //
+  // `saysCurrentPage` decides "this control IS the page being shown".
+  // `pageNumberFrom` decides "this control offers a page number".
+  //
+  // The second runs FIRST and gates the first: a control with no page number
+  // never becomes a member of the group, so `saysCurrentPage` is never asked
+  // about it. A string the newer reader recognises but the older one rejects is
+  // therefore not a small inconsistency — it is a reader that cannot run.
+  for (const name of [
+    "Page 1, current page",
+    "Current page, page 1",
+    "You are on page 1",
+    "you're on page 4",
+    "Page 1 selected",
+    "Selected page 3",
+    "Page 1, current",
+    "1Current page",
+    "1, current page"
+  ]) {
+    assert.equal(Applicants.saysCurrentPage(name), true, `"${name}" says it is the page being shown`);
+    assert.ok(Number.isInteger(Applicants.pageNumberFrom(name)),
+      `"${name}" claims to be the current page, so it must also offer that page's number`);
+  }
+
+  // The one that legitimately has no number is the one that names no page.
+  assert.equal(Applicants.saysCurrentPage("Currently page 6"), true);
+  assert.equal(Applicants.pageNumberFrom("Currently page 6"), 6);
+});
+
 test("3.9.6: a pager the reader could not group is never the end of the list", () => {
   const why = Applicants.pagerSearchReason;
 
