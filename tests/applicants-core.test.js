@@ -1153,19 +1153,26 @@ test("only a record carrying something counts as collected", () => {
 test("the applicants adapter clicks only its gated controls", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const clicks = source.match(/\.click\(\)/g) || [];
-  // Six gated opens — contact, resume, a collapsed section, the next row, the
-  // list's own next-page control (3.7.8, rule 9h) and the opened viewer's own
-  // Download (3.7.9, rule 9i) — plus the one shared dismiss that closes
-  // whichever overlay was opened.
+  // Seven gated opens — contact, resume, a collapsed section, the next row, the
+  // list's own next-page control (3.7.8, rule 9h), the opened viewer's own
+  // Download (3.7.9, rule 9i) and the resume CARD's own Download (3.13.0, rule
+  // 9k) — plus the one shared dismiss that closes whichever overlay was opened.
+  //
+  // The newest is the card's. A resume LinkedIn cannot preview — a `.doc` — gets
+  // a tile, no viewer and a download revealed on hover, so the viewer's Download
+  // is never reachable and pressing the card's own is the only way the file is
+  // ever fetched. It is judged by the same classifier and proven inside the same
+  // card, and it is reached only after the address sweep and the hover have both
+  // produced nothing.
   //
   // The pager has TWO callers since the list became on-demand, and deliberately
   // one call site: a second site for a control rule 9 already names would raise
   // this number without adding a control, and the number is only worth asserting
   // while it counts controls.
-  assert.equal(clicks.length, 8, `only seven gated controls and one dismiss may be clicked, found ${clicks.length}`);
+  assert.equal(clicks.length, 9, `only eight gated controls and one dismiss may be clicked, found ${clicks.length}`);
   assert.equal(
     (source.match(/control\.element\.click\(\)/g) || []).length,
-    5,
+    6,
     "every open must go through a classified verdict"
   );
   assert.match(source, /pager\.element\.click\(\);/, "and so must the pager");
@@ -1431,12 +1438,14 @@ test("the resume is downloaded, not previewed, whenever the page already has the
   // Rule 9e: a link needs no click at all. The recruiter asked for the file, so
   // the document address is looked for BEFORE anything is opened, and the viewer
   // is only opened when the page has not rendered it.
-  assert.match(step, /const rendered = linkedUrl \|\| findResumeDocumentUrl\(null\)/, "the page is asked before the control is clicked");
+  assert.match(step, /const rendered = cardUrl \|\| linkedUrl \|\| findResumeDocumentUrl\(null\)/,
+    "the page is asked before the control is clicked");
   assert.ok(
     step.indexOf("const rendered =") < step.indexOf("control.element.click()"),
     "nothing may be opened until the page has been asked"
   );
-  assert.match(step, /if \(!url\) \{\s*\n\s*\/\/ The page did not render it/, "the viewer is the fallback, not the method");
+  assert.match(step, /if \(!url && control\) \{\s*\n\s*\/\/ The page did not render it/,
+    "the viewer is the fallback, not the method");
   assert.match(step, /diagnostics\.resume\.foundWithoutOpening = Boolean\(rendered\)/, "and it is reported which path was taken");
   // Whichever path ran, a viewer that was opened is closed again — and the close
   // is VERIFIED. Discarding the result is how a preview could be left on screen
@@ -1448,8 +1457,15 @@ test("the resume is downloaded, not previewed, whenever the page already has the
   // name, and it is the one most likely to run long enough for the panel to
   // change underneath it. The fifth is LinkedIn still virus-scanning the file,
   // which is "come back later" rather than an answer. All five close the viewer.
-  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 5,
-    "every one of the five exits from this step closes the viewer");
+  //
+  // A SIXTH call since 3.13.0, and it is deliberately not an exit: a viewer that
+  // opened and produced nothing is closed BEFORE the resume card is hovered and
+  // its own Download pressed, because pressing a control underneath an open
+  // overlay is how a click lands somewhere nobody intended. It is counted here
+  // all the same — this assertion exists so that a viewer can never be left on
+  // screen, and a close that is not on an exit path still has to be a close.
+  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 6,
+    "every one of the five exits from this step closes the viewer, and so does the card fallback");
   const dismiss = source.slice(source.indexOf("async function dismissResumeViewer"), source.indexOf("const MAX_RESUME_BYTES"));
   assert.match(dismiss, /the resume viewer would not close/, "and a viewer that refuses to go says so on the record");
 
@@ -2429,8 +2445,8 @@ test("the run walks the list by identity, so a position can never address the wr
     "the panel is opened unless the PANEL ITSELF already says it shows this row");
   assert.ok(!/rowId !== openId/.test(withoutComments(source)),
     "the address bar can no longer decide on its own that an applicant is already open");
-  // Still exactly eight click call sites: this adds no control (rule 9).
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  // Still exactly nine click call sites: this adds no control (rule 9).
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("a control in the list header can never retire the open applicant's row", async () => {
@@ -3353,7 +3369,7 @@ test("coming back to an unfinished job run resumes it, but a completed run stays
 
   // And it costs no new click: the restart replays the run, it does not invent
   // a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("the worker lifecycle admits one newest execution and never reopens a completed run", async () => {
@@ -3636,7 +3652,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     "every list scan feeds the roster");
 
   // Rule 9: this adds no control, on any path.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("a roster seeded before the page is settled walks it from the middle, not the top", () => {
@@ -3799,7 +3815,7 @@ test("an applicant is opened, read and saved exactly once, and 'already open' is
     "and a collected row joins that ledger before the walk moves on");
 
   // Rule 9: none of this adds a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
@@ -3893,7 +3909,7 @@ test("an arrival survives a lost race, a back button and a bfcache restore", asy
   assert.match(source, /if \(previous\?\.pageShowHandler\) window\.removeEventListener\("pageshow", previous\.pageShowHandler\)/);
 
   // And none of it costs a click: the restart replays the run, it invents no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("coming back to the tab restarts the run, and the page says so", async () => {
@@ -3972,7 +3988,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
   assert.match(source, /previous\.noticeElement\.remove\(\)/);
 
   // Still no new control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("the run collects every page of the applicant list, not only the first", async () => {
@@ -4129,7 +4145,7 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
   // when it really is a document, then the whole page.
   assert.match(step, /const linkedUrl = Applicants\.isResumeDocumentUrl\(controlHref\) \? controlHref : "";/,
     "the control's own href counts only when it is a document, never a route");
-  assert.match(step, /const rendered = linkedUrl \|\| findResumeDocumentUrl\(null\);/,
+  assert.match(step, /const rendered = cardUrl \|\| linkedUrl \|\| findResumeDocumentUrl\(null\);/,
     "and the page is swept for the address before any click");
   assert.match(step, /diagnostics\.resume\.foundWithoutOpening = Boolean\(rendered\);/,
     "and the surface records that it did not need to open anything");
@@ -4144,7 +4160,7 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
   // adding a comment or a statement inside the block — where it is safe — breaks
   // it, while a click moved just outside the block, where it is not, would still
   // sit within the distance. This asks the question the rule actually makes.
-  const guardedOpen = step.slice(step.indexOf("if (!url) {"), step.indexOf("// However the address was found"));
+  const guardedOpen = step.slice(step.indexOf("if (!url && control) {"), step.indexOf("// However the address was found"));
   assert.ok(guardedOpen.length > 200, "the guarded block must be findable");
   assert.match(guardedOpen, /control\.element\.click\(\);/,
     "the resume is opened ONLY when no address was found");
@@ -4160,11 +4176,11 @@ test("PERMANENT: the resume is downloaded without opening it whenever the addres
   // Both halves still happen on the no-open path, because they live after the
   // guarded block: the address is proven, kept as the link, and saved to disk.
   assert.ok(
-    step.indexOf("url = await resolveResumeDocumentUrl(url, diagnostics)") > step.indexOf("if (!url) {"),
+    step.indexOf("url = await resolveResumeDocumentUrl(url, diagnostics)") > step.indexOf("if (!url && control) {"),
     "the descriptor resolve is outside the open-only block, so it runs either way"
   );
   assert.ok(
-    step.indexOf('type: "PV_APPLICANT_DOWNLOAD_RESUME"') > step.indexOf("if (!url) {"),
+    step.indexOf('type: "PV_APPLICANT_DOWNLOAD_RESUME"') > step.indexOf("if (!url && control) {"),
     "and so is the download, so not opening never means not saving"
   );
 });
@@ -4496,7 +4512,7 @@ test("a row that would not open is opened again, because nothing was read when i
 
   // No new click: re-resolving a row is finding it again, not pressing anything.
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "still one click per applicant");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and still exactly eight in the file");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and still exactly nine in the file");
 });
 
 test("a numbered pager is the pager too, but only against the page it says it is on", () => {
@@ -4595,7 +4611,7 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
     "and the numbered reader runs only when it found nothing");
 
   // No new click site: the pager press is the one that already existed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
   assert.match(source, /walk\.pagerReason = pager\.verdict\.reason/, "and which pager was used is on the record");
 });
 
@@ -4613,7 +4629,7 @@ test("the panel Download probe observes and never presses", async () => {
   assert.ok(!/return \{ element/.test(probe), "and must not hand an element back to be pressed");
 
   // The click budget is untouched: rule 9 governs controls that are pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
 
   // And what it found reaches the recruiter's console, which is the point.
   assert.match(source, /panelDownloadLabels: resume\.panelDownloadLabels \|\| \[\]/,
@@ -4864,10 +4880,10 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
   assert.match(source, /options\.recollect === true/, "which the walk still honours");
 
   // The click budget is a count of CONTROLS (rule 9), and no control was
-  // removed here — only a caller. Eight: seven gated opens plus one shared
+  // removed here — only a caller. Nine: eight gated opens plus one shared
   // dismiss.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8,
-    "applicants.js must still click exactly eight times");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9,
+    "applicants.js must still click exactly nine times");
 });
 
 // ------------------------------------------------- pacing the walk to the page
@@ -5242,7 +5258,7 @@ test("Phase 1 tripwire: phone is never taken from the rendered panel, and only o
   assert.ok(!/allow: \[[^\]]*phone/.test(source), "no reader may allow a phone off the click path");
 });
 
-test("Phase 1 tripwire: eight clicks, and each one is owned by a named function", async () => {
+test("Phase 1 tripwire: nine clicks, and each one is owned by a named function", async () => {
   // Guards phases 9 and 11, and it is the assertion the existing budget checks
   // cannot make. `.click()` counted seven times says nothing about WHERE the
   // seven are: the same total redistributed — a second press inside the contact
@@ -5254,6 +5270,12 @@ test("Phase 1 tripwire: eight clicks, and each one is owned by a named function"
   // that hides the contact disclosure on the captured layout. It is a NEW OWNER
   // rather than a redistribution, which is exactly what this test exists to make
   // visible — and CLAUDE.md rule 5 was amended in the same task.
+  //
+  // The ninth arrived in 3.13.0 the same way: `resumeAddressFromCard`, which
+  // presses the resume CARD's own Download. A `.doc` gets a tile and no viewer,
+  // so `clickResumeDownload` — which only ever looks inside a viewer — could
+  // never reach it, and those applicants were saved with no file at all. Also a
+  // new owner, also amended into rule 5 in the same task.
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
   const owners = [
     "closeOpenedOverlay",      // the dismiss, shared by every overlay we opened
@@ -5261,6 +5283,7 @@ test("Phase 1 tripwire: eight clicks, and each one is owned by a named function"
     "openContactMenu",         // the overflow menu that hides it (3.9.1, rule 9j)
     "expandCollapsedSections", // a collapsed section's own expander
     "clickResumeDownload",     // the resume viewer's own Download
+    "resumeAddressFromCard",   // the resume card's own Download (3.13.0, rule 9k)
     "collectResume",           // the resume control
     "selectApplicantRow",      // a row of the applicant list
     "clickApplicantPager"      // the list's next-page control
@@ -5273,7 +5296,7 @@ test("Phase 1 tripwire: eight clicks, and each one is owned by a named function"
   const found = [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(declarations, match.index));
 
   assert.deepEqual([...found].sort(), [...owners].sort(),
-    "every click is owned by exactly one of the eight sanctioned functions — none may move house");
+    "every click is owned by exactly one of the nine sanctioned functions — none may move house");
 });
 
 test("Phase 1 tripwire: the panel's column scrolls, the position is always restored, and only three functions move the list", async () => {
@@ -6061,7 +6084,7 @@ test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and 
   assert.match(signals, /held\.panel\?\.isConnected/, "a remount re-measures rather than answering from a detached node");
 
   // The click budget is untouched by any of this.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 // ------ Phase 5 of the multiple-LinkedIn-UI support guide: the fallbacks
@@ -6262,7 +6285,7 @@ test("Phase 5: a document card names the file when there is no viewer to ask", a
   assert.match(card, /DOCUMENT_EXTENSION_PATTERN\.test\(line\)/, "a file name is a line carrying a document extension");
   assert.match(card, /VIEWER_NOISE_PATTERN\.test\(line\)/, "and not one of the viewer's own chrome lines");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 test("Phase 5: the labelled reader refuses the posting's own title and company", async () => {
@@ -6455,7 +6478,7 @@ test("Phase 6: the header window ends at the first section on SCREEN, not the fi
   assert.match(own, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
   assert.ok(!/const cut = rest\.findIndex/.test(source), "and no longer carries its own copy");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 
@@ -6634,7 +6657,7 @@ test("Phase 7: whether the left list moved is measured on the page, because it c
   // The panel's own position is still restored on every path, failure included.
   const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
   assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the click budget is still nine");
 });
 
 
@@ -6885,8 +6908,8 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
   assert.match(capture, /snapshot\.raw\?\.applicant_header/,
     "and the header window is the one the extraction already read, not a second reading");
 
-  // Still eight clicks in the whole file.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  // Still nine clicks in the whole file.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // Stop is still matched before every other branch that does work.
   const handler = source.slice(source.indexOf("state.handler = (message"), source.length);
@@ -6989,7 +7012,7 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
 
   // And none of it costs a click.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
   const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
     .map((match) => ({ name: match[1], at: match.index }));
   const ownerOf = (offset) => {
@@ -7002,9 +7025,17 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   };
   assert.deepEqual(
     [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(match.index)).sort(),
-    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "selectApplicantRow"],
+    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "resumeAddressFromCard", "selectApplicantRow"],
     // `openContactMenu` is the eighth, added in 3.9.1 to reach the contact
-    // disclosure — NOT the resume. Every resume variant above still costs nothing.
+    // disclosure — NOT the resume.
+    //
+    // `resumeAddressFromCard` is the ninth (3.13.0) and it IS a resume variant —
+    // the first one that costs a click, which is why it is named here rather
+    // than folded into the count. The guide's "download action" variant is a
+    // card LinkedIn cannot preview: no viewer mounts, so no address is ever
+    // fetched or rendered, and pressing the card's own Download is the only way
+    // the file exists at all. Every other variant above still costs nothing, and
+    // this one is reached only after the sweep and the hover have both failed.
     "and each one is still owned by its own gated function — none moved house"
   );
 });
@@ -7130,7 +7161,7 @@ test("Phase 12: twelve phases changed no schema, no CSV and no click", async () 
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "eight clicks in, eight clicks out");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "nine clicks in, nine clicks out");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7268,7 +7299,7 @@ test("3.9.1: correcting the expander added no click and moved no schema", async 
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
   // This task changed policy only. Not one call site moved.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7398,9 +7429,9 @@ test("3.9.1: the eighth click is a new control, and it is the only new one", asy
   const source = withoutComments(
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "seven gated opens and one shared dismiss");
-  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 5,
-    "the five verdict-gated opens are unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "eight gated opens and one shared dismiss");
+  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 6,
+    "the verdict-gated opens are the five of 3.9.1 plus the card's Download (3.13.0)");
   assert.equal((source.match(/opener\.element\.click\(\)/g) || []).length, 1,
     "and the new one is the menu opener, once");
 
@@ -7575,7 +7606,7 @@ test("3.9.1: handling the scan cost no click and no new status", async () => {
   );
   // The eighth click is the contact menu and remains the only new one. Nothing
   // about the scan is pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // Reusing NOT_ATTEMPTED rather than inventing a status is deliberate: a new one
   // would have to be taught to the merge, the CSV and the dashboard, and this
@@ -7731,7 +7762,7 @@ test("3.9.2: none of this added a click, a column, a status or a permission", as
   );
   // The whole fix is reporting. It reads nothing new off the page and presses
   // nothing at all.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
   assert.equal((source.match(/trusted: true/g) || []).length, 1, "and trusted:true is still at one site");
 
   const { APPLICANT_TABLE_COLUMNS } = await import("../src/applicant-csv.js");
@@ -7883,9 +7914,9 @@ test("3.9.3: the opener can never be returned as its own menu", async () => {
   assert.match(open, /hasRenderedItems\(element\)/,
     "and an empty shell mid-render is never mistaken for an empty menu");
 
-  // Still exactly one press. The whole route is one click and the budget is eight.
+  // Still exactly one press. The whole route is one click and the budget is nine.
   assert.equal((open.match(/\.click\(\)/g) || []).length, 1, "the menu is opened once");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the file's budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the file's budget is unchanged");
 });
 
 test("3.9.3: 'it appeared when we pressed' means newly VISIBLE, not newly created", async () => {
@@ -7990,7 +8021,7 @@ test("3.9.3: a whole-job run expands collapsed sections, on a smaller budget tha
     "the same one budget still reaches the scan's second pass");
 
   // No new click site. The budget moved; the places that press did not.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight sites");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine sites");
 });
 
 test("3.9.3: an expander budget that runs out says so, and a refusal says why", async () => {
@@ -8258,7 +8289,7 @@ test("3.9.4: the completion gate stands between the last row and the pager", asy
   assert.match(run, /pageSweeps = 0;\s*\n\s*unfinished\.clear\(\);/, "a pager press resets the page's allowance");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 test("3.9.4: a numbered pager may mark its current page on the item wrapping the number", async () => {
@@ -8519,7 +8550,7 @@ test("3.9.4: the adapter hands the row's own address to the classifier", async (
   assert.ok(!/href: row\.href/.test(select), "the proof must describe the node being clicked");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 
@@ -9125,7 +9156,7 @@ test("3.9.5: the adapter asks three readers in order and presses no new control"
 
   // Rule 5, first: this task adds no click. The pager press is the one that
   // already existed; all that changed is which control it is handed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // READER 1 — unchanged, and still ARIA only (rule 7).
   assert.match(adapter, /function marksCurrentPage\(node\) \{[\s\S]{0,320}?aria-current[\s\S]{0,200}?aria-selected/);
@@ -9917,4 +9948,258 @@ test("3.13.0: PERMANENT — a long list is walked to the end, however many notic
     RESUME_RECOVERY.GIVE_UP, "one stuck applicant does not hold the whole list up");
   assert.equal(plan({ phase: "walking", streak: 1, owed: 9, applicantReloads: 1 }).action,
     RESUME_RECOVERY.RELOAD, "but two reloads are genuinely available to each of them");
+});
+
+// ---------------------------------------------------------------------------
+// 3.13.0 — the resume that is a tile, a type badge and a download on hover
+//
+// THE LIVE REPORT, with a screenshot: a `DOC` card reading "Sushmitha.L's
+// resume", *"resumes like this are not getting downloaded ... when i hover over
+// this the download appear"*.
+//
+// LinkedIn previews a PDF and cannot preview a `.doc`. The whole resume step is
+// built around the viewer — press the control, wait for the viewer, read the
+// address the viewer rendered or fetched — so on that card nothing mounts,
+// nothing is fetched, the wait times out and the applicant is saved with a link
+// and no file, or with no resume at all when the tile is not a control the
+// policy recognises.
+// ---------------------------------------------------------------------------
+
+test("3.13.0: the card ladder reads before it hovers and hovers before it presses", () => {
+  const { RESUME_CARD_STEP, planResumeCardStep } = Applicants;
+  const step = (options) => planResumeCardStep(options).action;
+
+  // An address the page already rendered ends it. A link needs no click, and
+  // this is the only outcome that produces a file having pressed nothing.
+  assert.equal(step({ address: "https://media.licdn.com/dms/document/media/x" }), RESUME_CARD_STEP.ADDRESS);
+  // ...and it wins from every state, including one where a Download is sitting
+  // right there. Pressing something you did not need is still pressing it.
+  assert.equal(
+    step({ address: "https://media.licdn.com/dms/document/media/x", hovered: true, downloadLabel: "download resume" }),
+    RESUME_CARD_STEP.ADDRESS,
+    "a known address is never given up to press a control"
+  );
+
+  // Nothing has been hovered yet, so nothing may be pressed yet: a control the
+  // page renders on `mouseenter` is not in the markup to be read until then.
+  assert.equal(step({}), RESUME_CARD_STEP.REVEAL);
+  assert.equal(step({ downloadLabel: "download resume" }), RESUME_CARD_STEP.REVEAL,
+    "the reveal comes first even when a download is already visible");
+
+  // Hovered, no address, and a Download that cleared the classifier.
+  assert.equal(step({ hovered: true, downloadLabel: "download resume" }), RESUME_CARD_STEP.PRESS);
+
+  // Every way of not pressing, each with its own reason on the verdict.
+  assert.equal(step({ hovered: true }), RESUME_CARD_STEP.GIVE_UP);
+  assert.equal(step({ hovered: true, downloadLabel: "download resume", canPress: false }), RESUME_CARD_STEP.GIVE_UP);
+  assert.equal(step({ hovered: true, downloadLabel: "download resume", pressed: true }), RESUME_CARD_STEP.GIVE_UP,
+    "a press that produced no address is a finished answer, not a second press");
+
+  const reasons = [
+    planResumeCardStep({ hovered: true }).reason,
+    planResumeCardStep({ hovered: true, downloadLabel: "download resume", pressed: true }).reason,
+    planResumeCardStep({ hovered: true, downloadLabel: "download resume", canPress: false }).reason
+  ];
+  assert.equal(new Set(reasons).size, 3, "each refusal says which one it was");
+  for (const reason of reasons) assert.ok(reason.length > 10, "and says it in words a report can carry");
+
+  // Never two presses, whatever order a caller drives it in.
+  let pressed = false;
+  let hovered = false;
+  let presses = 0;
+  for (let guard = 0; guard < 20; guard += 1) {
+    const next = planResumeCardStep({ hovered, downloadLabel: "download resume", pressed });
+    if (next.action === RESUME_CARD_STEP.GIVE_UP) break;
+    if (next.action === RESUME_CARD_STEP.REVEAL) hovered = true;
+    if (next.action === RESUME_CARD_STEP.PRESS) { presses += 1; pressed = true; }
+  }
+  assert.equal(presses, 1, "the ladder presses once and then stops");
+});
+
+test("3.13.0: a card's own Download is recognised by name, and an ATS action still is not", () => {
+  const verdict = (label, inContainer = true) =>
+    Applicants.classifyApplicantControl({
+      text: label,
+      purpose: Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD,
+      inContainer
+    });
+
+  // What the card actually renders. Under the old whole-label rule this was not
+  // a download control at all, so the ONE layout where pressing Download is the
+  // only way to get the file was the one layout that refused to press it.
+  assert.equal(verdict("Download Sushmitha.L's resume").allowed, true);
+  assert.equal(verdict("Download Komal Sharma's CV").allowed, true);
+  assert.equal(verdict("Download résumé").allowed, true);
+  // ...and everything the rule always accepted still passes.
+  for (const label of ["Download", "Download resume", "Download file", "Download attachment", "Download original"]) {
+    assert.equal(verdict(label).allowed, true, `${label} must still be a download control`);
+  }
+
+  // It is still a WHOLE-LABEL rule: begins with the verb, ends with a resume
+  // noun, and nothing but name characters in between.
+  for (const label of [
+    "Download applicant list",
+    "Download the full applicant export as CSV",
+    "Export resume",
+    "Download resume, then reject",
+    "Resume download instructions for this candidate"
+  ]) {
+    assert.equal(verdict(label).allowed, false, `${label} must not be a download control`);
+  }
+
+  // The denylist is still consulted FIRST and still beats everything.
+  for (const label of ["Download resume and reject", "Save resume", "Download resume and shortlist"]) {
+    const refused = verdict(label);
+    assert.equal(refused.allowed, false, `${label} must be refused`);
+    assert.equal(refused.forbidden, true, "and refused as a forbidden action, not merely unrecognised");
+  }
+
+  // And the container proof is unchanged: a Download loose on the page is not
+  // this applicant's CV, whatever it is called.
+  assert.equal(verdict("Download resume", false).allowed, false);
+  assert.equal(verdict("Download resume", false).reason, "outside-resume-viewer");
+});
+
+test("3.13.0: the adapter sweeps, hovers, and only then presses — and always lets go", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const card = source.slice(
+    source.indexOf("async function resumeAddressFromCard"),
+    source.indexOf("function readDocumentCardDetails")
+  );
+  assert.ok(card.length > 800 && card.length < 6000, "the card reader must be found, and only it");
+
+  // The ladder is the core's, not a second copy of the reasoning.
+  assert.match(card, /Applicants\.planResumeCardStep\(\{ address, hovered, downloadLabel, pressed \}\)/,
+    "the step is decided by the tested planner");
+  assert.match(card, /Applicants\.RESUME_CARD_STEP\.ADDRESS/, "and its verdicts are what the adapter acts on");
+
+  // Read first. The sweep runs before any event is dispatched.
+  assert.ok(
+    card.indexOf("let address = findResumeDocumentUrl(card)") < card.indexOf("dispatchHover("),
+    "the card is read before it is touched"
+  );
+  // Press last, and only through a classified verdict proven inside the card.
+  assert.match(card, /const control = findControl\(card, Applicants\.CONTROL_PURPOSE\.RESUME_DOWNLOAD\);/,
+    "the press goes through the policy");
+  assert.ok(
+    card.indexOf("dispatchHover(") < card.indexOf("control.element.click()"),
+    "nothing is pressed before the card has been looked at properly"
+  );
+  assert.equal((card.match(/\.click\(\)/g) || []).length, 1, "exactly one press lives here");
+
+  // The hover is released on EVERY path out, including the ones that threw.
+  assert.match(card, /\} finally \{[\s\S]{0,400}?if \(hoverSent\) dispatchHover\(tile \|\| card, HOVER_LEAVE_EVENTS\);/,
+    "the card is handed back the way it was found");
+  // And the observer is stopped whatever the press did.
+  assert.match(card, /\} finally \{[\s\S]{0,200}?requests\.stop\(\);/, "the request observer is always disconnected");
+
+  // Stop and a hidden page still end it: rule 12 reaches inside this step too.
+  assert.equal((card.match(/assertRunnable\(\)/g) || []).length, 2,
+    "both the hover and the press are behind the run's own gate");
+
+  // It decides nothing about the record. The caller proves the address is a file
+  // and owns every field, so this cannot write a route or a portrait into
+  // somebody's resume column.
+  assert.ok(!/accumulator\./.test(card), "the card reader never writes to the record");
+  assert.ok(!/RESUME_STATUS/.test(card), "and never decides a status");
+});
+
+test("3.13.0: the card is a container proof, so it can never be the whole panel", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const finder = source.slice(
+    source.indexOf("function isResumeCardCandidate"),
+    source.indexOf("function dispatchHover")
+  );
+  assert.ok(finder.length > 300, "the card finder must be found");
+
+  // The panel itself is never the card. Without this a `Download` anywhere on an
+  // applicant's panel would count as proven inside the resume card — which is
+  // exactly the proof `probePanelDownloadControls` exists to measure and refuse.
+  assert.match(finder, /node === panel/, "the panel is refused outright");
+  assert.match(finder, /!panel\.contains\(node\)/, "and so is anything outside it");
+  // A candidate holding another section's heading is refused for the same reason
+  // the section map refuses it: its blocks would belong to the wrong section.
+  assert.match(finder, /entry\.key && entry\.key !== "resume" && node\.contains\(entry\.element\)/,
+    "a candidate that swallows another section is refused");
+  // Found by the heading LinkedIn painted and by structure — never a class name.
+  assert.match(finder, /headingsIn\(panel\)/, "the card is found by the headings on screen");
+  assert.match(finder, /sectionRootFor\(heading, panel, headings\)/,
+    "using the same walk the section map already uses");
+  assert.ok(!/class[A-Z]|className|\[class/.test(finder), "and never by a generated class name (rule 7)");
+  // The climb from the control is bounded by a named constant.
+  assert.match(source, /const RESUME_CARD_CLIMB = 3;/, "the climb is bounded and named");
+});
+
+test("3.13.0: a tile that is not a control is read before the applicant is written off", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const step = source.slice(
+    source.indexOf("async function collectResume"),
+    source.indexOf("// ------------------------------------------------------------- the scan")
+  );
+
+  // The card is resolved once, for both fallbacks.
+  assert.match(step, /const resumeCard = findResumeCard\(panel, control\?\.element \|\| null\);/,
+    "the card is resolved whether or not a control was found");
+
+  // UNAVAILABLE is a claim about the applicant — "this person attached nothing" —
+  // and it may only be made after the card has been asked. A tile LinkedIn did
+  // not mark up as a button is still that person's CV.
+  assert.ok(
+    step.indexOf("cardUrl = resumeCard ? await resumeAddressFromCard(resumeCard, null, diagnostics)") <
+      step.indexOf("downloadStatus: Applicants.RESUME_STATUS.UNAVAILABLE"),
+    "the card is asked before an applicant is recorded as having no resume"
+  );
+  // ...and an applicant with no card at all still comes back UNAVAILABLE.
+  assert.match(step, /if \(!cardUrl\) \{[\s\S]{0,400}?RESUME_STATUS\.UNAVAILABLE/,
+    "nothing is invented for an applicant who really has no resume");
+
+  // The viewer needs something to press, so it is guarded on the control.
+  assert.match(step, /if \(!url && control\) \{/, "the viewer is opened only when there is a control to press");
+
+  // And the second fallback: a viewer that opened and produced nothing is closed
+  // BEFORE the card is touched, then the card is asked, and only then is this
+  // written off as a link with no file.
+  const fallbackAt = step.indexOf("if (!url && resumeCard) {");
+  assert.ok(fallbackAt > step.indexOf("if (!url && control) {"), "the card fallback follows the viewer");
+  assert.ok(fallbackAt < step.indexOf('diagnostics.resume.reason = "no-document-url"'),
+    "and it runs before link_only is written");
+  assert.match(step, /if \(overlay\) \{\s*\n\s*await dismissResumeViewer\(overlay, accumulator, diagnostics\);\s*\n\s*overlay = null;/,
+    "anything that opened is closed before the card is pressed");
+
+  // Rule 20's other half: no navigation was added anywhere.
+  assert.ok(!/location\.(?:assign|replace)\s*\(/.test(source), "the applicants page is never navigated");
+  assert.ok(!/location\.href\s*=[^=]/.test(source), "and its address is never assigned");
+  assert.equal((source.match(/location\.reload\(\)/g) || []).length, 1,
+    "the one reload is still the resume-recovery reload, and this added none");
+});
+
+test("3.13.0: what the card did is on the record, so the next report needs no guessing", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const step = source.slice(
+    source.indexOf("async function collectResume"),
+    source.indexOf("// ------------------------------------------------------------- the scan")
+  );
+
+  // The shape is declared up front, so its absence is never the answer.
+  assert.match(step, /card: null, fromCard: false,/, "the diagnostics carry the card from the start");
+  assert.match(step, /diagnostics\.resume\.fromCard = Boolean\(url\);/, "and say when the card is what answered");
+  assert.match(step, /diagnostics\.resume\.reason = "card-only";/, "a tile with no control is named as such");
+
+  const card = source.slice(
+    source.indexOf("async function resumeAddressFromCard"),
+    source.indexOf("function readDocumentCardDetails")
+  );
+  for (const field of ["found", "hovered", "pressed", "step", "reason"]) {
+    assert.match(card, new RegExp(`\\b${field}:`), `the card reader reports ${field}`);
+  }
+  assert.match(card, /pressedLabel: control\.verdict\.label/,
+    "and names the control it pressed, rather than leaving that to be guessed");
 });

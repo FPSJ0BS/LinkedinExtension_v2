@@ -111,10 +111,26 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    afterwards; a details view that never loads leaves the section as the profile painted it, never
    half of one member's list under another's name.
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
-   control · a row of the applicant list · the resume viewer's own Download · **the applicant panel's
-   overflow menu, opened only to reach the contact disclosure inside it.**
+   control · a row of the applicant list · the resume viewer's own Download · the applicant panel's
+   overflow menu, opened only to reach the contact disclosure inside it · **the resume card's own
+   Download, when the card mounts no viewer.**
 
-   That last one is the eighth click and the newest (3.9.1). On the captured layout the panel offers
+   **The resume card's Download is the ninth click and the newest (3.13.0).** LinkedIn previews a PDF
+   and cannot preview a `.doc` — that attachment renders as a tile with a type badge, mounts no viewer,
+   fetches nothing, and offers one action, revealed on hover: download. The whole resume step is built
+   around the viewer, so those applicants were saved with a link and no file, or with no resume at all
+   when the tile is not a control the policy recognises. The viewer's own Download (above) is
+   unreachable there by construction, because there is no viewer.
+
+   It is reached **only after both read-only steps have produced nothing** — the card is swept for a
+   document address, hovered, and swept again — and pressing it is what the recruiter's own mouse would
+   do. It is judged by the same classifier as the viewer's Download and **proven inside the resume card**,
+   which is found by the heading LinkedIn painted and can never be the panel itself; a `Download`
+   loose on an applicant's panel is still refused, exactly as it always was. A hover is **not** a click
+   and does not count against this list: it sends nothing, changes nothing, and the matching leave
+   events are dispatched on every path out.
+
+   The eighth click is the overflow menu (3.9.1). On the captured layout the panel offers
    no Contact control at all — the address and the number are behind `More…` — so every applicant was
    saved with an empty email and an empty mobile. Opening a menu renders controls LinkedIn is already
    offering this recruiter: it sends nothing, changes nothing, and Escape undoes it. What makes it

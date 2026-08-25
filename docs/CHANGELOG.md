@@ -1,5 +1,117 @@
 # CHANGELOG.md
 
+## 3.13.0 — the resume LinkedIn will not preview
+
+**The live report, with a screenshot of the card: a `DOC` tile reading "Sushmitha.L's resume", and
+*"resumes like this are not getting downloaded ... when i hover over this the download appear"*.**
+
+### Why that one card never produced a file
+
+LinkedIn previews a PDF. It cannot preview a `.doc` or a `.docx` — so it renders the attachment as a
+tile with a type badge, mounts no viewer, fetches nothing, and offers exactly one action, revealed on
+hover: download.
+
+Every resume path in this extension is built around that viewer. `collectResume` finds the resume
+control, presses it, waits for a viewer to mount, and reads the document's address out of the viewer,
+out of an attribute the viewer rendered, or out of what the viewer was observed fetching. On a card
+that previews nothing, all three sources are empty by construction, and the applicant ends one of two
+ways:
+
+- the tile **is** a control the policy recognises — it is pressed, no viewer ever mounts, the 4.5 s
+  wait times out, and the record is written `link_only` with reason `no-document-url`; or
+- the tile is **not** a control — a `div` with a badge and a label — so `findControl` returns nothing
+  and the record is written `unavailable`, reason `no-resume-control`, which is a claim about the
+  *applicant* ("this person attached nothing") made on the strength of a *layout*.
+
+Neither says anything about a file that is sitting on screen behind a hover.
+
+**This is not the virus-scan defect** (3.9.1, 3.10.0, 3.11.0, 3.12.0) and none of that work is
+touched. A scan notice replaces the card and says so, and the run now reloads for it. This card is
+fully rendered and perfectly healthy; there was simply never anything for a viewer-shaped reader to
+read.
+
+### The ladder — read, hover, and only then press
+
+`planResumeCardStep` in the core decides, and the adapter executes. Its order is the whole safety
+argument:
+
+1. **`ADDRESS`** — the card already names the file. A link needs no click, and this is the only step
+   that can end with a file having pressed nothing at all. It is asked first and it beats everything
+   below it, including a state where a Download is sitting right there: pressing something you did
+   not need is still pressing it.
+2. **`REVEAL`** — hover the card and look again. **A hover is not a click.** It sends nothing,
+   changes nothing in the recruiter's ATS, opens no overlay, and the matching leave events are
+   dispatched on every path out — including the ones that threw — so the card is handed back exactly
+   as it was found. It exists because a control the page renders on `mouseenter` is not in the markup
+   to be read until something hovers it. If the reveal is pure CSS instead, the control was in the
+   markup the whole time and step 1 already had its address — so both ways of hiding a download are
+   covered, and neither needed a class name.
+3. **`PRESS`** — the card's own Download, once. This is the only step that presses anything, so it is
+   the last, it is never reached while an address is known, and it is never reached before the card
+   has been looked at properly. A press that produced no address is a finished answer, not an
+   invitation to press again.
+
+Every refusal carries its own reason in words, because the last two releases each spent a round
+guessing at a resume defect that one line of diagnostics names.
+
+### The ninth click, and what makes it safe
+
+**CLAUDE.md rule 5 is amended in this release** — the card's own Download joins the hiring allowlist,
+and the click budget goes from eight to nine. That is a real amendment and it is stated plainly
+rather than folded into a count:
+
+- It is **judged by the same classifier** as the viewer's Download, so the denylist runs first and
+  every ATS action sitting on that card — Reject, Shortlist, Save, Move to — is refused exactly as it
+  was before.
+- It is **proven inside the resume card**, and the card is found by the heading LinkedIn painted and
+  by structure, never by a generated class name (rule 7). `findResumeCard` reuses `sectionRootFor`,
+  the same walk the section map already performs, so there is one copy of "which ancestor is this
+  section" rather than two — and it refuses two candidates outright: **the panel itself**, and any
+  candidate holding a different section's heading. Without the first, a `Download` anywhere on an
+  applicant's panel would count as proven inside the resume card, which is precisely the proof
+  `probePanelDownloadControls` has always existed to measure *without ever allowing*.
+- It is **reached only after both read-only steps have produced nothing**, and a viewer that did open
+  is closed before the card is touched — pressing a control underneath an open overlay is how a click
+  lands somewhere nobody intended.
+- It writes **nothing** to the record. The card reader returns an address or an empty string; the
+  caller proves that address is a document and owns every field, exactly as it does for the viewer
+  path, so this cannot put a page route or a portrait into somebody's resume column.
+
+One side effect is worth stating rather than discovering: pressing a control LinkedIn put there to
+download a file may also leave a copy in the browser’s own Downloads folder, beside the named copy
+this extension saves into `profile-vault-resumes/`. That is what the control does, it is what the
+recruiter pressing it by hand would get, and it only ever happens on the layout where nothing else
+produced the file at all.
+
+`RESUME_DOWNLOAD_CONTROL_PATTERN` gained a third alternative for the same reason: the card's control
+is called `Download Sushmitha.L's resume`, which under the old whole-label rule was not a download
+control at all. **It is still a whole-label rule** — the label must begin with the verb and end with
+a resume noun, with nothing between them but a bounded run of name characters, so `Download resume,
+then reject` cannot reach it even before the denylist refuses it.
+
+### What else this fixes on the way
+
+- **An applicant is no longer written off before the card is asked.** `unavailable` is a claim about
+  a person, and it may now only be made after the tile has been swept and hovered. An applicant who
+  genuinely has no card still comes back `unavailable`, unchanged.
+- **The record says which reader answered.** `diagnostics.resume.card` carries whether the card was
+  found, whether it was hovered, what the hover revealed, whether anything was pressed and under what
+  label, and the step and reason at each rung; `fromCard` says the card is what produced the file,
+  and `card-only` names a tile that was never a control.
+
+### Verified
+
+`npm run check` — typecheck, build, 706 tests, docs, validate. Twenty-three existing assertions were
+updated where they pinned the eight-click budget, including the Phase 1 tripwire that names an owner
+function for every `.click()` in the file: `resumeAddressFromCard` is registered there as the ninth
+owner, which is exactly what that test exists to make visible. Six new tests cover the ladder's
+order, its refusals, the widened label against ten shapes it must accept and eleven it must refuse,
+the container proof, the hover release in a `finally`, and the absence of any new navigation.
+
+**Rule 20 stands.** None of this has been run against a live LinkedIn page from this side; loading
+`dist/` in Chrome is the user's step, always. The card in the report is the evidence this was built
+from, and the diagnostics above are what the next report should be read out of.
+
 ## 3.12.0 - no limiter
 
 **The reload-on-sight design of 3.11.0 is kept exactly as it was. The three counts that could switch

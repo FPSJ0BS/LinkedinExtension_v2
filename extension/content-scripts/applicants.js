@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-26-react-v3.12.0";
+  const BUILD_ID = "2026-08-26-react-v3.13.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -3486,6 +3486,189 @@
   }
 
   /**
+   * The attachment CARD — the tile, its label, and whatever it reveals on hover.
+   *
+   * Found the way every other region on this surface is found: by the heading
+   * LinkedIn painted above it and by structure, never by a generated class name
+   * (rule 7). `sectionRootFor` is the same walk the section map uses, so there
+   * is one copy of "which ancestor is this section" rather than two, and it is
+   * already bounded by every other heading on the panel — an ancestor that
+   * reached back over the section above it is refused before it is returned.
+   *
+   * Two refusals on top of that walk, and both exist because this container is
+   * about to become a CLICK PROOF. The panel itself is never the card: a
+   * `Download` anywhere on an applicant's panel would then count as proven
+   * inside the resume card, which is precisely the container proof this repo has
+   * always refused — `probePanelDownloadControls` exists to measure exactly that
+   * without ever allowing it. And a candidate holding a different section's
+   * heading is refused for the same reason it is in the section map.
+   *
+   * The fallback, for a card LinkedIn titled with something that is not a
+   * heading: a bounded climb from the resume control itself, at most three
+   * levels, held to the same two refusals. The control is inside its own card by
+   * construction — this only asks how far up the card goes.
+   */
+  const RESUME_CARD_CLIMB = 3;
+
+  function isResumeCardCandidate(node, panel, headings) {
+    if (!node || node === panel || !panel.contains(node)) return false;
+    return !headings.some((entry) => entry.key && entry.key !== "resume" && node.contains(entry.element));
+  }
+
+  function findResumeCard(panel, control = null) {
+    if (!panel) return null;
+    const headings = headingsIn(panel);
+    const heading = headings.find((entry) => entry.key === "resume");
+    if (heading) {
+      const root = sectionRootFor(heading, panel, headings);
+      if (isResumeCardCandidate(root, panel, headings)) return root;
+    }
+    if (!control) return null;
+    let best = null;
+    let node = control.parentElement;
+    for (let level = 0; node && level < RESUME_CARD_CLIMB; level += 1) {
+      if (!isResumeCardCandidate(node, panel, headings)) break;
+      best = node;
+      node = node.parentElement;
+    }
+    return best;
+  }
+
+  /**
+   * Hover the card, and let go of it afterwards.
+   *
+   * **A hover is not a click, and rule 5 is not widened by it.** Nothing is
+   * sent, nothing in the recruiter's ATS changes, no overlay opens, and the
+   * matching leave events are dispatched on every path out — including the ones
+   * that threw — so the card is left exactly as it was found.
+   *
+   * What it buys: a control the page RENDERS on `mouseenter` does not exist in
+   * the markup to be read until something hovers the card. If the reveal is pure
+   * CSS instead, the control was in the markup all along and the address sweep
+   * already had it — so between the two, both ways of hiding a download are
+   * covered, and neither needed a class name.
+   *
+   * `enter`/`leave` do not bubble by specification and are dispatched as such;
+   * `over`/`out` do, and are dispatched on the innermost element so a handler
+   * anywhere above it sees them.
+   */
+  const HOVER_ENTER_EVENTS = ["pointerover", "pointerenter", "mouseover", "mouseenter"];
+  const HOVER_LEAVE_EVENTS = ["pointerout", "pointerleave", "mouseout", "mouseleave"];
+
+  function dispatchHover(element, types) {
+    if (!element) return false;
+    let sent = false;
+    for (const type of types) {
+      const bubbles = !/(?:enter|leave)$/.test(type);
+      try {
+        const Constructor = type.startsWith("pointer") && typeof PointerEvent === "function"
+          ? PointerEvent
+          : MouseEvent;
+        element.dispatchEvent(new Constructor(type, { bubbles, cancelable: true, view: window }));
+        sent = true;
+      } catch {
+        // An event type this browser will not construct. The next one still runs.
+      }
+    }
+    return sent;
+  }
+
+  /** How long a hovered card is given to render what it was hiding. */
+  const RESUME_CARD_REVEAL_MS = 900;
+
+  /**
+   * Get the file out of a resume card that mounted no viewer.
+   *
+   * The ladder is `planResumeCardStep`'s and the reasoning lives there. This is
+   * the half that touches the DOM: sweep, hover, sweep again, and — only when
+   * nothing else has produced an address — press the card's own Download with
+   * the request observer already running, because a control that fetches the
+   * file in JavaScript never writes its address into an attribute at all.
+   *
+   * Returns the document address or an empty string. It writes nothing to the
+   * record: the caller proves the address is a file and owns every field,
+   * exactly as it does for the viewer path, so this cannot put a page route or a
+   * portrait into somebody's resume column.
+   */
+  async function resumeAddressFromCard(card, tile, diagnostics) {
+    const note = (patch) => {
+      diagnostics.resume.card = { ...(diagnostics.resume.card || {}), ...patch };
+    };
+    if (!card) {
+      note({ found: false, step: "", reason: "no-card" });
+      return "";
+    }
+    note({ found: true, hovered: false, pressed: false, download: "" });
+
+    let address = findResumeDocumentUrl(card);
+    let hovered = false;
+    let pressed = false;
+    let downloadLabel = "";
+    let hoverSent = false;
+
+    try {
+      // Bounded by the ladder itself — every step either ends it or sets the
+      // flag that stops it being chosen twice — and by this count as well, so no
+      // rewording of the plan can turn this into a loop.
+      for (let step = 0; step < 4; step += 1) {
+        const next = Applicants.planResumeCardStep({ address, hovered, downloadLabel, pressed });
+        note({ step: next.action, reason: next.reason });
+        if (next.action === Applicants.RESUME_CARD_STEP.ADDRESS) return address;
+        if (next.action === Applicants.RESUME_CARD_STEP.GIVE_UP) return "";
+
+        if (next.action === Applicants.RESUME_CARD_STEP.REVEAL) {
+          assertRunnable();
+          hoverSent = dispatchHover(tile || card, HOVER_ENTER_EVENTS) || hoverSent;
+          hovered = true;
+          address = await waitFor(() => findResumeDocumentUrl(card), {
+            timeoutMs: RESUME_CARD_REVEAL_MS, pollMs: 60, label: "resume-card-address"
+          }) || "";
+          const revealed = findControl(card, Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD);
+          downloadLabel = revealed?.verdict.label || "";
+          note({ hovered: true, hoverSent, download: downloadLabel, addressAfterHover: Boolean(address) });
+          continue;
+        }
+
+        // PRESS — the last step, and the only one that presses anything.
+        assertRunnable();
+        const control = findControl(card, Applicants.CONTROL_PURPOSE.RESUME_DOWNLOAD);
+        if (!control) {
+          // It was there a moment ago and is not now. Say so, rather than
+          // pressing whatever took its place.
+          downloadLabel = "";
+          note({ download: "", reason: "the download control went away before it could be pressed" });
+          continue;
+        }
+        const openedAt = performance.now();
+        const requests = watchResumeRequests();
+        try {
+          control.element.click();
+          pressed = true;
+          note({ pressed: true, pressedLabel: control.verdict.label, watchingRequests: requests.watching });
+          // Whatever the press fetched, observed the same three ways the viewer
+          // path observes it: what the card now renders, what was seen being
+          // fetched, and the request log for a browser with no observer.
+          address = await waitFor(
+            () => findResumeDocumentUrl(card) || requests.url() || fetchedResumeDocumentUrl(openedAt),
+            { timeoutMs: RESUME_DOCUMENT_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "resume-card-document" }
+          ) || "";
+        } catch (error) {
+          note({ reason: `press-failed:${error?.message || error}` });
+          return "";
+        } finally {
+          requests.stop();
+        }
+      }
+    } finally {
+      // Always, including the paths that threw: a card left in its hover state
+      // is the next applicant's problem, exactly as an open menu would be.
+      if (hoverSent) dispatchHover(tile || card, HOVER_LEAVE_EVENTS);
+    }
+    note({ reason: "the card produced no address" });
+    return "";
+  }
+
+  /**
    * The file name a document CARD renders, when there is no viewer to ask.
    *
    * Some layouts put the attachment on the panel itself — a card showing
@@ -3512,6 +3695,7 @@
     }
     return details;
   }
+
 
   /**
    * Scroll the opened viewer to the bottom so every page renders.
@@ -3882,6 +4066,7 @@
     diagnostics.resume = {
       found: false, clicked: false, opened: false, scrolledSteps: 0,
       openedViewer: false, viewerClosed: true, foundInRequests: false,
+      card: null, fromCard: false,
       reason: "", status: Applicants.RESUME_STATUS.NOT_ATTEMPTED
     };
 
@@ -3903,18 +4088,32 @@
       // already failed, and no way for a flickering notice to loop.
       control = findControl(panel, Applicants.CONTROL_PURPOSE.RESUME);
     }
+    // The card itself, resolved once and used by both fallbacks below — the one
+    // for a tile that is not a control at all, and the one for a viewer that
+    // opened and never produced an address.
+    const resumeCard = findResumeCard(panel, control?.element || null);
+    let cardUrl = "";
     if (!control) {
-      accumulator.setResume({ available: false, downloadStatus: Applicants.RESUME_STATUS.UNAVAILABLE });
-      diagnostics.resume.reason = "no-resume-control";
-      diagnostics.resume.status = Applicants.RESUME_STATUS.UNAVAILABLE;
-      return;
+      // Before concluding this applicant attached nothing: a tile LinkedIn did
+      // not mark up as a button is still that person's CV, and on a layout that
+      // previews nothing the tile is the whole of the resume. Nothing here is
+      // guessed — the address is proven a document by the same rule the viewer
+      // path uses — and an applicant with no card still comes back UNAVAILABLE.
+      cardUrl = resumeCard ? await resumeAddressFromCard(resumeCard, null, diagnostics) : "";
+      if (!cardUrl) {
+        accumulator.setResume({ available: false, downloadStatus: Applicants.RESUME_STATUS.UNAVAILABLE });
+        diagnostics.resume.reason = "no-resume-control";
+        diagnostics.resume.status = Applicants.RESUME_STATUS.UNAVAILABLE;
+        return;
+      }
+      diagnostics.resume.reason = "card-only";
     }
     diagnostics.resume.found = true;
 
     // Whatever the control links to. On this surface it is almost always a
     // ROUTE — `linkedin.com/hiring/applicants/…` — rather than the document, so
     // it is kept as the viewer address and is never mistaken for the file.
-    const controlHref = resumeUrlFrom(control.element.getAttribute?.("href"));
+    const controlHref = resumeUrlFrom(control?.element?.getAttribute?.("href"));
     const linkedUrl = Applicants.isResumeDocumentUrl(controlHref) ? controlHref : "";
     const viewerUrl = linkedUrl ? "" : controlHref;
 
@@ -3922,7 +4121,7 @@
     // link needs no click (rule 9e), and the recruiter asked for the file, not
     // for a preview. `isResumeDocumentUrl` still decides, so a route can never
     // be taken for a file here either.
-    const rendered = linkedUrl || findResumeDocumentUrl(null);
+    const rendered = cardUrl || linkedUrl || findResumeDocumentUrl(null);
     diagnostics.resume.foundWithoutOpening = Boolean(rendered);
     // Observation only, and only worth the DOM walk when the viewer is about to
     // be opened — that is the case a panel-level Download would remove.
@@ -3932,7 +4131,7 @@
     let details = { filename: "", fileType: "", pages: null, text: "" };
     let url = rendered;
 
-    if (!url) {
+    if (!url && control) {
       // The page did not render it, so the viewer is the only place it exists.
       // Opened, read, and closed — never left open, never a new tab.
       assertRunnable();
@@ -4025,6 +4224,22 @@
     // this document's own request log — it is proven to be a file before
     // anything is written to disk under a person's name. An address that answers
     // with a descriptor resolves to the document it names, or to nothing.
+    // The viewer produced nothing — and on a layout LinkedIn cannot preview there
+    // was never going to be a viewer, because a `.doc` gets a tile and a download
+    // and no preview at all. So the card's own ladder is asked before this is
+    // written off as a link with no file behind it.
+    if (!url && resumeCard) {
+      // Anything that did open is closed FIRST. Pressing a control underneath an
+      // open overlay is how a click lands somewhere nobody intended, and a
+      // preview left on screen is the complaint this step exists to answer.
+      if (overlay) {
+        await dismissResumeViewer(overlay, accumulator, diagnostics);
+        overlay = null;
+      }
+      url = await resumeAddressFromCard(resumeCard, control?.element || null, diagnostics);
+      diagnostics.resume.fromCard = Boolean(url);
+    }
+
     if (url) url = await resolveResumeDocumentUrl(url, diagnostics);
     diagnostics.resume.documentUrlFound = Boolean(url);
 

@@ -1,0 +1,66 @@
+{
+  "schema": 2,
+  "id": "TASK-0204",
+  "name": "A resume card that only offers a hover download is now downloaded",
+  "request": "A resume card that only offers a hover download is now downloaded",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T23:33:38.467Z",
+  "completedAt": "2026-08-25T23:54:17.865Z",
+  "startCommit": "8c06082e3a7671db30541dec23fa9b39e1ef0b3e",
+  "gitRef": "task/TASK-0204",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 706 tests passed (700 before, 6 new), docs:check 18 files, validate 34 build files. dist/build-meta.json reads 3.13.0 / 2026-08-26-react-v3.13.0 and the built applicants.js carries the card reader, the hover release in a finally, 9 click sites, 1 location.reload and 0 navigations."
+  ],
+  "result": "TASK-0204 / 3.13.0: the resume LinkedIn will not preview is downloaded, by reading the card,\nhovering it, and only then pressing its own Download.\n\nTHE LIVE REPORT, with a screenshot of the card: a DOC tile reading \"Sushmitha.L's resume\", and\n\"resumes like this are not getting downloaded ... when i hover over this the download appear\".\n\nWHY THAT CARD NEVER PRODUCED A FILE, and it is a property of the FILE TYPE rather than of the\napplicant. LinkedIn previews a PDF and cannot preview a .doc or .docx, so it renders a tile with a\ntype badge, mounts no viewer, fetches nothing, and offers one action revealed on hover: download.\nEvery resume path here is built around that viewer - press the control, wait for it to mount, read\nthe address it rendered or was observed fetching - so on this card all three sources are empty by\nconstruction and the applicant ends one of two ways: link_only with reason no-document-url when the\ntile IS a control, or unavailable with reason no-resume-control when it is not. The second is the\nworse of the two, because it is a claim about the PERSON (\"they attached nothing\") made on the\nstrength of a LAYOUT. This is NOT the virus-scan defect and none of 3.9.1/3.10.0/3.11.0/3.12.0 is\ntouched: a scanning card says so and is reloaded for; this card is fully rendered and healthy.\n\nTHE LADDER, decided by planResumeCardStep in the core and executed by the adapter. (1) ADDRESS -\nthe card already names the file; a link needs no click, and this is the only rung that ends with a\nfile having pressed nothing, so it is asked first and beats every rung below even when a Download\nis sitting right there. (2) REVEAL - hover and look again. A HOVER IS NOT A CLICK: it sends\nnothing, changes nothing in the ATS, opens no overlay, and the matching leave events are dispatched\non every path out including the ones that threw. It exists because a control rendered on mouseenter\nis not in the markup to be read until something hovers it; if the reveal is pure CSS the control was\nthere all along and rung 1 already had its address, so both ways of hiding a download are covered\nand neither needed a class name. (3) PRESS - once. A press that produced no address is a finished\nanswer, not a second press. Every refusal carries its own reason in words.\n\nTHE NINTH CLICK, and CLAUDE.md rule 5 is amended in the same task rather than after it. What makes\nit safe is not the pressing but WHAT MAY BE PRESSED: the same classifier as the viewer's Download,\nso the denylist still runs first and Reject/Shortlist/Save/Move to on that card stay refused; and\nPROVEN INSIDE THE RESUME CARD, which findResumeCard resolves from the heading LinkedIn painted using\nsectionRootFor - the same walk the section map already performs, so there is one copy of \"which\nancestor is this section\" rather than two. Two refusals sit on top of that walk and both exist\nbecause this container is now a click proof: the panel ITSELF is never the card (without it a\nDownload anywhere on the panel would count as proven inside the resume card, which is exactly the\nproof probePanelDownloadControls has always existed to measure without ever allowing), and a\ncandidate holding another section's heading is refused for the reason the section map refuses it.\nThe press is reached only after both read-only rungs produced nothing, a viewer that did open is\nclosed BEFORE the card is touched, and the card reader writes nothing to the record - it returns an\naddress or an empty string, and the caller proves it is a document exactly as it does for the viewer\npath. RESUME_DOWNLOAD_CONTROL_PATTERN gained a third alternative because the control is called\n\"Download Sushmitha.L's resume\", which the old rule did not recognise at all; it is still a\nWHOLE-LABEL rule - begins with the verb, ends with a resume noun, nothing between but a bounded run\nof name characters - so \"Download resume, then reject\" cannot reach it even before the denylist.\n\nALSO FIXED: unavailable may no longer be written before the card has been swept and hovered, and an\napplicant who genuinely has no card still comes back unavailable. AND THE RECORD SAYS WHICH READER\nANSWERED: diagnostics.resume.card carries found/hovered/what the hover revealed/pressed and under\nwhat label/the step and reason at each rung, fromCard says the card produced the file, and card-only\nnames a tile that was never a control - the last two releases each spent a round guessing at a\nresume defect that one line of diagnostics names.\n\nRECORDED, NOT HIDDEN: pressing a download control may also leave a copy in the browser's own\nDownloads folder beside the named copy in profile-vault-resumes/. That is what the control does and\nit only happens on the layout where nothing else produced the file at all.\n\n23 existing assertions updated where they pinned the eight-click budget, including the Phase 1\ntripwire that names an owner function for every .click() in the file - resumeAddressFromCard is\nregistered there as the ninth owner, which is what that test exists to make visible. 6 new tests.\nNo new selector, schema, CSV column, permission or navigation: still one location.reload and zero\nlocation.assign/replace. NO live claim: rule 20 stands. Files: src/applicants-core.js,\nextension/content-scripts/applicants.js, tests/applicants-core.test.js, CLAUDE.md, docs/CHANGELOG.md,\nand the six build-ID sites plus manifest.json/package.json for 3.13.0."
+}

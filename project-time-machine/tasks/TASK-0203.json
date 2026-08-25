@@ -1,0 +1,18 @@
+{
+  "schema": 2,
+  "id": "TASK-0203",
+  "name": "Messaging phase 6: guided queue drives composers on applicants and profiles",
+  "request": "Messaging phase 6: guided queue drives composers on applicants and profiles",
+  "type": "change",
+  "status": "aborted",
+  "startedAt": "2026-08-25T23:28:45.100Z",
+  "completedAt": null,
+  "startCommit": "8c06082e3a7671db30541dec23fa9b39e1ef0b3e",
+  "commit": null,
+  "gitRef": "task/TASK-0203",
+  "files": [],
+  "checks": [],
+  "result": null,
+  "abortedAt": "2026-08-25T23:33:06.428Z",
+  "abortReason": "Aborted by operator"
+}

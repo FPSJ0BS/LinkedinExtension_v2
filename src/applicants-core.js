@@ -359,7 +359,22 @@
     // plural too, and the bare token would trip this file's own DOM check, which
     // greps for `\bdocument\b` after stripping comments and cannot tell a word
     // in an allowlist from a reference to the global.
-    /^(?:download|download\s+(?:resume|résumé|cv|curriculum\s+vitae|file|documents?|attachment|pdf|original))$/i;
+    //
+    // The third alternative is 3.13.0, and it is what a DOC card's own control
+    // is actually called. A card LinkedIn cannot preview offers a download and
+    // nothing else, and it names the file it would fetch — `Download
+    // Sushmitha.L's resume`. Under the two anchored alternatives above that is
+    // not a download control at all, so the one layout where pressing Download
+    // is the ONLY way to get the file was the one layout that refused to.
+    //
+    // It is still a WHOLE-LABEL rule and it is not a widening of what may be
+    // pressed. The label must still BEGIN with the verb and END with a resume
+    // noun, and everything between the two is a bounded run of NAME characters
+    // — letters, digits, apostrophes, dots and hyphens, six words at the most.
+    // No punctuation that could join a second clause survives that, so
+    // `Download resume, then reject` cannot reach it even before the denylist —
+    // which is still consulted first, on the whole label, and still refuses it.
+    /^download(?:\s+(?:resume|résumé|cv|curriculum\s+vitae|file|documents?|attachment|pdf|original)|\s+[\p{L}\p{N}'’.-]+(?:\s+[\p{L}\p{N}'’.-]+){0,5}\s+(?:resume|résumé|cv|curriculum\s+vitae))?$/iu;
 
   /** The applicant's attached CV. "Download" is a read, not an action on them. */
   const RESUME_CONTROL_PATTERN =
@@ -3952,6 +3967,66 @@
   }
 
   /**
+   * What is left to try on a resume card that has not produced a file yet.
+   *
+   * THE LIVE REPORT, with a screenshot of the card: a `DOC` tile reading
+   * "Sushmitha.L's resume", and *"resumes like this are not getting downloaded
+   * ... when i hover over this the download appear"*.
+   *
+   * WHY THAT CARD IS DIFFERENT FROM EVERY OTHER RESUME. This surface's whole
+   * resume path is built around the VIEWER: press the resume control, wait for
+   * LinkedIn to mount its viewer, and read the file's address out of the viewer
+   * or out of what the viewer fetched. LinkedIn can preview a PDF, so that
+   * works. It cannot preview a `.doc` or a `.docx` — so it renders a tile with a
+   * type badge, mounts no viewer, fetches nothing, and offers exactly one
+   * action, revealed on hover: download. The wait times out with no address and
+   * the applicant is recorded `link_only` — or `unavailable`, when the tile is
+   * not a control the policy recognises at all. Both mean the recruiter has no
+   * file for somebody who attached one.
+   *
+   * THE LADDER, and its order is the whole safety argument:
+   *
+   *   1. `ADDRESS` — the card already names the file. **A link needs no click**,
+   *      and this is the only step that can end with a file and press nothing at
+   *      all, so it is asked first and it beats everything below it.
+   *   2. `REVEAL` — hover the card and look again. A hover is not a click: it
+   *      sends nothing, changes nothing in the recruiter's ATS, and moving the
+   *      pointer away undoes it. It exists because a control the page renders on
+   *      `mouseenter` is not in the markup to be read until something hovers it.
+   *   3. `PRESS` — the card's own Download, once. This is the only step that
+   *      presses anything, so it is the LAST one, it is never reached while an
+   *      address is known, and it is never reached before the card has been
+   *      looked at properly.
+   *
+   * `pressed` is checked before `downloadLabel` deliberately: a press that
+   * produced no address is a finished answer, not an invitation to press again.
+   * The reason travels with the verdict because the last two releases each spent
+   * a round guessing at a resume defect that one line of diagnostics names.
+   */
+  const RESUME_CARD_STEP = Object.freeze({
+    ADDRESS: "address",
+    REVEAL: "reveal",
+    PRESS: "press",
+    GIVE_UP: "give-up"
+  });
+
+  function planResumeCardStep({
+    address = "",
+    hovered = false,
+    downloadLabel = "",
+    pressed = false,
+    canPress = true
+  } = {}) {
+    const step = (action, reason) => ({ action, reason });
+    if (cleanText(address)) return step(RESUME_CARD_STEP.ADDRESS, "the card already names the file");
+    if (!hovered) return step(RESUME_CARD_STEP.REVEAL, "the card has not been hovered yet");
+    if (pressed) return step(RESUME_CARD_STEP.GIVE_UP, "the download was pressed and no address followed");
+    if (!cleanText(downloadLabel)) return step(RESUME_CARD_STEP.GIVE_UP, "the card offers no download control");
+    if (!canPress) return step(RESUME_CARD_STEP.GIVE_UP, "the download may not be pressed right now");
+    return step(RESUME_CARD_STEP.PRESS, "the card's own download is the only thing left");
+  }
+
+  /**
    * Which applicants a run is allowed to skip, keyed by what a list row knows.
    *
    * The live complaint: a run stopped half way and started again went back to
@@ -4738,6 +4813,7 @@
     isFullyCollectedApplicant, createCollectedIndex,
     RESUME_SCAN_STREAK_LIMIT, MAX_APPLICANT_RESUME_RELOADS,
     RESUME_RECOVERY, planResumeRecovery,
+    RESUME_CARD_STEP, planResumeCardStep,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
