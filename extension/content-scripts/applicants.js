@@ -3498,8 +3498,35 @@
     diagnostics.resume.descriptor = "not-checked";
     if (!url) return "";
     let response;
+    // A HEAD first (3.9.1), because this check only ever needed the
+    // content-type and was paying for the whole document to learn it.
+    //
+    // WHAT IT COST. Every applicant's CV was pulled down the wire HERE, and then
+    // again by `chrome.downloads` a moment later, on top of the copy LinkedIn's
+    // own viewer had already fetched and the copy its Download control fetches —
+    // four transfers of one file where a recruiter doing it by hand makes one or
+    // two. That is the sharpest difference between this extension's traffic and a
+    // human's, and it is the shape of thing that gets an account throttled: the
+    // reported symptom was that the first two applicants downloaded and every one
+    // after them came back with LinkedIn's own "Scanning resume for viruses"
+    // notice, on an account where doing it by hand worked fine.
+    //
+    // WHETHER THAT IS THE CAUSE IS NOT ESTABLISHED, and this comment must not be
+    // read as saying it is — no live run has been made (rule 20) and no test here
+    // can show it. What IS established is that the transfer was redundant: the
+    // body was read only on the descriptor branch, and every other path threw it
+    // away. Removing a redundant credentialed GET of somebody's CV is worth doing
+    // whether or not it turns out to be the cause.
+    let headOnly = false;
     try {
-      response = await fetch(url, { credentials: "include" });
+      response = await fetch(url, { method: "HEAD", credentials: "include" });
+      headOnly = true;
+      // Not every CDN answers HEAD, and one that answers without a content-type
+      // has told us nothing. Fall back to exactly the request this always made.
+      if (!response.ok || !response.headers.get("content-type")) {
+        response = await fetch(url, { credentials: "include" });
+        headOnly = false;
+      }
     } catch (error) {
       // Said out loud rather than swallowed. This catch is where a **missing host
       // permission** lands: the media CDN is a different origin from
@@ -3527,10 +3554,115 @@
       return url;
     }
 
+    // JSON means this address is a DESCRIPTOR, and the descriptor is in the body
+    // — which a HEAD does not carry. This is the one branch that genuinely needs
+    // the bytes, and it is the rare one: the common case is a real document,
+    // which now costs a HEAD and nothing more.
+    if (headOnly) {
+      try {
+        response = await fetch(url, { credentials: "include" });
+      } catch (error) {
+        diagnostics.resume.descriptor = "check-failed";
+        diagnostics.resume.descriptorError = error instanceof Error ? error.message : String(error);
+        return url;
+      }
+      if (!response.ok) {
+        diagnostics.resume.descriptor = `http-${response.status}`;
+        return url;
+      }
+    }
     const body = await response.text().catch(() => "");
     const document_ = Applicants.documentUrlFromDescriptor(body);
     diagnostics.resume.descriptor = document_ ? "resolved-from-descriptor" : "descriptor-named-no-document";
     return document_;
+  }
+
+  /**
+   * How long a resume still being virus-scanned is given to clear (3.9.1).
+   *
+   * Bounded deliberately, and deliberately not long. LinkedIn's own notice says
+   * "Please refresh the page now", which suggests the component may not update
+   * by itself — and this extension will not reload the hiring page mid-run to
+   * find out, because that would tear down the applicant list, the pager and the
+   * panel the walk is standing on. So this is a short, cheap "did it settle on
+   * its own?" and nothing more; when it has not, the applicant is recorded as
+   * NOT ATTEMPTED rather than as having no CV, and a later run picks it up.
+   *
+   * WHETHER IT EVER CLEARS WITHOUT A RELOAD IS NOT KNOWN HERE. No test in this
+   * repository can establish it and no live run has been made (rule 20); the
+   * wait is written so that being wrong about it costs one poll interval per
+   * affected applicant and nothing else.
+   */
+  const RESUME_SCAN_WAIT_MS = 5000;
+
+  /**
+   * The notice LinkedIn puts where the resume should be while it scans it.
+   *
+   * Scoped two ways, because a false positive here would mark a real CV as
+   * unreadable: the element must be inside the container the caller passed, and
+   * its own text must be SHORT. A notice is a sentence; an applicant's CV that
+   * happens to discuss antivirus work is not, and the length bound is what keeps
+   * those apart without needing a class name (rule 7).
+   */
+  function resumeScanningNotice(root) {
+    if (!root) return null;
+    for (const element of root.querySelectorAll("p,span,div,section,[role='alert'],[role='status']")) {
+      const text = cleanText(element.innerText || "");
+      if (!text || text.length > 200) continue;
+      if (!Applicants.isResumeScanningText(text)) continue;
+      if (!isVisible(element)) continue;
+      return element;
+    }
+    return null;
+  }
+
+  /**
+   * Give a scan a short chance to finish. Returns true if it is STILL scanning.
+   *
+   * Presses nothing and reloads nothing — the state is LinkedIn's to clear, and
+   * every control that might hurry it along is either forbidden or a page reload.
+   */
+  async function waitForResumeScan(root, diagnostics) {
+    if (!resumeScanningNotice(root)) return false;
+    diagnostics.resume.scanning = true;
+    const started = Date.now();
+    while (Date.now() - started < RESUME_SCAN_WAIT_MS) {
+      await wait(OVERLAY.POLL_MS);
+      assertRunnable();
+      if (!resumeScanningNotice(root)) {
+        diagnostics.resume.scanClearedMs = Date.now() - started;
+        return false;
+      }
+    }
+    diagnostics.resume.scanWaitedMs = Date.now() - started;
+    return true;
+  }
+
+  /**
+   * Record a resume that could not be read because LinkedIn was still scanning.
+   *
+   * NOT_ATTEMPTED, and the choice matters: `mergeApplicantRecord` reads it as "I
+   * did not look" and keeps whatever was already stored, so a re-run that hits
+   * the scan cannot destroy a file an earlier run did get. UNAVAILABLE would be
+   * a WRONG value — the applicant has a CV, this run just could not see it — and
+   * rule 1 says a blank beats a wrong value.
+   *
+   * Said on the RECORD as a warning, not only in a diagnostics field nobody
+   * opens: "the first two downloaded and the rest did not" was invisible for a
+   * whole run precisely because this state had no voice.
+   */
+  function recordScanningResume(accumulator, diagnostics, viewerUrl) {
+    accumulator.setResume({
+      available: true,
+      viewerUrl: viewerUrl || null,
+      downloadStatus: Applicants.RESUME_STATUS.NOT_ATTEMPTED
+    });
+    accumulator.addWarning(
+      "LinkedIn was still virus-scanning this resume, so it was not read. "
+      + "The applicant keeps whatever was saved before; collect them again later."
+    );
+    diagnostics.resume.reason = "still-scanning";
+    diagnostics.resume.status = Applicants.RESUME_STATUS.NOT_ATTEMPTED;
   }
 
   async function collectResume(panel, accumulator, diagnostics, applicantKey, applicantName = "", expected = "") {
@@ -3540,7 +3672,24 @@
       reason: "", status: Applicants.RESUME_STATUS.NOT_ATTEMPTED
     };
 
-    const control = findControl(panel, Applicants.CONTROL_PURPOSE.RESUME);
+    let control = findControl(panel, Applicants.CONTROL_PURPOSE.RESUME);
+    if (!control) {
+      // Before concluding this applicant has no CV: LinkedIn replaces the whole
+      // resume card with a scan notice, taking the control with it (3.9.1). The
+      // card in that state carries no Download and no viewer link, so the old
+      // code reached exactly this branch and wrote UNAVAILABLE — a WRONG value
+      // for somebody who does have a resume, and rule 1 says a blank beats a
+      // wrong one. Given a moment to clear first, because the alternative is
+      // losing the file over a second of timing.
+      if (await waitForResumeScan(panel, diagnostics)) {
+        recordScanningResume(accumulator, diagnostics, "");
+        return;
+      }
+      // The scan may have cleared while we waited and brought the card back.
+      // Looked up again rather than recursing: one more query on a path that had
+      // already failed, and no way for a flickering notice to loop.
+      control = findControl(panel, Applicants.CONTROL_PURPOSE.RESUME);
+    }
     if (!control) {
       accumulator.setResume({ available: false, downloadStatus: Applicants.RESUME_STATUS.UNAVAILABLE });
       diagnostics.resume.reason = "no-resume-control";
@@ -3667,6 +3816,18 @@
     diagnostics.resume.documentUrlFound = Boolean(url);
 
     if (!url) {
+      // Second scan checkpoint (3.9.1). Reaching here with no address is the
+      // symptom the scan notice produces once the card DID have a control: the
+      // viewer opens onto the notice instead of the document, nothing is ever
+      // fetched, and the wait above times out. Told apart here because
+      // `link_only` and "still scanning" want opposite handling — one is a
+      // finished answer, the other is "come back later" — and for four
+      // applicants in a row they looked identical on the record.
+      if (await waitForResumeScan(overlay || panel, diagnostics)) {
+        recordScanningResume(accumulator, diagnostics, viewerUrl || location.href);
+        await dismissResumeViewer(overlay, accumulator, diagnostics);
+        return;
+      }
       // The viewer opened but never exposed a document URL. What it *said* is
       // still recorded — the file name is worth having even with no file — and
       // the route is stored as the viewer address, not as the CV. Reporting a

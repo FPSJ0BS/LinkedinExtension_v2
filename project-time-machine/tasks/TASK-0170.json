@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0170",
+  "name": "Handle LinkedIn's resume virus-scan state and stop fetching each document twice",
+  "request": "Handle LinkedIn's resume virus-scan state and stop fetching each document twice",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T07:09:41.811Z",
+  "completedAt": "2026-08-25T07:16:30.311Z",
+  "startCommit": "3ab4f3ca9d36999d5ffb4e066c869d0c9a7be87e",
+  "gitRef": "task/TASK-0170",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 546 tests passed (was 541), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "Give LinkedIn's resume virus-scan state a name, and stop transferring each document four times. THE REPORT: on a live run the first two applicants downloaded their resumes and every one after them did not, with LinkedIn's own notice - 'Scanning resume for viruses. Please refresh the page now.' - where the resume card had been; doing it by hand on the same account opened the file normally. WHAT COULD BE FIXED ON THE EVIDENCE, and what could not: nothing here establishes the CAUSE and this task does not claim to (rule 20, no live run has been made from this side). Two things were provably wrong regardless. (1) THE STATE HAD NO NAME. Nothing in the tree contained the string, so the scan notice was indistinguishable from a layout the readers cannot parse. Worse, LinkedIn takes the whole resume card away while scanning, control included, so collectResume reached its no-resume-control branch and wrote UNAVAILABLE - a WRONG value for somebody who does have a CV, and rule 1 says a blank beats a wrong one. Now recognised by RESUME_SCANNING_PATTERN in the core, waited out once for a bounded five seconds at two checkpoints (before concluding there is no resume, and before concluding no-document-url), and if it has not cleared, recorded as NOT_ATTEMPTED with a warning ON THE RECORD rather than in a diagnostics field nobody opens. NOT_ATTEMPTED rather than a new status because mergeApplicantRecord already reads it as 'I did not look' and keeps what was stored - asserted end to end through the merge, so a re-run that hits the scan cannot destroy a file an earlier run saved. The wait presses nothing and reloads nothing: every way of hurrying the scan is either a forbidden control or a page reload that would tear down the list, the pager and the panel the walk is standing on. The notice is told from an applicant's own CV by LENGTH, not by a class name (rule 7) - asserted against 'Built antivirus scanning pipelines' and 'malware analysis and virus research', which must not match. (2) THE DOCUMENT WAS FETCHED FOUR TIMES PER APPLICANT. resolveResumeDocumentUrl needed only the content-type and was doing a full credentialed GET of the CV to learn it, reading the body on one branch and discarding it on every other - so each file went down the wire there, again through chrome.downloads, on top of the viewer's own fetch and the copy its Download control pulls. A human doing this by hand transfers it once or twice. Now a HEAD, with the old GET kept as the fallback for a CDN that refuses HEAD or answers without a type, and the descriptor branch going back for the bytes it genuinely needs. Behaviour is preserved on every branch that mattered and the 3.7.1 refusal that keeps a LinkedIn page from being saved as a CV is re-asserted. Removing a redundant credentialed GET of somebody's CV is worth doing whether or not it turns out to be the cause. Two existing tripwires fired and both were raised deliberately rather than worked around: the core's DOM check caught the bare token 'document' in the new pattern, fixed the way the file's own note prescribes, and the resume step's exit count went from four to five because the scan checkpoint is a fifth exit that closes the viewer like the other four. Six new tests. No click added - the budget is still the eight from the previous task - no new resume status, and the nine CSV columns are unchanged."
+}

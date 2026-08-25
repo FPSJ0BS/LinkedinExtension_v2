@@ -1951,6 +1951,45 @@
   const RESUME_EXTENSION_PATTERN = /\.(?:pdf|docx?|odt|rtf|txt|pages)(?:$|[?#])/i;
 
   /**
+   * LinkedIn is still virus-scanning this attachment, so there is nothing to read
+   * yet (3.9.1).
+   *
+   * THE LIVE SYMPTOM. On a run the recruiter reported that the first two
+   * applicants downloaded and every one after them did not; the resume card had
+   * been replaced by "Scanning resume for viruses. Please refresh the page now."
+   * Doing it by hand on the same account opened the file normally.
+   *
+   * Nothing in this extension knew that string, so the step behaved as if the
+   * page had simply not rendered an address: it waited out the document timeout
+   * and saved `link_only` with reason `no-document-url`, which says nothing about
+   * what actually happened and reads exactly like a layout it cannot parse.
+   *
+   * The state is TRANSIENT and the recovery is to wait, not to press anything —
+   * so what this pattern buys is the ability to tell "not ready yet" from "not
+   * there", and those two want opposite handling: one is retried, the other is
+   * recorded as absent.
+   *
+   * Matched on the message rather than on any container, because the card that
+   * carries it is a plain block with no role and no stable name.
+   */
+  const RESUME_SCANNING_PATTERN =
+    /\b(?:scanning\s+(?:this\s+|the\s+)?(?:resume|résumé|cv|documents?|file|attachment)|scanning\s+for\s+(?:a\s+)?virus(?:es)?|virus\s+scan(?:ning)?\s+in\s+progress|being\s+scanned)\b/i;
+
+  /**
+   * Does this text say the attachment is still being scanned?
+   *
+   * A plain predicate rather than a bare regex export so the adapter cannot
+   * accidentally test it against a whole panel and match an applicant whose own
+   * CV happens to discuss antivirus work. The caller scopes it; this only
+   * decides.
+   */
+  function isResumeScanningText(value) {
+    const text = cleanText(value);
+    if (!text) return false;
+    return RESUME_SCANNING_PATTERN.test(text);
+  }
+
+  /**
    * Hosts and paths that serve the document rather than a page about it.
    *
    * LinkedIn's media CDN, and the storage routes it proxies through. An id with
@@ -3503,7 +3542,8 @@
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,
     nameFromExplanations, chooseApplicantName,
     // the record
-    RESUME_STATUS, RESUME_EXTENSION_PATTERN, isResumeDocumentUrl, documentUrlFromDescriptor,
+    RESUME_STATUS, RESUME_EXTENSION_PATTERN,
+    RESUME_SCANNING_PATTERN, isResumeScanningText, isResumeDocumentUrl, documentUrlFromDescriptor,
     // naming the saved file
     sanitizeFileName, resumeFileExtension, resumeFileName,
     applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,

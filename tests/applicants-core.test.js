@@ -1286,12 +1286,13 @@ test("the resume is downloaded, not previewed, whenever the page already has the
   // without the extension ever mentioning it, which is the whole complaint.
   assert.ok(!/if \(overlay\) await closeOpenedOverlay\(overlay\)/.test(step),
     "the close result must not be discarded");
-  // Four exits since 3.9.0. The fourth is the non-throwing identity re-check:
+  // Five exits since 3.9.1. The fourth is the non-throwing identity re-check:
   // the resume step is the only one whose output is a FILE saved under somebody's
   // name, and it is the one most likely to run long enough for the panel to
-  // change underneath it. It closes the viewer like the other three.
-  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 4,
-    "every one of the four exits from this step closes the viewer");
+  // change underneath it. The fifth is LinkedIn still virus-scanning the file,
+  // which is "come back later" rather than an answer. All five close the viewer.
+  assert.equal((step.match(/await dismissResumeViewer\(overlay, accumulator, diagnostics\)/g) || []).length, 5,
+    "every one of the five exits from this step closes the viewer");
   const dismiss = source.slice(source.indexOf("async function dismissResumeViewer"), source.indexOf("const MAX_RESUME_BYTES"));
   assert.match(dismiss, /the resume viewer would not close/, "and a viewer that refuses to go says so on the record");
 
@@ -6975,4 +6976,174 @@ test("3.9.1: the eighth click is a new control, and it is the only new one", asy
     "contact", "resume", "experience", "education", "skills",
     "screeningResponses", "qualifications", "applicationStatus"
   ], "the same seventeen applicant fields");
+});
+
+// ---------------------------------------------------------------------------
+// 3.9.1 — "Scanning resume for viruses", and the document fetched four times
+//
+// Reported live: the first two applicants of a run downloaded their resumes and
+// every one after them did not, with LinkedIn's own notice — "Scanning resume
+// for viruses. Please refresh the page now." — where the resume card had been.
+// Doing it by hand on the same account opened the file normally.
+//
+// Nothing here can prove what caused it (rule 20). Two things could be fixed on
+// the evidence available: the state had no name, so it was recorded as a layout
+// failure or as "no resume"; and the document was being transferred four times
+// per applicant where a human transfers it once or twice.
+// ---------------------------------------------------------------------------
+
+test("3.9.1: LinkedIn's scan notice is recognised, and a CV that mentions one is not", () => {
+  // The string from the capture, verbatim.
+  assert.equal(
+    Applicants.isResumeScanningText("Scanning resume for viruses. Please refresh the page now."),
+    true,
+    "the notice in the live capture"
+  );
+  for (const text of [
+    "Scanning resume for viruses",
+    "Scanning this document for viruses",
+    "Your file is being scanned",
+    "Virus scanning in progress"
+  ]) {
+    assert.equal(Applicants.isResumeScanningText(text), true, text);
+  }
+
+  // A false positive here would mark a real CV as unreadable, so the wording has
+  // to be the notice's and not merely on the subject of viruses.
+  for (const text of [
+    "Resume",
+    "Naveen Scaria",
+    "Built antivirus scanning pipelines at Acme",
+    "Security Engineer — malware analysis and virus research",
+    ""
+  ]) {
+    assert.equal(Applicants.isResumeScanningText(text), false, text);
+  }
+  assert.equal(Applicants.isResumeScanningText(null), false);
+});
+
+test("3.9.1: a resume still being scanned is not-attempted, never unavailable", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const record = source.slice(
+    source.indexOf("function recordScanningResume"),
+    source.indexOf("async function collectResume")
+  );
+  assert.ok(record.length > 200, "the recorder must be found, not an empty slice");
+
+  // NOT_ATTEMPTED and never UNAVAILABLE. The applicant HAS a resume — this run
+  // could not see it — and `mergeApplicantRecord` reads not-attempted as "I did
+  // not look" and keeps whatever was stored, so a re-run that hits the scan
+  // cannot destroy a file an earlier run did get. UNAVAILABLE would be a wrong
+  // value written over a right one.
+  assert.match(record, /RESUME_STATUS\.NOT_ATTEMPTED/, "the verdict is not-attempted");
+  assert.ok(!/RESUME_STATUS\.UNAVAILABLE/.test(record), "and never unavailable");
+  assert.match(record, /available: true/, "the applicant does have a resume");
+
+  // Said on the record, not only in diagnostics. "The first two worked and the
+  // rest did not" was invisible for a whole run because this state had no voice.
+  assert.match(record, /addWarning/, "a scan that blocked the read is a warning on the record");
+
+  // And that is exactly how the merge treats it — proven through the merge
+  // rather than asserted about it.
+  const stored = Applicants.normalizeApplicantRecord({
+    applicant: { name: "A", resume: { available: true, url: "https://media.licdn.com/dms/document/x", downloadStatus: "downloaded" } }
+  });
+  const rescanned = Applicants.normalizeApplicantRecord({
+    applicant: { name: "A", resume: { available: true, downloadStatus: "not_attempted" } }
+  });
+  const merged = Applicants.mergeApplicantRecord(stored, rescanned);
+  assert.equal(merged.applicant.resume.downloadStatus, "downloaded",
+    "a scan on a later run must not undo a resume an earlier run saved");
+  assert.equal(merged.applicant.resume.url, "https://media.licdn.com/dms/document/x",
+    "and must not drop its address");
+});
+
+test("3.9.1: the scan is waited out, never clicked through and never reloaded", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const waiter = source.slice(
+    source.indexOf("async function waitForResumeScan"),
+    source.indexOf("function recordScanningResume")
+  );
+  assert.ok(waiter.length > 200, "the waiter must be found, not an empty slice");
+
+  // The state is LinkedIn's to clear. Every way of hurrying it is either a
+  // forbidden control or a page reload that would tear down the list, the pager
+  // and the panel the walk is standing on.
+  assert.ok(!/\.click\(\)/.test(waiter), "the scan is never clicked through");
+  assert.ok(!/location\.reload|location\.href\s*=|window\.open/.test(waiter), "and the page is never reloaded");
+
+  // Bounded, and it stops when the run stops.
+  assert.match(waiter, /RESUME_SCAN_WAIT_MS/, "the wait is bounded by a named constant");
+  assert.match(waiter, /assertRunnable\(\)/, "and a Stop ends it like every other loop");
+
+  // Costs nothing when nothing is scanning: it returns before waiting at all.
+  assert.match(waiter, /if \(!resumeScanningNotice\(root\)\) return false;/,
+    "an applicant with no notice must not pay for this check");
+
+  // The notice is told from a CV by its LENGTH, not by a class name (rule 7).
+  const notice = source.slice(
+    source.indexOf("function resumeScanningNotice"),
+    source.indexOf("async function waitForResumeScan")
+  );
+  assert.match(notice, /text\.length > 200/, "a notice is a sentence; a CV is not");
+  assert.ok(!/class\*=/.test(notice), "and nothing here matches a generated class name");
+});
+
+test("3.9.1: the descriptor check no longer downloads the document to read its type", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const resolve_ = source.slice(
+    source.indexOf("async function resolveResumeDocumentUrl"),
+    source.indexOf("function resumeScanningNotice")
+  );
+  assert.ok(resolve_.length > 400, "the resolver must be found, not an empty slice");
+
+  // THE POINT: this check only ever needed the content-type. It was a full
+  // credentialed GET of the CV, whose body was read on ONE branch and discarded
+  // on every other — so every applicant's document went down the wire here and
+  // again through chrome.downloads a moment later.
+  assert.match(resolve_, /method: "HEAD", credentials: "include"/, "the type is asked for with a HEAD");
+  const headAt = resolve_.indexOf('method: "HEAD"');
+  const bodyAt = resolve_.indexOf("response.text()");
+  assert.ok(headAt > 0 && bodyAt > headAt, "and the body is only ever read after it");
+
+  // Behaviour is preserved on every branch that mattered:
+  //  - a CDN that refuses HEAD, or answers without a type, gets the old GET;
+  //  - a JSON answer is still a descriptor and still resolved from its body.
+  assert.match(resolve_, /if \(!response\.ok \|\| !response\.headers\.get\("content-type"\)\)/,
+    "a HEAD that told us nothing falls back to the request this always made");
+  assert.match(resolve_, /if \(headOnly\) \{/, "and the descriptor branch goes back for the bytes it needs");
+  assert.match(resolve_, /documentUrlFromDescriptor/, "a descriptor is still resolved to the file it names");
+
+  // The refusal that keeps a page from being saved as a CV is untouched.
+  assert.equal(Applicants.isResumeDocumentUrl("https://www.linkedin.com/hiring/applicants/?applicationId=1"), false);
+  assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
+});
+
+test("3.9.1: handling the scan cost no click and no new status", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  // The eighth click is the contact menu and remains the only new one. Nothing
+  // about the scan is pressed.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+
+  // Reusing NOT_ATTEMPTED rather than inventing a status is deliberate: a new one
+  // would have to be taught to the merge, the CSV and the dashboard, and this
+  // one already means exactly the right thing.
+  assert.deepEqual(Object.keys(Applicants.RESUME_STATUS), [
+    "NOT_ATTEMPTED", "DOWNLOADED", "ALREADY_SAVED", "LINK_ONLY", "UNAVAILABLE", "FAILED"
+  ], "the same six resume verdicts");
+
+  // And the columns did not move.
+  const { APPLICANT_TABLE_COLUMNS } = await import("../src/applicant-csv.js");
+  assert.deepEqual([...APPLICANT_TABLE_COLUMNS], [
+    "applicant_name", "email", "mobile", "resume_file",
+    "current_role", "current_company", "total_experience", "education"
+  ]);
 });
