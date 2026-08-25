@@ -148,6 +148,16 @@
      */
     lastPanelIdentity: "",
     /**
+     * Why the last attempt to open a row ended as it did.
+     *
+     * `selectApplicantRow` answered a bare boolean, so "the row was not mounted
+     * any more", "the classifier refused the control" and "the panel came up
+     * showing the previous applicant" were one indistinguishable false — and
+     * that false is what turns an applicant into a name with no details. The
+     * reason now travels with it, into the run's own error line and the console.
+     */
+    lastSelect: null,
+    /**
      * Coming back to a job the recruiter already started a run on.
      *
      * `lastKey` is the view this page was showing the last time it was looked
@@ -5238,17 +5248,65 @@
    * and scrolled nothing. Arrival is a wait; only a panel positively showing
    * **somebody else** refuses the row.
    */
-  async function selectApplicantRow(row) {
+  /**
+   * This row, as the page is rendering it NOW.
+   *
+   * **THE DEFECT (3.9.4). "Many applicants have only a name."** A row is picked
+   * from a list scan and then a good deal happens before it is clicked — most of
+   * it `panelAlreadyShowing`, which waits up to `PANEL_ARRIVAL_TIMEOUT_MS` for
+   * the panel to say who it is showing. The hiring view re-mounts continuously
+   * while that wait runs, and a virtualized list recycles rows in and out. So by
+   * the time the click is attempted, `row.control` is routinely a **detached
+   * node**: the freshly-resolved `applicantList()` does not contain it, so the
+   * container proof fails and the classifier refuses it — or the proof passes
+   * against a stale list and the click lands on a node that is not on the page,
+   * which does nothing at all. Either way `selectApplicantRow` answers false,
+   * the run saves the floor record built from the row's own text and moves on,
+   * and the applicant is stored with a name and nothing else — no role, no
+   * company, no contact details, no resume — with no error anywhere, because
+   * from the run's point of view the row simply "would not open".
+   *
+   * The row is therefore re-resolved by identity from the live list before it is
+   * pressed. It is the SAME applicant — `rowKey` is their own href — mounted
+   * where the page has it now, so the container proof is against the list that
+   * is actually on screen. Nothing here is a new click and nothing is a new
+   * reading rule: it is the same row, found again.
+   */
+  function relocateApplicantRow(row) {
     const list = applicantList();
-    const verdict = Applicants.classifyApplicantControl({
-      text: cleanText(row.control.textContent),
-      ariaLabel: cleanText(row.control.getAttribute("aria-label")),
-      purpose: Applicants.CONTROL_PURPOSE.APPLICANT_ROW,
-      inContainer: Boolean(list && list.contains(row.control))
-    });
-    if (!verdict.allowed) return false;
+    if (list && row.control?.isConnected && list.contains(row.control)) {
+      return { list, control: row.control, relocated: false };
+    }
+    const key = rowKey(row);
+    const again = applicantRows().find((candidate) => rowKey(candidate) === key);
+    const live = applicantList();
+    if (again && live && live.contains(again.control)) {
+      return { list: live, control: again.control, relocated: true };
+    }
+    return null;
+  }
 
-    const control = { element: row.control, verdict };
+  async function selectApplicantRow(row) {
+    // Re-resolved first: the node this row was found on may have been recycled
+    // out of the DOM while the panel was being asked who it was showing.
+    const here = relocateApplicantRow(row);
+    if (!here) {
+      state.lastSelect = { opened: false, reason: "row-not-mounted", relocated: false };
+      return false;
+    }
+    const { list, control: element, relocated } = here;
+    const verdict = Applicants.classifyApplicantControl({
+      text: cleanText(element.textContent),
+      ariaLabel: cleanText(element.getAttribute("aria-label")),
+      purpose: Applicants.CONTROL_PURPOSE.APPLICANT_ROW,
+      inContainer: Boolean(list && list.contains(element))
+    });
+    if (!verdict.allowed) {
+      state.lastSelect = { opened: false, reason: verdict.reason || "row-refused", relocated };
+      return false;
+    }
+
+    const control = { element, verdict };
     const expected = Applicants.parseHiringContext(row.href).applicationId || "";
     const heldPanel = arrivalPanel();
     const before = panelIdentity(heldPanel);
@@ -5297,6 +5355,15 @@
     // to the panel, not a verdict on the applicant.
     const refused = settled.state === Applicants.PANEL_ARRIVAL.OTHER
       || settled.state === Applicants.PANEL_ARRIVAL.PREVIOUS;
+    // Why, on the record. "The panel would not open" and "the panel opened
+    // somebody else" are different failures with different fixes, and the run
+    // used to report both as one silent boolean — which is why a job full of
+    // name-only records said nothing about how it got that way.
+    state.lastSelect = {
+      opened: !refused,
+      reason: refused ? `panel-showed-${settled.state}` : "",
+      relocated
+    };
     return !refused;
   }
 
@@ -6434,6 +6501,19 @@
     let wrongApplicantRetries = 0;
 
     /**
+     * How many times a row whose panel never opened may be opened again.
+     *
+     * The failure this bounds costs the WHOLE record rather than a field of it —
+     * nothing is read when a row does not open — so it is the one most worth
+     * retrying and was the only one with no retry at all. Bounded for the same
+     * reason as its two siblings: a row that will never open must still end,
+     * and it ends with the floor record rather than with the person lost.
+     */
+    const MAX_OPEN_RETRIES = 2;
+    let openRetryKey = "";
+    let openRetries = 0;
+
+    /**
      * How many growth attempts in a row may end without telling us where the
      * list ends.
      *
@@ -6844,9 +6924,46 @@
         opened = false;
         state.run.lastError = error instanceof Error ? error.message : String(error);
       }
-      if (!opened && !state.run.lastError) {
+      /**
+       * A PANEL THAT DID NOT OPEN IS TRIED AGAIN, and this is the other half of
+       * "many applicants have only a name".
+       *
+       * `collectVisibleApplicant` answers `opened: false` before `extractApplicant`
+       * is called at all, so **nothing was read**: no panel scan, no contact
+       * disclosure, no resume. The floor record below is then all that person
+       * ever gets. Every other way this can fail is already bounded and retried —
+       * a hidden page gets `MAX_HIDDEN_RETRIES`, a panel showing somebody else
+       * gets `MAX_WRONG_APPLICANT_RETRIES` — and this, the one failure that
+       * costs the entire record rather than a field of it, got none at all: one
+       * attempt, then the row was retired with a bare name.
+       *
+       * Retrying is free of side effects precisely BECAUSE nothing was read.
+       * There is no half-written record to reconcile, no second copy of a CV to
+       * download and no disclosure left open — the row simply has not been
+       * opened yet. And the next turn re-resolves it from a fresh list scan,
+       * which is the whole point: the usual cause is a node the page has since
+       * recycled, and `relocateApplicantRow` can only find the live one once the
+       * page has finished re-mounting it.
+       *
+       * Bounded like its two siblings, and the floor record still lands when the
+       * retries run out — losing a person from the list because their panel
+       * misbehaved would defeat the one thing this pass is for.
+       */
+      if (!opened) {
+        const why = cleanText(state.lastSelect?.reason) || "the panel did not open";
+        openRetries = key === openRetryKey ? openRetries + 1 : 1;
+        openRetryKey = key;
+        if (openRetries <= MAX_OPEN_RETRIES) {
+          state.run.lastError =
+            `${fromRow.applicant.name}'s panel did not open (${why}); opening it again `
+            + `(${openRetries} of ${MAX_OPEN_RETRIES}) rather than saving a name with no details.`;
+          state.run.updatedAt = new Date().toISOString();
+          await paceBetweenApplicants();
+          continue;
+        }
         state.run.lastError =
-          `Could not open ${fromRow.applicant.name}'s profile; the name from their list row was still saved.`;
+          `Could not open ${fromRow.applicant.name}'s profile after ${MAX_OPEN_RETRIES} attempts (${why}); `
+          + "the name from their list row was still saved.";
       }
 
       // `extractApplicant` has already saved whatever the panel gave it. This
@@ -6861,7 +6978,17 @@
       // can only ever fill the gap, never flatten the details.
       const named = cleanText(record?.applicant?.name);
       try {
-        if (!named) await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
+        if (!named) {
+          // Named in the console as it happens. `state.run.lastError` holds one
+          // line and every later applicant overwrites it, so a run that ended
+          // with twenty name-only records showed the reason for the last of
+          // them and no trace of the other nineteen.
+          console.warn(
+            `[Profile Vault ${BUILD_ID}] saved a name with no details`,
+            { name: fromRow.applicant.name, reason: state.lastSelect?.reason || "", opened }
+          );
+          await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
+        }
         results.push(record || fromRow);
         state.run.collected += 1;
         // Added to the index as well as to the store, so a virtualized list

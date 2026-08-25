@@ -1658,7 +1658,11 @@ test("the next applicant is only scanned once the panel is showing them", async 
   // And what the walk then saves for that row is the row's OWN name — never a
   // reading of whoever the panel was left on.
   const run = source.slice(source.indexOf("async function extractAllApplicants"));
-  assert.match(run, /if \(!opened && !state\.run\.lastError\) \{/, "a row that would not open is recorded as such");
+  // 3.9.4: a row that would not open is now OPENED AGAIN before it is written
+  // off, because nothing is read when it does not open — see the bounded-retry
+  // test below — and only then recorded as such.
+  assert.match(run, /if \(!opened\) \{/, "a row that would not open is recorded as such");
+  assert.match(run, /Could not open \$\{fromRow\.applicant\.name\}'s profile after \$\{MAX_OPEN_RETRIES\} attempts/);
   assert.match(run, /record: fromRow/, "and only its own name is saved for it");
 });
 
@@ -1875,8 +1879,12 @@ test("the list pass opens every applicant across every page and takes what the p
   // opened, or a panel that resolved no name, would otherwise leave the column
   // the whole export is read by empty.
   assert.match(pass, /const named = cleanText\(record\?\.applicant\?\.name\);/, "the panel's name is preferred");
-  assert.match(pass, /if \(!named\) await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_SAVE", record: fromRow \}\)/,
+  assert.match(pass, /if \(!named\) \{[\s\S]{0,600}?await chrome\.runtime\.sendMessage\(\{ type: "PV_APPLICANT_SAVE", record: fromRow \}\)/,
     "and the row's name only fills a gap");
+  // 3.9.4: and it says so as it happens. `state.run.lastError` holds one line,
+  // so a run that ended with twenty name-only records showed the reason for the
+  // last of them and no trace of the other nineteen.
+  assert.match(pass, /saved a name with no details/, "every name-only save is named in the console");
   assert.match(pass, /opened = false;/, "a profile that would not open still reaches the floor save");
   // And a hidden page is a pause with the SAME bound the full run applies, or a
   // panel that reliably hides the tab re-runs one applicant forever.
@@ -4153,7 +4161,12 @@ test("PERMANENT: one click per applicant, wait for the right panel, scroll only 
   //    inside that list — never by building an address.
   const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
   assert.match(select, /purpose: Applicants\.CONTROL_PURPOSE\.APPLICANT_ROW/, "the row is a gated control");
-  assert.match(select, /inContainer: Boolean\(list && list\.contains\(row\.control\)\)/, "proven inside the left list");
+  // 3.9.4: proven inside the list that is on screen NOW. The row is re-resolved
+  // by identity first, because the node it was found on is routinely recycled
+  // out of the DOM while the panel is being asked who it is showing — and a
+  // proof taken against a stale list is no proof.
+  assert.match(select, /const here = relocateApplicantRow\(row\);/, "the row is re-resolved before it is pressed");
+  assert.match(select, /inContainer: Boolean\(list && list\.contains\(element\)\)/, "proven inside the left list");
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "and clicked exactly once per applicant");
 
   // 3 + 5. After the click it WAITS for the right panel to become a different
@@ -4313,6 +4326,57 @@ test("a Next pager is still the pager when its label carries a chevron", () => {
     assert.equal(result.allowed, false, `${forbidden} must never be pressed`);
   }
   assert.equal(verdict("Next: Message").forbidden, true, "the denylist is still consulted first");
+});
+
+test("a row that would not open is opened again, because nothing was read when it did not", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+
+  // THE REPORT: "many applicants have only a name, they did not get any details
+  // collected." `collectVisibleApplicant` answers `opened: false` BEFORE
+  // `extractApplicant` is called, so nothing is read for that row — no panel
+  // scan, no contact disclosure, no resume — and the floor record built from the
+  // row's own text was all that person ever got.
+  const relocate = source.slice(source.indexOf("function relocateApplicantRow"), source.indexOf("async function selectApplicantRow"));
+  assert.match(relocate, /row\.control\?\.isConnected/, "a detached node is not a row on the page");
+  assert.match(relocate, /rowKey\(candidate\) === key/, "the same applicant is found again by their own identity");
+  assert.match(relocate, /live\.contains\(again\.control\)/, "and the container proof is taken against the live list");
+
+  const run = source.slice(source.indexOf("async function extractAllApplicants"));
+
+  // The retry, bounded exactly like the two failures that already had one.
+  assert.match(run, /const MAX_OPEN_RETRIES = 2;/, "bounded, so a row that will never open still ends");
+  assert.match(run, /openRetries = key === openRetryKey \? openRetries \+ 1 : 1;/,
+    "and counted per row, so one bad row cannot spend another row's allowance");
+  assert.match(run, /if \(openRetries <= MAX_OPEN_RETRIES\) \{[\s\S]{0,600}?continue;/,
+    "a retry leaves the row unprocessed, so the next turn re-resolves it from a fresh scan");
+
+  // THE SAFETY ARGUMENT, and it is why this retry needs no new bound of its own:
+  // nothing was read, so there is no half-written record, no second copy of a CV
+  // and no disclosure left open to undo.
+  assert.match(run, /Retrying is free of side effects precisely BECAUSE nothing was read/);
+
+  // The three retries are three DIFFERENT failures and keep three counters.
+  for (const bound of ["MAX_HIDDEN_RETRIES", "MAX_WRONG_APPLICANT_RETRIES", "MAX_OPEN_RETRIES"]) {
+    assert.match(run, new RegExp(`const ${bound} = 2;`), `${bound} is its own allowance`);
+  }
+
+  // And the person is never lost: the floor still lands when the retries run out.
+  assert.ok(
+    run.indexOf("Could not open ${fromRow.applicant.name}'s profile after") < run.indexOf("record: fromRow"),
+    "the floor save is what follows the last failed attempt"
+  );
+
+  // Why it failed now travels with the answer. A bare boolean made "the row was
+  // not mounted", "the classifier refused it" and "the panel showed the previous
+  // applicant" one indistinguishable false.
+  const select = source.slice(source.indexOf("async function selectApplicantRow"), source.indexOf("* Scroll the applicant list until it stops producing new rows"));
+  for (const reason of ["row-not-mounted", "verdict.reason", "panel-showed-"]) {
+    assert.ok(select.includes(reason), `${reason} is recorded rather than collapsed into false`);
+  }
+
+  // No new click: re-resolving a row is finding it again, not pressing anything.
+  assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "still one click per applicant");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and still exactly eight in the file");
 });
 
 test("a numbered pager is the pager too, but only against the page it says it is on", () => {
@@ -4760,8 +4824,8 @@ test("adapting the pace changes what a wait costs, never what a walk concludes",
 
   // Every call site takes the same breath — there is one pacing rule, not three.
   assert.ok(!/await wait\(LIST_PROFILE_PACE_MS\)/.test(source), "no call site may pace itself");
-  assert.equal((source.match(/await paceBetweenApplicants\(\)/g) || []).length, 3,
-    "the two retry paths and the completed row all pace through the one helper");
+  assert.equal((source.match(/await paceBetweenApplicants\(\)/g) || []).length, 4,
+    "the three retry paths and the completed row all pace through the one helper");
 
   // And the run says which tempo it was held at, because "the run was slow" and
   // "the page never settled" are the same sentence from two ends.

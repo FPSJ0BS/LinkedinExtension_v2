@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "id": "TASK-0179",
+  "name": "Re-resolve a row whose control was re-mounted, and retry a panel that did not open, instead of saving a bare name",
+  "request": "Re-resolve a row whose control was re-mounted, and retry a panel that did not open, instead of saving a bare name",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:53:39.872Z",
+  "completedAt": "2026-08-25T08:56:59.160Z",
+  "startCommit": "03d1b9aa95cc76874865c7f633e9d4003289b099",
+  "gitRef": "task/TASK-0179",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 567 tests passed / 0 failed (566 before, 1 added), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "TASK-0179: 'many applicants have only a name' - re-resolve a row whose control the page recycled, and open a panel again rather than writing the person off after one attempt. THE MECHANISM, and it is structural rather than a selector. collectVisibleApplicant answers opened:false BEFORE extractApplicant is called at all, so when a row does not open NOTHING is read for that person - no panel scan, no contact disclosure, no resume - and the floor record built from the row's own text is all they ever get. That path had NO RETRY. Every other way an applicant can fail is bounded and retried: a hidden page gets MAX_HIDDEN_RETRIES, a panel showing somebody else gets MAX_WRONG_APPLICANT_RETRIES, and this - the one failure that costs the WHOLE record instead of a field of it - got one attempt and then the row was retired with a bare name and no error anywhere. WHY THE ROW DID NOT OPEN, which is the half that had to be fixed first or the retry would simply fail twice more. A row is picked from a list scan and a great deal happens before it is pressed, most of it panelAlreadyShowing, which waits up to PANEL_ARRIVAL_TIMEOUT_MS for the panel to say who it is showing. The hiring view re-mounts continuously while that wait runs and the list is virtualized, so by the time the click is attempted row.control is routinely a DETACHED NODE: either the freshly-resolved applicantList() does not contain it and the container proof fails, so the classifier refuses the control, or the proof passes against a stale list and the click lands on a node that is not on the page and does nothing. Both end as one silent false. relocateApplicantRow now finds the row again by IDENTITY - rowKey is the applicant's own href - from the list that is on screen now, so the proof is against the live list and the press lands on a mounted node. It is the same applicant, found again: no new click, no new reading rule, and the eight-click budget is re-asserted at one per applicant and eight in the file. THE RETRY IS FREE OF SIDE EFFECTS PRECISELY BECAUSE NOTHING WAS READ - there is no half-written record to reconcile, no second copy of a CV to download and no disclosure left open - and it leaves the row unprocessed, so the next turn re-resolves it from a fresh scan, which is the whole point: the usual cause is a node the page has since recycled and relocateApplicantRow can only find the live one once the re-mount has finished. Bounded at two like its siblings, counted per row so one bad row cannot spend another's allowance, and the floor record STILL LANDS when the retries run out - losing a person from the list because their panel misbehaved would defeat the one thing the pass is for. AND IT SAYS WHY, which it never did. selectApplicantRow returned a bare boolean, so 'the row was not mounted', 'the classifier refused the control' and 'the panel came up showing the previous applicant' were one indistinguishable false; the reason now travels on state.lastSelect into the run's own error line. Every name-only save is also named in the console as it happens, because state.run.lastError holds ONE line and a run that ended with twenty such records showed the reason for the last of them and no trace of the other nineteen. Four existing assertions pinned the old shape and were updated to the new one, including the pacing count from three call sites to four. One new test. NO live claim: rule 20 stands. Files: extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}
