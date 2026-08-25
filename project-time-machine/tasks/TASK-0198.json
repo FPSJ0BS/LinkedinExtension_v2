@@ -1,0 +1,44 @@
+{
+  "schema": 2,
+  "id": "TASK-0198",
+  "name": "Rollback of TASK-0181 (Applicant messaging: custom messages and reusable templates)",
+  "request": "Rollback of TASK-0181 (Applicant messaging: custom messages and reusable templates)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:33:55.036Z",
+  "completedAt": "2026-08-25T22:33:56.246Z",
+  "startCommit": "593e8bc9a55ce749363289df567e4e4c2e16b4c0",
+  "commit": null,
+  "gitRef": "task/TASK-0198",
+  "files": [
+    {
+      "change": "deleted",
+      "path": "src/message-templates-core.js"
+    },
+    {
+      "change": "deleted",
+      "path": "src/template-store.js"
+    },
+    {
+      "change": "deleted",
+      "path": "tests/message-templates-core.test.js"
+    },
+    {
+      "change": "deleted",
+      "path": "tests/template-store.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-25T22-33-54-590Z created and verified"
+  ],
+  "result": "Reversed TASK-0181 — Applicant messaging: custom messages and reusable templates",
+  "target": {
+    "taskId": "TASK-0181",
+    "taskName": "Applicant messaging: custom messages and reusable templates",
+    "commit": "34bcb8384391f5f3d9990c5ad845468d426ff996"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-25T22-33-54-590Z",
+    "commit": "593e8bc9a55ce749363289df567e4e4c2e16b4c0"
+  }
+}
