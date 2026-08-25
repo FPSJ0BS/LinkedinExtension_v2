@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "TASK-0190",
+  "name": "Applicant messaging: usage guide and verification record",
+  "request": "Applicant messaging: usage guide and verification record",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T12:49:06.131Z",
+  "completedAt": "2026-08-25T12:51:57.508Z",
+  "startCommit": "8163508953d7929ee26ba673ad86cd4e6d8f506d",
+  "gitRef": "task/TASK-0190",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "added",
+      "path": "docs/applicant-messaging-guide.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 678 tests (0 fail), doc links across 19 Markdown files, build validation"
+  ],
+  "result": "TASK-0190: the messaging feature explained to the person using it, and the verification written down. A USAGE GUIDE, docs/applicant-messaging-guide.md, which leads with the only thing that really has to be understood: the extension types the message and the human presses Enter. Everything else in the feature is downstream of that sentence, so it is stated first rather than buried under a feature list - no Send control is resolved, found or pressed, 'send' and 'inmail' stay denylisted for every purpose so none COULD be classified clickable, there is no SEND message type, and there is no bulk anything. Then the six-step workflow, the twelve variables in a table READ OUT OF THE CORE rather than remembered (executed TEMPLATE_VARIABLES and pasted what it answered, so the doc cannot drift from the code by my mistyping it), and the two sections a recruiter actually needs when something does not work: why a message is BLOCKED and why an insertion is REFUSED. The blocked section explains the rule rather than just naming it - an unresolved variable stops the message because the alternative is sending somebody 'Hi ,', and rule 1 says a wrong value is worse than a blank one - and gives the two repairs, a fallback or an edit. The refusal table translates each reason code into what to do next, and says why the recipient check is not paranoia: LinkedIn's messaging overlay persists between applicants, so the PREVIOUS conversation is routinely what is on screen, and being wrong there sends one applicant's message to another. A VERIFICATION RECORD in docs/CHECKS.md, real results only (rule 22): the suite at 678 tests 0 fail with the note that it was 668 at TASK-0188 and TASK-0189 landed ten more, the classifier matrix EXECUTED rather than reasoned about across every purpose and every refusal reason, the composer policy the same way including composerTextMatches answering false for an empty box, and the BUILT dist/applicants.js re-checked at nine clicks with Escape as the only synthesised keystroke in the file - no Enter, no keyCode 13, no form.submit, no requestSubmit, no MESSAGE_SEND symbol anywhere in dist. It also records the defect a test found that reading had missed, which is the most useful line in the entry: text 'Message' with aria-label 'Send message' was ALLOWED, because label prefers the visible text so the anchored allowlist never saw the verb, which made the exemption's own comment false for exactly the shape that mattered. And the twelve intermediate failures, including Phase 9 - whose slice runs from captureApplicantUi to the message handler, so the composer section landing between those markers made the capture test report the composer's click as the capture's. TWO POINTERS so the guide is found by someone about to break it: a 'before changing anything about messaging an applicant, read this' block beside the two existing guides at the top of CLAUDE.md, carrying the one rule in a single line, and the guide added to the companion-docs list. NOT DONE AND NOT PRETENDED: docs/PROJECT_STATUS.md still reads 3.9.3 and is several releases stale from other sessions' work; correcting the header alone would leave it describing 3.9.3 under a 3.10.0 heading, which is worse than the drift, so it is left for its own task. No source file, selector, schema, click or CSV column touched - this task is documentation and nothing else. NO LIVE CLAIM: rule 20 stands and the guide says so in its own last section, which is deliberately about what to do the first time rather than a disclaimer. Files: docs/applicant-messaging-guide.md, docs/CHECKS.md, CLAUDE.md."
+}

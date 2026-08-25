@@ -29,6 +29,14 @@ layout, a scroll container, or anything to do with supporting more than one Link
 Its one rule, which every rule below already implies: **add a fallback reader after the working one; never
 replace working extraction logic to support another UI.** All UIs write into the same applicant record.
 
+**Before changing anything about messaging an applicant — the Message control, the composer, templates
+or their variables — read:**
+
+[`docs/applicant-messaging-guide.md`](docs/applicant-messaging-guide.md)
+
+Its one rule: **the extension types the message and the human presses Enter.** Nothing here may resolve,
+find or press a Send control, and nothing here may act on more than the one applicant the user picked.
+
 **Keep all existing applicant data collection working. Make only the smallest safe changes and do not
 modify the Project Time Machine logging system.**
 
@@ -324,7 +332,8 @@ Companion docs: [WORKFLOW.md](docs/WORKFLOW.md) · [AGENTS.md](AGENTS.md) · [TE
 [CHECKS.md](docs/CHECKS.md) (real results only) · [PHASES.md](docs/PHASES.md) ·
 [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [SETUP.md](docs/SETUP.md) (from a clone) ·
 [INSTALL.md](docs/INSTALL.md) (from the installer) · [MEMORY.md](docs/MEMORY.md) ·
-[SKILLS.md](docs/SKILLS.md) · [README.md](README.md).
+[SKILLS.md](docs/SKILLS.md) · [applicant-messaging-guide.md](docs/applicant-messaging-guide.md) ·
+[README.md](README.md).
 
 [COMPLETE_EXTRACTION_SPEC.md](docs/COMPLETE_EXTRACTION_SPEC.md) is a **proposal**, not current behaviour —
 it describes reading from the data the page already holds rather than only what it painted. Every rule
