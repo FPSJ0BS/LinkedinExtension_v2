@@ -232,17 +232,20 @@ profiles are saved"*. The ask was that it be fixed permanently, and the reporter
 named the remedy themselves — reload the page at that applicant when waiting
 does not help.
 
-**Also in 3.10.0, and a separate change: applicant messaging (TASK-0188).** That
-work is what makes this a minor bump rather than a patch, and it wrote no entry
-of its own, so it is recorded here in outline only. The applicant panel's own
-**Message** control becomes the **ninth click**, exempted from the denylist for
-that one purpose and no other; the feature **inserts** the rendered template into
-LinkedIn's own composer and **stops there**, so the recruiter reads it and presses
-Enter themselves and no Send control is ever resolved, let alone pressed.
-`send` and `inmail` remain denylisted for every purpose, everywhere. Rule 5 in
-CLAUDE.md was amended in the same breath, as an amendment to that rule must be.
-**The reasoning is in the TASK-0188 commit**, and nothing below is part of it —
-everything from here is TASK-0189.
+**Also in 3.10.0, and since REMOVED: applicant messaging (TASK-0181, TASK-0188,
+TASK-0190).** That work is why 3.10.0 was a minor bump rather than a patch. It
+added the applicant panel's own **Message** control as a ninth click, exempted
+from the denylist for that one purpose, and inserted a rendered template into
+LinkedIn's composer without ever sending it.
+
+**It was rolled back in full at the user's request** — TASK-0196 reversed the
+feature, TASK-0198 the template cores, TASK-0199 the documentation. The ninth
+click is gone, `Message` is back on the permanently-forbidden list in rule 5, and
+the click budget is eight again. This paragraph is kept rather than deleted
+because the release history should say what shipped and what was taken back out;
+the reasoning that was written for it lives in those task records.
+
+Nothing below is part of that work — everything from here is TASK-0189.
 
 **The diagnosis comes from the shape of the report rather than from the DOM.**
 3.9.1's report of the same notice was "the first two applicants downloaded and

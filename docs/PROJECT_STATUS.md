@@ -4,9 +4,7 @@
 **Version:** 3.10.0
 **Build ID:** `2026-08-25-react-v3.10.0`
 
-## Latest work — the refresh LinkedIn asked for, and messaging one applicant (3.10.0)
-
-Two separate changes, and the second is what makes this a minor bump rather than a patch.
+## Latest work — the refresh LinkedIn asked for (3.10.0)
 
 **The resume scan (TASK-0189).** *"Scanning resume for viruses. Please refresh the page now."* —
 LinkedIn's own words, in the resume card, reported a second time and with the detail that settles
@@ -15,28 +13,11 @@ and the run now does what the notice asks — reloading at that applicant when w
 and coming back for what it still owes. The budget that stops it looping rides on the auto-run lease
 rather than in the run, because a reload destroys every counter in the document it bounds.
 
-**Applicant messaging (TASK-0188, TASK-0190).** Message one applicant from a reusable template,
-filled from that person's already-collected record. The panel's own **Message** control becomes the
-**ninth click**, exempted from the denylist for that one purpose and no other.
-
-**It inserts and stops.** LinkedIn's composer says *"Press Enter to Send"*, and the human presses it.
-No Send control is resolved, found or pressed — `send` and `inmail` stay denylisted for *every*
-purpose, so none could be classified clickable by any caller, and there is no `SEND` message type.
-There is no bulk anything: one applicant, one composer, one insertion, driven by the user.
-
-An unresolved template variable **blocks** the message rather than rendering nothing, because the
-alternative is sending somebody `Hi ,` — rule 1, a wrong value is worse than a blank one. The
-composer must also say who it is addressed to and agree, since the messaging overlay persists
-between applicants and the *previous* conversation is routinely what is on screen.
-
-**Rule 5 was amended in the same task**, as an amendment to that rule must be. A test — not
-reading — caught the one real hole: `Message` with `aria-label: "Send message"` was allowed, because
-the label check prefers visible text and the anchored allowlist never saw the verb. Closed the same
-day, and recorded in [CHECKS.md](CHECKS.md).
-
-**Still open:** none of the messaging path has run live, and it is the one feature here whose
-mistakes reach a person rather than a spreadsheet cell. See
-[applicant-messaging-guide.md](applicant-messaging-guide.md) for what to do the first time.
+**Applicant messaging also shipped in 3.10.0, and has since been removed entirely.** It added the
+applicant panel's own `Message` control as a ninth click and inserted a rendered template into
+LinkedIn's composer without ever sending it. Rolled back in full at the user's request — TASK-0196
+reversed the feature, TASK-0198 the template cores, TASK-0199 the documentation. **The ninth click
+is gone, `Message` is back on rule 5's permanently-forbidden list, and the click budget is eight.**
 
 ## Latest work — six releases on one pager control (3.9.4 – 3.9.8)
 

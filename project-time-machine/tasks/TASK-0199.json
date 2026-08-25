@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0199",
+  "name": "Remove the messaging documentation the rollback could not invert",
+  "request": "Remove the messaging documentation the rollback could not invert",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:35:36.041Z",
+  "completedAt": "2026-08-25T22:38:37.465Z",
+  "startCommit": "a7b66e32219d079a9f368288518eb6ecc41c9ba9",
+  "gitRef": "task/TASK-0199",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    },
+    {
+      "change": "deleted",
+      "path": "docs/applicant-messaging-guide.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 606 tests (0 fail), doc links across 18 Markdown files, build validation; built dist/applicants.js re-verified at eight clicks and 'Message' refused for all seven purposes"
+  ],
+  "result": "TASK-0199: finish the messaging rollback by hand, where git could not invert it. THE ROLLBACK IN THREE PARTS, at the user's request that all messaging tasks be reversed. TASK-0196 reversed TASK-0188 (the Message control, the composer insertion, the relay, the dashboard UI and the rule 5 amendment) and TASK-0198 reversed TASK-0181 (message-templates-core.js, template-store.js and their two test files); both inverted cleanly and both left every later task intact. TASK-0190 COULD NOT BE INVERTED and the tool was right to refuse it: its docs/CHECKS.md section was written at the top of the file, and TASK-0193 and TASK-0194 have since written their own sections into exactly that place, so the reverse patch no longer applies. rollback.js aborted and returned the repository to where it started rather than leaving a half-applied revert or guessing at a resolution - twice, once before TASK-0196 and once after - keeping a backup branch each time. That is the correct behaviour and it is why the remainder is done here as ordinary edits instead. WHAT WAS REMOVED: docs/applicant-messaging-guide.md deleted; the '3.10.0 - applicant messaging' section cut from docs/CHECKS.md, leaving 3.12.0, 3.11.0 and 3.9.3 either side of it untouched; and two pointers out of CLAUDE.md, the 'before changing anything about messaging an applicant' block at the top and the companion-docs link. WHAT WAS KEPT, AND WHY IT IS NOT AN OVERSIGHT: the messaging paragraphs in docs/CHANGELOG.md and docs/PROJECT_STATUS.md are REWRITTEN rather than deleted. Both belong to tasks that are not messaging tasks - TASK-0189's 3.10.0 release entry and TASK-0191's status refresh, the latter also carrying the whole 3.9.4-3.9.8 pager story - so reversing those tasks would have thrown away unrelated work the user did not ask to lose. And a release history that silently drops a feature teaches a reader not to trust it: the feature DID ship in 3.10.0, which is why that release was a minor bump rather than a patch, so both now say what it was, that it was rolled back in full, and which tasks did it. VERIFIED, and this is the part that matters more than the tidying: the BUILT dist/applicants.js is back to EIGHT clicks; MESSAGE_COMPOSE no longer appears anywhere in src/applicants-core.js; 'Message' is back in rule 5's permanently-forbidden list beside Connect, Follow and InMail; and the classifier was EXECUTED across all seven purposes with the label 'Message' and refuses every one of them, which is the pre-3.10.0 invariant restored rather than assumed. npm run check passed: typecheck, build, 606 tests 0 fail, doc links across 18 Markdown files, build validation. NOT TOUCHED AND WORTH KNOWING: stash@{0} still holds TASK-0192's messaging-templates files, parked out of TASK-0193 and never part of any release; two tm-backup branches from the aborted TASK-0190 reverts are kept by design and are not deleted automatically; and docs/PROJECT_STATUS.md still reads 3.10.0 while the extension ships 3.12.0, which is drift from TASK-0193 and TASK-0194 and belongs to its own task rather than to this one. Files: CLAUDE.md, docs/CHANGELOG.md, docs/CHECKS.md, docs/PROJECT_STATUS.md, docs/applicant-messaging-guide.md (deleted)."
+}
