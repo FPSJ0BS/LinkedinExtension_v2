@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.11.0";
+  const BUILD_ID = "2026-08-26-react-v3.12.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -6923,8 +6923,8 @@
    * being too cautious here is one page not refreshed; the failure mode of being
    * too trusting is a browser that will not stop moving.
    */
-  async function readResumeReloadBudget(jobId, spend = false, { applicantKey = "", recovered = 0 } = {}) {
-    const none = { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
+  async function readResumeReloadBudget(jobId, spend = false, { applicantKey = "" } = {}) {
+    const none = { ok: false, reloads: 0, applicantReloads: 0 };
     if (!cleanText(jobId)) return none;
     try {
       // The same bounded send the resume cycle uses. A worker that is waking can
@@ -6934,11 +6934,9 @@
           type: "PV_APPLICANT_RESUME_RELOAD",
           jobId,
           spend: spend === true,
-          // WHO this reload is for, and WHETHER the run that is about to be
-          // destroyed got anywhere. Both are counted on the lease, because both
-          // questions span the reload and nothing in this document does.
-          applicantKey: cleanText(applicantKey),
-          recovered: Math.max(0, Number(recovered) || 0)
+          // WHO this reload is for. Counted on the lease, because the question
+          // spans the reload and nothing in this document survives one.
+          applicantKey: cleanText(applicantKey)
         },
         RESUME_RELOAD_BUDGET_TIMEOUT_MS
       );
@@ -6946,8 +6944,7 @@
       return {
         ok: true,
         reloads: Math.max(0, Number(reply.reloads) || 0),
-        applicantReloads: Math.max(0, Number(reply.applicantReloads) || 0),
-        fruitless: Math.max(0, Number(reply.fruitless) || 0)
+        applicantReloads: Math.max(0, Number(reply.applicantReloads) || 0)
       };
     } catch {
       return none;
@@ -7934,7 +7931,7 @@
       if (scanStreak >= Applicants.RESUME_SCAN_STREAK_LIMIT) {
         const budget = mayReloadForResumes()
           ? await readResumeReloadBudget(jobId, false, { applicantKey: key })
-          : { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
+          : { ok: false, reloads: 0, applicantReloads: 0 };
         const verdict = Applicants.planResumeRecovery({
           phase: "walking",
           owed: resumesOwed.size,
@@ -7944,7 +7941,6 @@
           // reloads that recovered nothing — the two bounds that replaced the
           // streak and the old give-up-after-one-fruitless-reload rule.
           applicantReloads: budget.applicantReloads,
-          fruitless: budget.fruitless,
           // Both halves, folded: `ok` is true only when this page was allowed to
           // reload AND the worker actually answered with the budget.
           canReload: budget.ok
@@ -8018,12 +8014,11 @@
       // finished walk for the same reason.
       const budget = owedResumes > 0 && mayReloadForResumes()
         ? await readResumeReloadBudget(jobId)
-        : { ok: false, reloads: 0, applicantReloads: 0, fruitless: 0 };
+        : { ok: false, reloads: 0, applicantReloads: 0 };
       const finishedVerdict = Applicants.planResumeRecovery({
         phase: "finished",
         owed: owedResumes,
         reloads: budget.reloads,
-        fruitless: budget.fruitless,
         canReload: budget.ok
       });
       resumeRecovery = { ...finishedVerdict, applicantKey: "", recovered: resumesRecovered };
@@ -8173,8 +8168,7 @@
         // from one that is not. Both cross the message boundary because both
         // outlive this document, which is about to stop existing.
         const spent = await readResumeReloadBudget(jobId, true, {
-          applicantKey: result.resumeRecovery.applicantKey || "",
-          recovered: result.resumeRecovery.recovered || 0
+          applicantKey: result.resumeRecovery.applicantKey || ""
         });
         /**
          * PAID FOR, AND PAID FOR EXACTLY ONCE.
@@ -8200,9 +8194,11 @@
           return result;
         }
         console.warn(
-          `[Profile Vault ${BUILD_ID}] reloading the hiring page (${spent.reloads} of `
-          + `${Applicants.MAX_RESUME_RELOADS}, ${spent.applicantReloads} of `
-          + `${Applicants.MAX_APPLICANT_RESUME_RELOADS} for this applicant): `
+          // NO "n of N" ANY MORE, because there is no N. The job-wide ceiling is
+          // gone, so the honest report is how many this job has taken and how
+          // many of them were for this applicant - the one bound still in force.
+          `[Profile Vault ${BUILD_ID}] reloading the hiring page (reload ${spent.reloads} for this job, `
+          + `${spent.applicantReloads} of ${Applicants.MAX_APPLICANT_RESUME_RELOADS} for this applicant): `
           + `${result.resumeRecovery.owed} resume(s) are still owed because LinkedIn was virus-scanning `
           + `them (${result.resumeRecovery.reason}). Its own notice asks for a refresh; the run will pick `
           + "up the applicants that are not yet saved."

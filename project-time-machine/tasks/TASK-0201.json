@@ -1,0 +1,68 @@
+{
+  "schema": 2,
+  "id": "TASK-0201",
+  "name": "Remove the reload ceilings so recovery never stops on a long list",
+  "request": "Remove the reload ceilings so recovery never stops on a long list",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:43:51.111Z",
+  "completedAt": "2026-08-25T22:54:56.714Z",
+  "startCommit": "15e27e07e869b799a516b16938a576b5604d5248",
+  "gitRef": "task/TASK-0201",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build 3.12.0, 609 tests 0 fail, doc links across 18 files, validate 31 build files",
+    "built dist verified: 8 clicks, 1 location.reload, 0 navigations, MAX_RESUME_RELOADS and MAX_FRUITLESS_RESUME_RELOADS absent from dist code, manifest 3.12.0",
+    "policy executed: 1e6 reloads spent still answers reload; 2000-applicant driven walk gives every applicant a reload"
+  ],
+  "result": "3.12.0/TASK-0201: no limiter. The reload-on-sight design of 3.11.0 is kept exactly as it was; the three counts that could switch it off are DELETED. Sits on a rollback of TASK-0194, done at the user's request after the prime-the-list design did not work live ('the applicants with error are not getting thier resume and the reload after a page is not working too'). The rollback was targeted at TASK-0194 BY NAME rather than 'task last', because five later tasks (0195-0199, the applicant-messaging removal) had landed in between and 'task last' would have reversed those instead - previewed first, and the preview named exactly TASK-0194's 13 paths with 'Later tasks are preserved'. WHAT WAS REMOVED AND WHAT EACH DID ON A REAL LIST: MAX_RESUME_RELOADS=12, a job-wide lifetime ceiling - 'for at least first 100 in my case after it whenever the warning/error came the pages were not reloading i waited for it to reload at some point but even after 10 applicants it did not reload'. Twelve reloads across a hundred applicants is one notice every eight, an ordinary rate, so the ceiling was reached around applicant 100 and NEVER RESET for the rest of the job - and the irony is that it only ever bit runs where reloading was WORKING, because a hopeless page was stopped sooner by the breaker while a page whose reloads kept succeeding spent all twelve and went silent. MAX_FRUITLESS_RESUME_RELOADS=3, three reloads in a row recovering nothing, which disarmed recovery for every applicant after it fired. Both DELETED rather than raised, because the defect was never the number: a count on a job cannot know how long the recruiter's list is, so on a long enough list it always stops early, and raising twelve to fifty moves the wall from applicant 100 to 400 without removing it. WHAT IS LEFT IS ONE RULE AND IT IS NOT A CAP ON THE FEATURE: MAX_APPLICANT_RESUME_RELOADS=2 bounds reloads per applicant, and its job is to make the walk MOVE ON rather than to make it stop - without it one permanently-scanning file reloads, comes back to the same applicant, finds the same notice and reloads forever, never reaching applicant N+1, which is the opposite of collecting every profile. An applicant whose two are spent is not abandoned: they stay owed, stay out of the collected index, and the end-of-walk sweep (exempt from the per-applicant rule) goes back for them with no ceiling above it any more. AND STOP: what bounds a runaway now is rule 12 rather than a counter, arriving at the policy as canReload:false - a deliberate trade made after two releases in which an automatic bound was the thing that broke the feature, because a recruiter who can see the page reloading can end it and a counter that fires at applicant 100 of 500 cannot be argued with. THE ONE AUTOMATIC GUARD KEPT is that a reload must be RECORDABLE before it is taken: the count still rises on the lease and the reload happens only when it is proven to have risen by exactly one, and a job with NO lease is now refused outright rather than answered with a fresh allowance - nothing is lost, because claimAutoRun refuses a job it has no record of. VERIFIED BY EXECUTION: 1,000,000 reloads already spent still answers reload while anything is owed; a caller passing maxReloads:2 is ignored because the parameter no longer exists; a driven walk of 2000 applicants each showing the notice gives EVERY ONE of them a reload with the lease counting all 2000 rather than saturating. THE HONEST CAVEAT, stated rather than discovered later: with no job-wide bound, a page showing the notice on every applicant and never recovering anything will reload once per applicant for the length of the list, bounded only by the per-applicant rule and by Stop. That is the deliberate cost of 'do not set any limiter'. CLICK COUNT IS 8, NOT 9, and the docs were corrected after the build reported it - the ninth was the messaging control removed by the TASK-0196/0198 rollbacks this release sits on, not by anything here. NO LIVE CLAIM: rule 20 stands. Files: src/applicants-core.js, src/background.ts, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, docs/CHECKS.md, + version bump in eight places."
+}

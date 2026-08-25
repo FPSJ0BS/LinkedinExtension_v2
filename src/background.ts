@@ -20,7 +20,7 @@ const TabsCore: any = (globalThis as any).ProfileVaultTabs;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-25-react-v3.11.0";
+const BUILD_ID = "2026-08-26-react-v3.12.0";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -1864,11 +1864,14 @@ async function settleAutoRunFor(jobId: string, report: any): Promise<any> {
 async function resumeReloadFor(
   jobId: string,
   spend: boolean,
-  applicantKey: string,
-  recovered: number
+  applicantKey: string
 ): Promise<any> {
   const key = String(jobId || "").trim();
-  if (!key) return { ok: true, reloads: 0, applicantReloads: 0, fruitless: 0 };
+  // No job id, so nothing can be recorded against anything. Refused rather than
+  // answered with a fresh allowance: a reload nothing can write down is one that
+  // can repeat for ever, and that is the one failure mode removing the ceilings
+  // leaves no other guard against.
+  if (!key) return { ok: false, reloads: 0, applicantReloads: 0 };
   const runs = await readAutoRuns();
   const entry = runs[key];
   /**
@@ -1890,14 +1893,16 @@ async function resumeReloadFor(
    * do not permit it.
    */
   if (!entry || typeof entry !== "object") {
-    // Every bound reported as already spent, not just the total: a caller that
-    // reads only one of them must not be able to find an allowance here.
-    return {
-      ok: true,
-      reloads: Number(Applicants.MAX_RESUME_RELOADS) || 12,
-      applicantReloads: Number(Applicants.MAX_APPLICANT_RESUME_RELOADS) || 2,
-      fruitless: Number(Applicants.MAX_FRUITLESS_RESUME_RELOADS) || 3
-    };
+    // REFUSED, and this is now the only automatic guard against an unbounded
+    // reload. The ceilings are gone deliberately — they were what made the
+    // feature stop working partway down a long list — so the remaining
+    // protection is that a reload must be RECORDABLE before it is taken. There
+    // is no lease to record it on here, and inventing one would arm a job nobody
+    // asked to collect.
+    //
+    // It costs nothing real: `claimAutoRun` refuses a job it has no record of,
+    // so a reload from this state was never going to resume anything anyway.
+    return { ok: false, reloads: 0, applicantReloads: 0 };
   }
   // The three counters this applicant's next reload is judged against. Read
   // through the core so the "is this the same applicant" comparison is the same
@@ -1905,7 +1910,7 @@ async function resumeReloadFor(
   const current = Applicants.readResumeReloadState(entry, { applicantKey });
   if (!spend) return { ok: true, ...current };
 
-  const noted = Applicants.noteResumeReload(entry, { now: nowIso(), applicantKey, recovered });
+  const noted = Applicants.noteResumeReload(entry, { now: nowIso(), applicantKey });
   if (!noted.changed) return { ok: true, ...current };
   runs[key] = noted.entry;
   // Persisted BEFORE the caller reloads, which is the whole point of the round
@@ -2423,8 +2428,7 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
     return resumeReloadFor(
       String(message?.jobId || ""),
       message?.spend === true,
-      String(message?.applicantKey || ""),
-      Number(message?.recovered) || 0
+      String(message?.applicantKey || "")
     );
   }
 

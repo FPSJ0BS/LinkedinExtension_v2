@@ -1,5 +1,71 @@
 # CHANGELOG.md
 
+## 3.12.0 - no limiter
+
+**The reload-on-sight design of 3.11.0 is kept exactly as it was. The three counts that could switch
+it off are deleted.**
+
+### What was removed, and what each one did on a real list
+
+- **`MAX_RESUME_RELOADS = 12`** - a job-wide lifetime ceiling. The live report: *"the pages were
+  reloading after 'Scanning resume for viruses. Please refresh the page now.' for at least first 100
+  in my case after it whenever the warning/error came the pages were not reloading i waited for it to
+  reload at some point but even after 10 applicants it did not reload"*. Twelve reloads across a
+  hundred applicants is one notice every eight, an entirely ordinary rate - so the ceiling was
+  reached around applicant 100 and **never reset for the rest of the job**.
+
+  The irony is worth recording: it only ever bit runs where reloading was *working*. A hopeless page
+  was stopped sooner by the breaker below; a page whose reloads kept succeeding spent all twelve and
+  then went silent.
+
+- **`MAX_FRUITLESS_RESUME_RELOADS = 3`** - three reloads in a row recovering nothing ended recovery
+  for the whole job. Also a count, also job-wide, and it disarmed the remedy for every applicant
+  after it fired.
+
+Both are **deleted rather than raised**, because the defect was never the number. A count on a job
+cannot know how long the recruiter's list is, so on a long enough list it always stops early. Raising
+twelve to fifty moves the wall from applicant 100 to applicant 400; it does not remove it.
+
+### What is left
+
+**One rule, and it is not a cap on the feature.** `MAX_APPLICANT_RESUME_RELOADS = 2` bounds reloads
+*per applicant*, and its job is to make the walk **move on** rather than to make it stop. Without it
+a single permanently-scanning file reloads the page, comes back to the same applicant, finds the same
+notice and reloads again - for ever, never reaching applicant N+1. That is the opposite of collecting
+every profile, so it stays. An applicant whose two are spent is not abandoned: they stay owed, stay
+out of the collected index, and the end-of-walk sweep - which is exempt from the per-applicant rule -
+goes back for them, with no ceiling above it any more.
+
+**And Stop.** What bounds a runaway now is rule 12 rather than a counter: Stop is rendered
+unconditionally, matched before every other message branch, honoured inside all three content
+scripts' loops, and arrives at the policy as `canReload: false`. That is a deliberate trade made
+after two releases in which an automatic bound was the thing that broke the feature - a recruiter who
+can see the page reloading can end it, and a counter that fires at applicant 100 of 500 cannot be
+argued with at all.
+
+**The one automatic guard kept** is that a reload must be *recordable* before it is taken. The count
+is still incremented on the lease and the reload happens only when it is proven to have risen by
+exactly one; a job with no lease is now **refused** outright rather than answered with a fresh
+allowance. Nothing is lost by that: `claimAutoRun` refuses a job it has no record of, so a reload
+from that state was never going to resume anything.
+
+### Verified
+
+609 tests, 0 fail. The policy was executed rather than reasoned about: **1,000,000 reloads already
+spent still answers `reload`** while anything is owed, and a driven walk of 2000 applicants each
+showing the notice gives **every one of them** a reload, with the lease counting all 2000 rather than
+saturating. `MAX_RESUME_RELOADS` and `MAX_FRUITLESS_RESUME_RELOADS` are absent from the built core.
+Still eight clicks, one `location.reload()`, zero navigations - eight rather than nine because the messaging control was removed by the rollbacks this release sits on, not by anything here.
+
+**Rule 20 stands.** None of this has run against a live LinkedIn page.
+
+### The honest caveat
+
+With no job-wide bound, a page that shows the notice on every applicant and never recovers anything
+will reload once per applicant for the length of the list. That is the deliberate consequence of
+*"do not set any limiter"*, and Stop is what ends it. The previous design bounded that case
+automatically and paid for it by also stopping runs that were working.
+
 ## 3.11.0 — the reload arrives on the applicant that asked for it
 
 TASK-0192. **"Scanning resume for viruses. Please refresh the page now."** for

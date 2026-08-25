@@ -1,5 +1,75 @@
 # CHECKS.md
 
+## 3.12.0 - no limiter (TASK-0201)
+
+Executed in this environment on 2026-08-26. **Real results only.**
+
+### Provenance
+
+This release sits on a **rollback of TASK-0194**, done at the user's request after the prime-the-list
+design did not work live: *"the applicants with error are not getting thier resume and the reload
+after a page is not working too"*. The rollback was targeted at TASK-0194 by name rather than at
+`task last`, because five later tasks (0195-0199, the applicant-messaging removal) had landed in
+between and `task last` would have reversed those instead. Previewed first, and the preview named
+exactly the 13 paths of TASK-0194 with "Later tasks are preserved."
+
+### The suite
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` | passed |
+| `npm run build` | Built Profile Vault React 3.12.0 into `dist` |
+| `npm test` | **609 tests, 0 fail** |
+| `node scripts/check-doc-links.mjs` | Checked local links in 18 Markdown files |
+| `node scripts/validate-build.mjs` | Validated 31 build files, 4 React entry points, service-worker imports |
+
+### The ceilings are gone, executed rather than asserted
+
+| Input | Answer |
+|---|---|
+| `{phase:"walking", streak:1, reloads:999}` | `reload` |
+| `{phase:"finished", owed:5, reloads:999}` | `reload` |
+| `{phase:"finished", owed:5, reloads:100000}` | `reload` |
+| `{phase:"finished", owed:5, reloads:1e6, maxReloads:2}` | `reload` - a caller cannot reintroduce one |
+| `{phase:"walking", streak:1, applicantReloads:2}` | `give-up / this applicant's reloads are spent` |
+| `{phase:"finished", owed:5, canReload:false}` | `continue / the page may not be reloaded right now` |
+
+`Applicants.MAX_RESUME_RELOADS` and `Applicants.MAX_FRUITLESS_RESUME_RELOADS` both read `undefined` -
+the exports are gone, not merely unused.
+
+### A long list, driven
+
+Every applicant shows the notice once, walked through the real lease:
+
+| Applicants | Given a reload | Lease total |
+|---|---|---|
+| 10 | 10 | 10 |
+| 100 | 100 | 100 |
+| 500 | 500 | 500 |
+| 2000 | 2000 | 2000 |
+
+No count stopped it partway at any size. The old ceiling failed this at 12.
+
+### The built artifact
+
+| Property | Result |
+|---|---|
+| `.click()` in `dist/applicants.js` | **8** - unchanged by this task (rule 5). Eight, not nine, because the ninth was the messaging control removed by the TASK-0196/0198 rollbacks. |
+| `location.reload()` | **1**, in the recovery branch |
+| `location.assign` / `location.href =` | **0** |
+| `dist/manifest.json` version | 3.12.0 |
+
+### Not verified, and not claimed
+
+**Rule 20 stands.** None of this has run against a live LinkedIn page; loading `dist/` in Chrome is
+the user's step.
+
+**The known consequence of removing the job-wide bound**, stated rather than discovered later: a page
+that shows the notice on every applicant and never recovers anything will now reload once per
+applicant for the length of the list, bounded only by the per-applicant rule and by Stop. That is the
+deliberate cost of *"do not set any limiter"*. The previous design bounded it automatically and paid
+for that by also stopping runs that were working, which is the defect being fixed here.
+
 ## 3.11.0 — the reload arrives on the applicant that asked for it (TASK-0192)
 
 Executed in this environment on 2026-08-25. **Real results only.**

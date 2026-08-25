@@ -3505,15 +3505,6 @@
        */
       resumeReloadKey: "",
       resumeReloadKeyCount: 0,
-      /**
-       * How many reloads IN A ROW have recovered no resume at all.
-       *
-       * Reset to zero by any reload that is followed by a resume actually being
-       * read, so it only ever climbs on a page that reloading is not helping.
-       * A per-run counter could not do this job: the reload destroys the run
-       * that would be holding it.
-       */
-      resumeReloadFruitless: 0,
       state: AUTO_RUN_STATE.RUNNING
     };
   }
@@ -3597,7 +3588,7 @@
    * than for one person — which clears the key and its count rather than
    * charging it to whoever happened to be last.
    */
-  function noteResumeReload(entry, { now = "", applicantKey = "", recovered = 0 } = {}) {
+  function noteResumeReload(entry, { now = "", applicantKey = "" } = {}) {
     if (!entry || typeof entry !== "object") return { changed: false, reason: "missing", entry };
     const spent = Math.max(0, Number(entry.resumeReloads) || 0) + 1;
     const key = cleanText(applicantKey);
@@ -3605,12 +3596,6 @@
     const forApplicant = sameApplicant
       ? Math.max(0, Number(entry.resumeReloadKeyCount) || 0) + 1
       : (key ? 1 : 0);
-    // Any resume read at all is proof the reloads are getting somewhere: a
-    // resumed run opens only the applicants it still OWES, so it cannot have
-    // read one by accident.
-    const fruitless = Math.max(0, Number(recovered) || 0) > 0
-      ? 0
-      : Math.max(0, Number(entry.resumeReloadFruitless) || 0) + 1;
     return {
       changed: true,
       reason: "reloaded",
@@ -3619,7 +3604,6 @@
         resumeReloads: spent,
         resumeReloadKey: key,
         resumeReloadKeyCount: forApplicant,
-        resumeReloadFruitless: fruitless,
         updatedAt: cleanText(now)
       }
     };
@@ -3638,8 +3622,7 @@
     const sameApplicant = Boolean(key) && key === cleanText(source.resumeReloadKey);
     return {
       reloads: Math.max(0, Number(source.resumeReloads) || 0),
-      applicantReloads: sameApplicant ? Math.max(0, Number(source.resumeReloadKeyCount) || 0) : 0,
-      fruitless: Math.max(0, Number(source.resumeReloadFruitless) || 0)
+      applicantReloads: sameApplicant ? Math.max(0, Number(source.resumeReloadKeyCount) || 0) : 0
     };
   }
 
@@ -3777,10 +3760,16 @@
    *      one the recruiter was looking at, so the remedy never visibly answered
    *      the complaint even when it fired.
    *   2. The budget was two, so a third notice could not be answered at all.
-   *      See `MAX_RESUME_RELOADS`.
    *   3. One reload that recovered nothing ended recovery for the whole job,
    *      permanently — which is what "6 profiles without even reloading" is.
-   *      See `MAX_FRUITLESS_RESUME_RELOADS`.
+   *
+   * **Both of those were then raised, and raising them did not fix them.** A
+   * ceiling of twelve went quiet around applicant 100 of a long list; a breaker
+   * of three still disarmed the job for every applicant after it fired. They are
+   * now DELETED rather than tuned, because the defect was never the number - it
+   * is that a count cannot know how long the recruiter's list is. Only the
+   * per-applicant rule below survives, and it exists to make the walk move ON to
+   * the next person rather than to stop it.
    *
    * **What replaced the streak as the loop-breaker is `MAX_APPLICANT_RESUME_RELOADS`,
    * and that swap is the whole design.** The streak was never really about
@@ -3816,57 +3805,6 @@
    * counting.
    */
   const MAX_APPLICANT_RESUME_RELOADS = 2;
-
-  /**
-   * How many reloads in a row may recover NOTHING before the job stops trying.
-   *
-   * **THE CIRCUIT BREAKER, and it replaces a strictly worse one.** Until now a
-   * single reload that recovered no resume ended recovery for the entire job,
-   * on the reasoning that a remedy which changed nothing has answered the
-   * question. On a page that reloads on sight that rule is far too sharp, and it
-   * is the direct cause of the third complaint above — *"at last it was not even
-   * reloading, it kept going through 6 profiles"*. One unlucky reload, landing
-   * while a scan genuinely had not finished, disarmed the feature for every
-   * applicant after it.
-   *
-   * Three consecutive is a real answer rather than one sample: a page that is
-   * recovering resets this to zero every time it gives one up, so the count only
-   * ever climbs on a page that reload after reload produces nothing. That bounds
-   * the hopeless case at three reloads — barely more than the old ceiling of two
-   * — while leaving a page that IS recovering free to keep going.
-   */
-  const MAX_FRUITLESS_RESUME_RELOADS = 3;
-
-  /**
-   * How many times one job may reload the hiring page chasing resumes.
-   *
-   * A reload is the strongest thing this extension does to a page the recruiter
-   * is sitting in front of, and an unbounded one is the classic way to turn a
-   * transient failure into a browser that will not stop moving. So there is
-   * still a ceiling, and it is still absolute.
-   *
-   * **TWO BECAME TWELVE, because two was a ceiling on the wrong thing.** When a
-   * reload could only be triggered by three-in-a-row, a budget of two meant six
-   * applicants had to fail before it ran out, and reaching it was rare. Now that
-   * the notice is answered where it appears, two would be exhausted by the
-   * second applicant, and every applicant after that would be walked past with
-   * the notice on screen and nothing done about it — which is precisely the
-   * *"it kept going through 6 profiles without even reloading"* the recruiter
-   * reported, made worse rather than better by the more responsive trigger.
-   *
-   * **What actually bounds this now is not the ceiling.** Two other rules bite
-   * long before twelve: `MAX_APPLICANT_RESUME_RELOADS` stops one applicant from
-   * looping, and `MAX_FRUITLESS_RESUME_RELOADS` stops a page that is recovering
-   * nothing after three tries. A hopeless page therefore costs three reloads,
-   * not twelve; the ceiling is only ever approached by a page that keeps giving
-   * resumes up and keeps going stale again, which is a page worth reloading.
-   * Twelve is the backstop for the case none of that anticipated.
-   *
-   * Persisted on the auto-run entry rather than held in the run, because the
-   * reload destroys the document and every counter in it. A budget that resets
-   * on the thing it is bounding is not a budget.
-   */
-  const MAX_RESUME_RELOADS = 12;
 
   const RESUME_RECOVERY = Object.freeze({
     CONTINUE: "continue",
@@ -3942,11 +3880,8 @@
     streak = 0,
     reloads = 0,
     applicantReloads = 0,
-    fruitless = 0,
     canReload = true,
-    maxReloads = MAX_RESUME_RELOADS,
     maxApplicantReloads = MAX_APPLICANT_RESUME_RELOADS,
-    maxFruitless = MAX_FRUITLESS_RESUME_RELOADS,
     streakLimit = RESUME_SCAN_STREAK_LIMIT
   } = {}) {
     const count = (value) => Math.max(0, Number(value) || 0);
@@ -3976,10 +3911,43 @@
     if (!finished && count(applicantReloads) >= count(maxApplicantReloads)) {
       return verdict(RESUME_RECOVERY.GIVE_UP, "this applicant's reloads are spent");
     }
-    if (spent >= count(maxReloads)) return verdict(RESUME_RECOVERY.GIVE_UP, "reload-budget-spent");
-    if (count(fruitless) >= count(maxFruitless)) {
-      return verdict(RESUME_RECOVERY.GIVE_UP, "the last reloads recovered no resume");
-    }
+    /**
+     * AND THAT IS THE LAST BOUND. THERE IS NO CEILING BELOW THIS LINE.
+     *
+     * **Two used to sit here and both are gone, because both were counts, and a
+     * count cannot know how long the recruiter's list is.** The live reports
+     * that removed them, in order:
+     *
+     *   - `MAX_RESUME_RELOADS`, a job-wide lifetime ceiling of twelve. *"for at
+     *     least first 100 in my case after it whenever the warning came the
+     *     pages were not reloading ... even after 10 applicants it did not
+     *     reload"*. Twelve reloads across a hundred applicants is one notice
+     *     every eight, which is an ordinary rate — so the ceiling was reached
+     *     around applicant 100 and never reset, and every applicant after that
+     *     was walked past with the notice on screen. It only ever bit runs where
+     *     reloading was WORKING: a hopeless page was stopped earlier by the
+     *     breaker below, while a page whose reloads kept succeeding spent all
+     *     twelve and then went silent.
+     *   - `MAX_FRUITLESS_RESUME_RELOADS`, three reloads in a row recovering
+     *     nothing. Also a count, also job-wide, and it disarmed recovery for
+     *     every applicant after it fired.
+     *
+     * **What stops a runaway now is Stop (rule 12), which is a person rather
+     * than a counter.** It is rendered unconditionally, matched before every
+     * other message branch, honoured inside all three content scripts' loops,
+     * and it arrives here as `canReload: false` — which is checked above, before
+     * any of this. That is a deliberate trade, made after two releases in which
+     * an automatic bound was the thing that broke the feature: a recruiter who
+     * can see the page reloading can end it, and a counter that fires at
+     * applicant 100 of 500 cannot be argued with at all.
+     *
+     * The per-applicant rule above is the only bound left, and it is not a cap
+     * on the feature — it is what makes the walk MOVE ON to the next person
+     * instead of reloading forever on one stuck file. Without it a single
+     * permanently-scanning resume stalls the run on applicant N and no applicant
+     * after them is ever reached, which is the opposite of collecting every
+     * profile.
+     */
     return verdict(RESUME_RECOVERY.RELOAD, finished ? "resumes-still-owed" : "page-stale");
   }
 
@@ -4768,8 +4736,8 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, hasPendingResume,
     isFullyCollectedApplicant, createCollectedIndex,
-    RESUME_SCAN_STREAK_LIMIT, MAX_RESUME_RELOADS, MAX_APPLICANT_RESUME_RELOADS,
-    MAX_FRUITLESS_RESUME_RELOADS, RESUME_RECOVERY, planResumeRecovery,
+    RESUME_SCAN_STREAK_LIMIT, MAX_APPLICANT_RESUME_RELOADS,
+    RESUME_RECOVERY, planResumeRecovery,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
