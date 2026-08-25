@@ -5393,8 +5393,17 @@
    * page LinkedIn renders the pager and disables it, and clicking it forever is
    * how a walk stops terminating.
    */
-  function findApplicantPaginationControl(list) {
-    if (!list) return null;
+  function findApplicantPaginationControl(list, note = {}) {
+    note.named = false;
+    note.groups = 0;
+    note.numbered = 0;
+    note.marked = 0;
+    note.currentPage = null;
+    note.reason = "";
+    if (!list) {
+      note.reason = "no-list";
+      return null;
+    }
     const scope = list.parentElement || list;
     for (const element of scope.querySelectorAll("button,a,[role='button']")) {
       if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
@@ -5406,9 +5415,11 @@
       });
       if (!verdict.allowed) continue;
       if (!isVisible(element)) continue;
+      note.named = true;
+      note.reason = "named-pager";
       return { element, verdict };
     }
-    return findNumberedPagerControl(list);
+    return findNumberedPagerControl(list, note);
   }
 
   /** How far above the list a pager may sit and still be this list's pager. */
@@ -5428,11 +5439,60 @@
       ?? Applicants.pageNumberFrom(cleanText(element.getAttribute("aria-label")));
   }
 
-  /** Is this the page the pager says is being shown? */
-  function isCurrentPageControl(element) {
-    const current = cleanText(element.getAttribute("aria-current")).toLowerCase();
+  /** Does THIS node carry the ARIA that names the page being shown? */
+  function marksCurrentPage(node) {
+    if (!(node instanceof Element)) return false;
+    const current = cleanText(node.getAttribute("aria-current")).toLowerCase();
     if (current && current !== "false") return true;
-    return cleanText(element.getAttribute("aria-selected")).toLowerCase() === "true";
+    return cleanText(node.getAttribute("aria-selected")).toLowerCase() === "true";
+  }
+
+  /**
+   * How far above a page number its current-page mark may sit.
+   *
+   * Two: the number is on the control, the mark is routinely on the list item
+   * that wraps it, and nothing legitimate puts it further away than that.
+   */
+  const CURRENT_PAGE_MARK_LEVELS = 2;
+
+  /**
+   * Is this the page the pager says is being shown?
+   *
+   * **The mark is not always on the control that carries the number.** A
+   * numbered pager renders the number on a `button` and marks the current page
+   * on the `li` around it just as often — the button is the thing you press, the
+   * item is the thing that is current. Asking only the button therefore found
+   * nothing marked on exactly the layout this exists to read, `numberedPagerWithin`
+   * refused the group for having no current page, `growApplicantList` recorded
+   * `settled`, and `settled` is CONCLUSIVE: the job was marked COMPLETED at the
+   * bottom of page one and `claimAutoRun` will not re-arm a completed job, so
+   * the run could not even restart itself. That is the reported "it does not
+   * move to next page after completing one page".
+   *
+   * Still ARIA and only ARIA (rule 7) — a filled-in look is a class name and a
+   * class name is never the proof. What is widened is *where* the ARIA may be,
+   * not *what counts as* the ARIA.
+   *
+   * The climb stops before any ancestor that also wraps another page control,
+   * because a mark up there belongs to the pager rather than to this page, and
+   * inheriting it would make every member look current. The group-level "exactly
+   * one marked" rule would catch that anyway; stopping here means the pager is
+   * refused for a reason that is true rather than for one this function
+   * manufactured.
+   */
+  function isCurrentPageControl(element, members = null) {
+    let node = element;
+    for (let level = 0; level <= CURRENT_PAGE_MARK_LEVELS && node instanceof Element; level += 1) {
+      if (marksCurrentPage(node)) return true;
+      const parent = node.parentElement;
+      if (!parent) return false;
+      const wrapsAnother = (members || []).some(
+        (member) => member.element !== element && parent.contains(member.element)
+      );
+      if (wrapsAnother) return false;
+      node = parent;
+    }
+    return false;
   }
 
   /**
@@ -5467,18 +5527,32 @@
    * searched, and (1)–(3) are what make a wider scope safe here when it would
    * not be for a control identified by the word "Next".
    */
-  function findNumberedPagerControl(list) {
+  function findNumberedPagerControl(list, note = {}) {
     let scope = list;
     for (let level = 0; level <= PAGER_SCOPE_LEVELS && scope; level += 1) {
-      const found = numberedPagerWithin(scope);
-      if (found) return found;
+      const found = numberedPagerWithin(scope, note);
+      if (found) {
+        note.reason = "numbered-pager";
+        return found;
+      }
       if (scope === document.body || scope.tagName?.toLowerCase() === "main") break;
       scope = scope.parentElement;
+    }
+    // Nothing to press, and WHICH nothing decides what happens next: a page with
+    // no pager at all is the last page, while a pager whose current page is
+    // unmarked is a layout this reader cannot yet see. Both used to arrive as
+    // `settled`, which is conclusive, so the second one completed a job that had
+    // pages left. Written down rather than reasoned about again from source —
+    // 3.9.2 spent two rounds guessing at a defect one downloaded report settled.
+    if (!note.reason) {
+      note.reason = note.numbered > 0
+        ? (note.marked === 1 ? "no-next-number" : note.marked > 1 ? "many-marked-current" : "no-current-page")
+        : "no-pager";
     }
     return null;
   }
 
-  function numberedPagerWithin(scope) {
+  function numberedPagerWithin(scope, note = {}) {
     // Grouped by the parent the numeric controls share, so a pager is told from
     // numbers scattered through the list — a rating, a count, a year in a card.
     const groups = new Map();
@@ -5492,13 +5566,17 @@
       groups.get(parent).push({ element, page });
     }
 
+    note.groups = Math.max(note.groups || 0, groups.size);
     for (const members of groups.values()) {
       if (members.length < 2) continue;
-      const marked = members.filter((member) => isCurrentPageControl(member.element));
+      note.numbered = Math.max(note.numbered || 0, members.length);
+      const marked = members.filter((member) => isCurrentPageControl(member.element, members));
       // Exactly one current page. None means this is not a pager, or is one that
       // will not say where it is — either way there is nothing to be next to.
+      note.marked = Math.max(note.marked || 0, marked.length);
       if (marked.length !== 1) continue;
       const current = marked[0].page;
+      note.currentPage = current;
       const next = members.find((member) => member.page === current + 1);
       if (!next) continue;
       const element = next.element;
@@ -5752,7 +5830,12 @@
   function createListWalk(diagnostics) {
     diagnostics.listScroll = {
       passes: 0, rows: applicantRows().length, pages: 1, paged: 0,
-      fruitless: 0, mode: "on-demand", stoppedBy: "running"
+      fruitless: 0, mode: "on-demand", stoppedBy: "running",
+      // Present from the start so a report that carries neither is telling you
+      // the walk never reached the end of a page, rather than that the fields
+      // are missing. `pagerSearch` says why nothing was pressed;
+      // `pageCompletion` says whether the page it was about to leave was done.
+      pagerSearch: null, pageCompletion: null
     };
     return diagnostics.listScroll;
   }
@@ -6027,9 +6110,11 @@
       // Genuinely settled at the bottom of this page. Is there another one?
       // Without this the end of page one is indistinguishable from the end of
       // the list.
+      const pagerSearch = {};
       const pager = walk.fruitless < MAX_FRUITLESS_PAGINATION
-        ? findApplicantPaginationControl(live)
+        ? findApplicantPaginationControl(live, pagerSearch)
         : null;
+      walk.pagerSearch = pagerSearch;
       if (!pager) {
         walk.stoppedBy = walk.fruitless >= MAX_FRUITLESS_PAGINATION ? "pagination-retired" : "settled";
         break;
@@ -6403,7 +6488,41 @@
       startedAt: new Date().toISOString()
     });
 
-    const results = [];
+    /**
+     * What this run produced, keyed by the row that produced it.
+     *
+     * A list, until the page-completion gate below started re-opening rows that
+     * saved nothing but a name: a second read of the same applicant would then
+     * have appended a SECOND entry for them, so the reply would carry the thin
+     * record and the enriched one side by side and the recruiter's count of
+     * "how many did it get" would exceed the number of people on the job.
+     * Keyed, the enriched read replaces the thin one it enriched — which is
+     * exactly what the store does with them (rule 17: reconcile, never duplicate).
+     */
+    const resultsByKey = new Map();
+
+    /**
+     * Rows whose saved record carries nothing but a name.
+     *
+     * The set the gate re-arms, and the reason this run can finish a page
+     * instead of only reaching the end of one. Membership is decided by
+     * `isCollectedApplicant` — the same test a LATER run uses to decide whom to
+     * come back for, which is the whole point: those were precisely the rows
+     * this run used to page straight past.
+     */
+    const thin = new Set();
+
+    /**
+     * Rows already counted in `state.run.collected`.
+     *
+     * A re-armed row is saved twice — thin, then enriched — and it is one
+     * applicant both times. Without this the progress the recruiter watches
+     * would climb past the number of people on the page.
+     */
+    const countedCollected = new Set();
+
+    /** Extra passes spent finishing the CURRENT page. Reset by a pager press. */
+    let pageSweeps = 0;
 
     /**
      * Every row this run has finished with, by identity.
@@ -6637,7 +6756,11 @@
             pending = roster.sort(unprocessedRows());
             if (!mounted(target)) {
               processed.add(target);
-              state.run.skipped += 1;
+              // Not skipped if this run already saved them: a row re-armed by
+              // the completion gate has a record — a thin one — and counting it
+              // again on each sweep that cannot re-mount it would report one
+              // person as three.
+              if (!countedCollected.has(target)) state.run.skipped += 1;
               state.run.index = processed.size;
               state.run.lastError = `A row on this page could not be found again and was skipped (${target}).`;
               console.warn(`[Profile Vault ${BUILD_ID}] a row vanished from the page`, target);
@@ -6646,6 +6769,69 @@
           }
 
           if (!pending.length) {
+            /**
+             * THE PAGE IS FINISHED WHEN ITS APPLICANTS ARE READ, not when its
+             * rows have been reached.
+             *
+             * **"From 25 applicants it skipped 11 and only saved their name" —
+             * and then "it does not move to next page."** The gate answers the
+             * first half and stands exactly where the second half is decided,
+             * which is why it is here rather than anywhere else: this is the one
+             * line in the run that leads to the pager, so it is the one place a
+             * page can be held back until it is genuinely done.
+             *
+             * Nothing about the walk below changes. The re-armed rows go back on
+             * the queue and are opened one at a time in the page's own order,
+             * through the same `roster.next` the first pass used — a row that
+             * has been recycled out of the DOM is swept back exactly as it is on
+             * the first pass, and every per-row retry allowance starts over,
+             * because a fresh sweep is a fresh attempt.
+             *
+             * Bounded, and the bound matters more than the retry does: an
+             * applicant this page will never read costs one thin record, while a
+             * page that refuses to end costs every applicant after it.
+             */
+            const completion = Applicants.planPageCompletion({
+              pageKeys: roster.keys(),
+              processed,
+              thin,
+              sweepsUsed: pageSweeps,
+              maxSweeps: Applicants.MAX_PAGE_COMPLETION_SWEEPS
+            });
+            listDiagnostics.listScroll.pageCompletion = {
+              sweeps: pageSweeps,
+              thin: completion.thin,
+              action: completion.action,
+              reason: completion.reason
+            };
+            if (completion.action === "rearm") {
+              pageSweeps += 1;
+              for (const stale of completion.rearm) processed.delete(stale);
+              state.run.index = processed.size;
+              state.run.lastError =
+                `${completion.rearm.length} applicant(s) on this page saved only a name; `
+                + `opening them again (pass ${pageSweeps} of ${Applicants.MAX_PAGE_COMPLETION_SWEEPS}) `
+                + "before moving to the next page.";
+              state.run.updatedAt = new Date().toISOString();
+              // Named in the console, because `lastError` holds ONE line and the
+              // next applicant overwrites it — the same reason a name-only save
+              // is logged where it happens rather than only counted.
+              console.warn(
+                `[Profile Vault ${BUILD_ID}] finishing this page before paging`,
+                { pass: pageSweeps, of: Applicants.MAX_PAGE_COMPLETION_SWEEPS, rows: completion.rearm }
+              );
+              continue;
+            }
+            if (completion.thin > 0) {
+              // Moving on with people left incomplete. Said out loud rather than
+              // buried in a count: a silent truncation reads as "it collected
+              // the page", which is the report this whole task came from.
+              console.warn(
+                `[Profile Vault ${BUILD_ID}] moving to the next page with ${completion.thin} applicant(s) `
+                + `still name-only after ${pageSweeps} extra pass(es)`,
+                { rows: roster.keys().filter((entry) => thin.has(entry)) }
+              );
+            }
             grown = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
             // A pager press is a NEW page: nothing about the old roster survives
             // it, and the new one is settled before anybody on it is opened, so
@@ -6653,6 +6839,11 @@
             if (listDiagnostics.listScroll.paged !== pagedBefore) {
               roster.reset();
               pageSettled = false;
+              // A new page owes its own allowance, and the rows of the old one
+              // are not on it — leaving either behind would spend page two's
+              // sweeps on page one's failures.
+              pageSweeps = 0;
+              thin.clear();
               await sweepCurrentPage(roster, listDiagnostics);
               pageSettled = true;
             }
@@ -6989,11 +7180,46 @@
           );
           await chrome.runtime.sendMessage({ type: "PV_APPLICANT_SAVE", record: fromRow });
         }
-        results.push(record || fromRow);
-        state.run.collected += 1;
+        const saved = named ? record : fromRow;
+        resultsByKey.set(key, saved);
+        /**
+         * IS THAT A RECORD, OR IS IT JUST A NAME?
+         *
+         * Asked here, of what actually landed, and it was never asked before.
+         * The floor path above is the obvious way to end up with a name and
+         * nothing else, but it is not the common one: a panel that DOES open and
+         * renders no section, discloses no contact and offers no resume returns
+         * a record whose only filled field is the name, so `named` is truthy,
+         * the floor save is skipped, and the row was retired as a SUCCESS. Eleven
+         * of twenty-five, in the live report.
+         *
+         * `isCollectedApplicant` is the existing line between the two and is
+         * deliberately not re-drawn here. Taken from the record this pass
+         * produced rather than from the store: anyone the store already had a
+         * usable record for was retired in bulk further up, so within this run
+         * the two answers cannot disagree.
+         */
+        if (Applicants.isCollectedApplicant(saved)) thin.delete(key);
+        else thin.add(key);
+        if (!countedCollected.has(key)) {
+          countedCollected.add(key);
+          state.run.collected += 1;
+        }
         // Added to the index as well as to the store, so a virtualized list
         // that renders the same row twice in one pass is not walked twice.
-        if (rowId) collected.applications.add(rowId.toLowerCase());
+        //
+        // ONLY WHEN THE RECORD IS USABLE, and without this the gate above could
+        // not work at all. The index is what the bulk retirement at the top of
+        // the turn consults, and it retires by "do I have them" — so a row
+        // re-armed for saving nothing but a name would be retired again on the
+        // very next scan, before it could be opened. Every sweep would then
+        // spend itself re-retiring the same eleven people. This is the same
+        // distinction `loadCollectedIndex` already makes between runs — a thin
+        // record is a run that failed on that applicant, and marking it
+        // collected is what makes the failure permanent — applied within one
+        // run, where the identity ledger `processed` is what stops a row being
+        // walked twice anyway.
+        if (rowId && Applicants.isCollectedApplicant(saved)) collected.applications.add(rowId.toLowerCase());
       } catch (error) {
         state.run.failed += 1;
         state.run.lastError = error instanceof Error ? error.message : String(error);
@@ -7021,7 +7247,7 @@
     listDiagnostics.listScroll.tempo = tempoSnapshot();
     logListWalk(listDiagnostics.listScroll);
 
-    return { records: results, run: { ...state.run }, list: listDiagnostics.listScroll || null };
+    return { records: [...resultsByKey.values()], run: { ...state.run }, list: listDiagnostics.listScroll || null };
   }
 
   /**

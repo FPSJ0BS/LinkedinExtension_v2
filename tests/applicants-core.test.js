@@ -2305,7 +2305,10 @@ test("the applicant list is grown when the run needs a row, never walked up fron
     "the run must not walk the whole list unconditionally");
   assert.match(run, /if \(options\.loadAll === true\) await loadEveryApplicantRow\(listDiagnostics\)/,
     "the full walk stays available, but only when it is asked for");
-  assert.match(run, /if \(!pending\.length\) \{[\s\S]{0,1800}?grown = await growApplicantList\(listDiagnostics, \(\) => unprocessedRows\(\)\.length > 0\)/,
+  // The window is wide because 3.9.4 put the page-completion gate between the
+  // two: the page must be judged finished before the list may be grown, and
+  // growing the list is the only thing that presses the pager.
+  assert.match(run, /if \(!pending\.length\) \{[\s\S]{0,6000}?grown = await growApplicantList\(listDiagnostics, \(\) => unprocessedRows\(\)\.length > 0\)/,
     "the list is scrolled only when the run has run out of rows it has not done");
   assert.equal((run.match(/await growApplicantList\(/g) || []).length, 1,
     "and from exactly one place, so no path can scroll the list unconditionally");
@@ -3588,7 +3591,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     "a row recycled out of the DOM is brought back, not skipped past");
   // Only a row that survives a confirmed walk of the whole page is retired, and
   // one at a time, so a single vanished row cannot condemn the rest.
-  assert.match(run, /if \(!mounted\(target\)\) \{[\s\S]{0,400}?processed\.add\(target\);[\s\S]{0,400}?continue;/,
+  assert.match(run, /if \(!mounted\(target\)\) \{[\s\S]{0,400}?processed\.add\(target\);[\s\S]{0,800}?continue;/,
     "and only a row that is genuinely gone is skipped");
 
   // The pager is reached only after all of that, and a page it moves to is
@@ -3597,8 +3600,10 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     run.indexOf("const owed = roster.next(processed);") < run.indexOf("await growApplicantList("),
     "the roster is consulted before anything may page forward"
   );
-  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) \{\s*\n\s*roster\.reset\(\);\s*\n\s*pageSettled = false;\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);/,
-    "a pager press is a new page: a new roster, settled before it is walked");
+  // A new page is a new roster, a new completion allowance and no inherited
+  // failures — then settled before its first applicant is opened.
+  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) \{\s*\n\s*roster\.reset\(\);\s*\n\s*pageSettled = false;[\s\S]{0,400}?pageSweeps = 0;\s*\n\s*thin\.clear\(\);\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);/,
+    "a pager press is a new page: a new roster, a fresh allowance, settled before it is walked");
 
   // The roster learns from every list read the run already makes, so a row
   // LinkedIn mounts late is merged into its own place at no extra scan.
@@ -4439,19 +4444,28 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
   assert.match(finder, /member\.page === current \+ 1/, "and only the one numbered next may be pressed");
   assert.match(finder, /currentPage: current/, "the page it is on is read off the pager, never counted by the run");
 
-  // Rule 7: the current page is decided by ARIA, never by a class name.
+  // Rule 7: the current page is decided by ARIA, never by a class name. Since
+  // 3.9.4 the mark may sit on the item that WRAPS the number, so what the mark
+  // IS and where it may BE are two functions and are asserted apart — widening
+  // the second must never be able to widen the first.
+  const ariaAt = source.indexOf("function marksCurrentPage");
+  const aria = source.slice(ariaAt, source.indexOf("\n  }", ariaAt));
+  assert.ok(aria.length > 40 && aria.length < 500, "the slice is the function, not the file after it");
+  assert.match(aria, /aria-current/);
+  assert.match(aria, /aria-selected/);
+  assert.ok(!/class/i.test(aria), "a generated class name is never the proof (rule 7)");
+
   const markerAt = source.indexOf("function isCurrentPageControl");
   const marker = source.slice(markerAt, source.indexOf("\n  }", markerAt));
-  assert.ok(marker.length > 40 && marker.length < 500, "the slice is the function, not the file after it");
-  assert.match(marker, /aria-current/);
-  assert.match(marker, /aria-selected/);
-  assert.ok(!/class/i.test(marker), "a generated class name is never the proof (rule 7)");
+  assert.ok(marker.length > 40 && marker.length < 900, "the slice is the function, not the file after it");
+  assert.ok(!/class/i.test(marker), "the climb to the wrapping item is ARIA-only too (rule 7)");
+  assert.match(marker, /CURRENT_PAGE_MARK_LEVELS/, "and it is bounded rather than climbing to the pager");
 
   // The named pager is still tried FIRST and in its own narrow scope — this is
   // a reader added after the working one, not a replacement for it.
   const named = source.slice(source.indexOf("function findApplicantPaginationControl"), source.indexOf("const PAGER_SCOPE_LEVELS"));
   assert.match(named, /const scope = list\.parentElement \|\| list;/, "the named pager's scope is unchanged");
-  assert.match(named, /return findNumberedPagerControl\(list\);/, "and the numbered reader runs only when it found nothing");
+  assert.match(named, /return findNumberedPagerControl\(list, note\);/, "and the numbered reader runs only when it found nothing");
 
   // No new click site: the pager press is the one that already existed.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
@@ -8017,4 +8031,129 @@ test("3.9.3: the docx media type does not weaken the core's DOM check", async ()
     "the split literal is still the type it claims to be"
   );
   assert.equal(Object.keys(Applicants.RESUME_MIME_EXTENSIONS).length, 8, "a closed table, and it stays closed");
+});
+
+// --------------------------------------------------------------------------
+// 3.9.4 — a page is finished when its applicants are READ, not when its rows
+// have been reached, and a numbered pager may mark its current page on the item
+// that wraps the number rather than on the number itself.
+//
+// THE LIVE REPORT, both halves: "from 25 applicants it skipped 11 and only
+// saved their name" and "it does not move to next page after completing one
+// page."
+// --------------------------------------------------------------------------
+
+test("3.9.4: a page owes another pass while any of its applicants saved only a name", () => {
+  const { planPageCompletion, MAX_PAGE_COMPLETION_SWEEPS } = Applicants;
+  const page = ["a", "b", "c"];
+
+  // Rows still outstanding: the gate has nothing to say. Ordinary walking, and
+  // in particular it must NOT re-arm anybody while the first pass is running —
+  // that would open the same applicant twice inside one pass.
+  const walking = planPageCompletion({ pageKeys: page, processed: new Set(["a"]), thin: new Set(["a"]) });
+  assert.equal(walking.action, "collect", "the page is still being walked for the first time");
+  assert.equal(walking.outstanding, 2);
+  assert.deepEqual(walking.rearm, [], "nothing is re-armed while rows are still unreached");
+
+  // Every row reached, every record usable: page forward, which is the whole
+  // point of the bound — this gate must not be able to hold a good page back.
+  const done = planPageCompletion({ pageKeys: page, processed: new Set(page) });
+  assert.equal(done.action, "page");
+  assert.equal(done.thin, 0);
+  assert.equal(done.reason, "page-complete");
+
+  // Every row reached, two of them saved nothing but a name. THIS is the defect:
+  // before the gate existed, this state pressed the pager.
+  const owed = planPageCompletion({ pageKeys: page, processed: new Set(page), thin: new Set(["c", "a"]) });
+  assert.equal(owed.action, "rearm");
+  // Page order, from the roster, NEVER the order they happened to fail in: a
+  // re-armed row must not be the reason the walk starts jumping around again.
+  assert.deepEqual(owed.rearm, ["a", "c"], "re-opened in the page's own order");
+  assert.equal(owed.thin, 2);
+
+  // And it is bounded, because a page that will never read must still end. An
+  // applicant this page cannot read costs one thin record; a page that refuses
+  // to end costs every applicant after it.
+  const spent = planPageCompletion({
+    pageKeys: page,
+    processed: new Set(page),
+    thin: new Set(["c"]),
+    sweepsUsed: MAX_PAGE_COMPLETION_SWEEPS
+  });
+  assert.equal(spent.action, "page", "out of allowance, the page moves on");
+  assert.equal(spent.reason, "sweeps-exhausted");
+  assert.equal(spent.thin, 1, "and says how many it is leaving behind rather than moving on silently");
+
+  // A thin key that is not on this page cannot hold this page. Pages are reset
+  // on a pager press, and this is the belt to that braces.
+  const foreign = planPageCompletion({ pageKeys: page, processed: new Set(page), thin: new Set(["z"]) });
+  assert.equal(foreign.action, "page", "another page's failures are not this page's business");
+});
+
+test("3.9.4: the completion gate stands between the last row and the pager", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const run = withoutComments(source);
+
+  // The gate is asked BEFORE the list is grown, because growing the list is the
+  // only thing that presses the pager. Anywhere else and it is decoration.
+  const gate = run.indexOf("Applicants.planPageCompletion({");
+  const grow = run.indexOf("grown = await growApplicantList(");
+  assert.ok(gate > 0 && grow > gate, "the page is judged complete before the pager can be reached");
+  assert.match(run, /pageKeys: roster\.keys\(\)/,
+    "membership comes from the roster — the mounted window is what retired half a page in the first place");
+  assert.match(run, /for \(const stale of completion\.rearm\) processed\.delete\(stale\);/,
+    "a re-armed row goes back on the queue");
+  assert.match(run, /pageSweeps \+= 1;/, "and every sweep is counted against the bound");
+
+  // Usable is decided by the EXISTING test, not by a second copy of it: this is
+  // the same line a later run uses to decide whom to come back for.
+  assert.match(run, /if \(Applicants\.isCollectedApplicant\(saved\)\) thin\.delete\(key\);\s*\n\s*else thin\.add\(key\);/,
+    "the record that landed is judged, not merely counted");
+
+  // The trap that would have made the whole gate inert: the in-memory index is
+  // what the bulk retirement consults, so a thin record put there would retire
+  // the re-armed row again before it could be opened.
+  assert.match(run, /if \(rowId && Applicants\.isCollectedApplicant\(saved\)\) collected\.applications\.add/,
+    "only a usable record marks an applicant collected within the run");
+
+  // One applicant, one entry — a re-armed row is saved twice and is one person.
+  assert.match(run, /const resultsByKey = new Map\(\);/, "results are keyed by row");
+  assert.match(run, /if \(!countedCollected\.has\(key\)\) \{/, "and counted once");
+  assert.ok(!/results\.push\(/.test(run), "the append that would have duplicated a re-armed row is gone");
+
+  // A new page owes its own allowance and holds none of the old page's failures.
+  assert.match(run, /pageSweeps = 0;\s*\n\s*thin\.clear\(\);/, "a pager press resets the page's allowance");
+
+  // Rule 9: this adds no control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+});
+
+test("3.9.4: a numbered pager may mark its current page on the item wrapping the number", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const adapter = withoutComments(source);
+
+  // Still ARIA and only ARIA (rule 7). What widened is WHERE the mark may be,
+  // never what counts as the mark — a filled-in look is a class name.
+  assert.match(adapter, /function marksCurrentPage\(node\) \{[\s\S]{0,320}?aria-current[\s\S]{0,200}?aria-selected/,
+    "the mark is aria-current or aria-selected, and nothing else");
+  assert.ok(!/isCurrentPageControl[\s\S]{0,600}?classList/.test(adapter),
+    "a class name never decides which page is current");
+
+  // Bounded, and it stops before an ancestor that wraps another page control:
+  // a mark up there belongs to the pager rather than to this page.
+  assert.match(adapter, /const CURRENT_PAGE_MARK_LEVELS = 2;/, "two levels: the control, and the item around it");
+  assert.match(adapter, /member\.element !== element && parent\.contains\(member\.element\)/,
+    "the climb stops before the group, so one mark cannot make every member current");
+  assert.match(adapter, /isCurrentPageControl\(member\.element, members\)/,
+    "the group is what makes the wider search safe, so the group is passed in");
+
+  // The group-level rule that catches everything the climb could get wrong is
+  // unchanged: exactly one current page, or no pager at all.
+  assert.match(adapter, /if \(marked\.length !== 1\) continue;/, "exactly one current page, still");
+
+  // And a pager search that finds nothing now says WHICH nothing. "No pager at
+  // all" is the last page; "a pager whose current page is unmarked" is a layout
+  // this reader cannot see — and both used to arrive as the conclusive `settled`.
+  assert.match(adapter, /note\.reason = note\.numbered > 0/, "the search records why it found nothing");
+  assert.match(adapter, /walk\.pagerSearch = pagerSearch;/, "and the walk carries it into the report");
 });

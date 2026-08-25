@@ -3460,6 +3460,91 @@
     };
   }
 
+  /**
+   * How many extra passes over one page its unfinished applicants may cost.
+   *
+   * Two, for the same reason every other retry on this surface is bounded: a
+   * page whose applicants will never read properly must still end, or the run
+   * never reaches page two at all — which is the more expensive failure of the
+   * two, because the applicants beyond it are not thin, they are absent.
+   */
+  const MAX_PAGE_COMPLETION_SWEEPS = 2;
+
+  /**
+   * Is this page finished, or does it owe another pass?
+   *
+   * **THE DEFECT THIS EXISTS FOR, reported live: "from 25 applicants it skipped
+   * 11 and only saved their name."** The run had no notion of a page being
+   * *properly* finished — only of every row having been *reached*. `processed`
+   * is added to on every terminal outcome, and a floor record is a terminal
+   * outcome, so eleven applicants whose panel never opened were retired with
+   * nothing but the name their list row painted and the walk moved on. Worse,
+   * the commonest thin outcome was not even one of the bounded failures: a panel
+   * that DOES open and renders no section, no contact and no resume returns a
+   * record carrying only a name, which the walk counted as a success.
+   *
+   * The test for "usable" is not new and is deliberately not re-invented here —
+   * `isCollectedApplicant` already draws exactly this line, and it is the line a
+   * *later* run uses to decide whom to try again. That is the whole absurdity
+   * this repairs: the records a second run would come back for were the ones the
+   * first run paged straight past.
+   *
+   * Membership comes from the roster rather than from the DOM, because the DOM
+   * cannot answer it: a virtualized list renders a window, and "nothing
+   * unprocessed is on screen" is what retired half a page in the first place.
+   *
+   * Three verdicts, and no fourth:
+   *
+   *   - `collect` — rows on this page have not been reached at all. Ordinary
+   *     walking; the gate has nothing to say yet.
+   *   - `rearm` — every row was reached, some saved nothing but a name, and the
+   *     sweep allowance is not spent. Those keys go back on the queue in page
+   *     order and are opened again before the pager is touched.
+   *   - `page` — every row was reached and either read properly or given its
+   *     allowance. `thin` says how many were left incomplete, so moving on is
+   *     recorded rather than silent (rule 22 in spirit: no quiet truncation).
+   *
+   * Re-arming is free of side effects for the same reason the open-retry is:
+   * the store is merge-only, so a second read of the same applicant can only
+   * fill the gaps in the record already written — `mergeApplicantRecord` never
+   * overwrites a filled field with a blank, and `saveApplicant` reconciles on
+   * job + applicationId, so the enriched read lands ON the thin record rather
+   * than beside it (rules 17 and 1).
+   */
+  function planPageCompletion({
+    pageKeys = [],
+    processed = new Set(),
+    thin = new Set(),
+    sweepsUsed = 0,
+    maxSweeps = MAX_PAGE_COMPLETION_SWEEPS
+  } = {}) {
+    const keys = [];
+    for (const key of pageKeys || []) {
+      const value = cleanText(key);
+      if (value && !keys.includes(value)) keys.push(value);
+    }
+    const has = (set, key) => Boolean(set && typeof set.has === "function" && set.has(key));
+
+    const outstanding = keys.filter((key) => !has(processed, key));
+    if (outstanding.length) {
+      return { action: "collect", rearm: [], thin: 0, outstanding: outstanding.length, reason: "rows-outstanding" };
+    }
+
+    // Page order, always: these are re-opened one at a time from the top of the
+    // page, exactly as they were the first time, so a re-armed row is never the
+    // reason the walk starts jumping around the list again.
+    const incomplete = keys.filter((key) => has(thin, key));
+    if (!incomplete.length) {
+      return { action: "page", rearm: [], thin: 0, outstanding: 0, reason: "page-complete" };
+    }
+    if (sweepsUsed < Math.max(0, maxSweeps)) {
+      return { action: "rearm", rearm: incomplete, thin: incomplete.length, outstanding: 0, reason: "incomplete-records" };
+    }
+    // Out of allowance. The page moves on — a page that will not read must not
+    // hold the pages after it — and says how many it is leaving behind.
+    return { action: "page", rearm: [], thin: incomplete.length, outstanding: 0, reason: "sweeps-exhausted" };
+  }
+
   // ------------------------------------------------------------ panel arrival
   /**
    * Has the applicant we asked for actually mounted?
@@ -3827,6 +3912,7 @@
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
+    MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // capturing a layout nobody has seen, with nobody's details in it
     CAPTURE_SCHEMA_VERSION, CAPTURE_LINK_RELATIONS, createCapturePseudonyms,

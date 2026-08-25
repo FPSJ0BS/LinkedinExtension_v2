@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0180",
+  "name": "Finish a page before paging: re-open applicants saved with only a name, and let a numbered pager mark its current page on the item that wraps it",
+  "request": "Finish a page before paging: re-open applicants saved with only a name, and let a numbered pager mark its current page on the item that wraps it",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T09:13:34.962Z",
+  "completedAt": "2026-08-25T09:23:54.240Z",
+  "startCommit": "fc28090f90ca733934d33fc438846108bd440c94",
+  "gitRef": "task/TASK-0180",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 570 tests, doc links, 31 build files validated"
+  ],
+  "result": "TASK-0180: a page is finished when its applicants are READ, not when its rows have been reached — and a numbered pager may mark its current page on the item that wraps the number. THE FIRST HALF, from the live report 'from 25 applicants it skipped 11 and only saved their name': the run's only notion of finishing a row was 'processed', which is added to on every TERMINAL outcome, and a floor record is terminal — so eleven people were retired with the name their list row painted and the walk pressed the pager. The commonest thin outcome was not even one of the bounded failures: a panel that DOES open and renders no section, discloses no contact and offers no resume returns a record whose only filled field is the name, so 'named' is truthy, the floor save is skipped, and the row was counted a SUCCESS. planPageCompletion is the gate, and it stands immediately before growApplicantList because growing the list is the one thing that presses the pager. Membership comes from the roster, never from the mounted window — that window is what retired half a page in the first place. Three verdicts: collect while rows are unreached, rearm when every row was reached and some saved only a name, page when they are read or their allowance is spent. Usable is decided by isCollectedApplicant, deliberately not re-drawn: that is the same line a LATER run uses to decide whom to come back for, which is the absurdity this repairs — the records a second run would return for were exactly the ones the first run paged past. Re-armed rows go back on the queue and are opened one at a time in the page's own order through the same roster.next the first pass used; every per-row allowance starts over. Bounded at two, because an applicant this page cannot read costs one thin record while a page that refuses to end costs every applicant after it, and the count of who was left behind is logged rather than silently truncated. THE TRAP THAT WOULD HAVE MADE THE GATE INERT: 'collected.applications.add(rowId)' ran for every save including thin ones, and that index is what the bulk retirement at the top of each turn consults — so a re-armed row would have been retired again before it could be opened and every sweep would have spent itself re-retiring the same eleven people. It is now added only for a usable record, the same distinction loadCollectedIndex already makes between runs. Two counters made honest at the same time: results are keyed by row so a re-armed applicant is one entry rather than two, and 'collected' and 'skipped' are counted once per person rather than once per attempt. THE SECOND HALF, 'it does not move to next page': isCurrentPageControl asked only the control carrying the number, but a numbered pager renders the number on a button and marks the current page on the item that wraps it just as often. Nothing marked meant marked.length !== 1, no pager, stoppedBy 'settled' — which is CONCLUSIVE, so the job was marked COMPLETED at the bottom of page one and claimAutoRun will not re-arm a completed job, so it could not even restart itself. The mark may now sit up to two levels above the number, and the climb stops before any ancestor that also wraps another page control, so one mark cannot make every member look current; the group rule of exactly one marked page is unchanged. Still ARIA and only ARIA — what widened is WHERE the mark may be, never what counts as the mark (rule 7), and the two are now separate functions so widening the second can never widen the first. AND IT SAYS WHICH NOTHING IT FOUND: a page with no pager at all is the last page, a pager whose current page is unmarked is a layout this reader cannot see, and both used to arrive as the same conclusive 'settled'. The search records no-pager / no-current-page / many-marked-current / no-next-number onto walk.pagerSearch, and pageCompletion carries the sweeps and the thin count, so the next live report answers this in one line instead of another round of reading source — 3.9.2 spent two rounds guessing at a defect one downloaded report settled. NO NEW CLICK: still exactly eight, and no selector, schema or CSV column touched. Three new tests; six existing assertions widened where they pinned the old shape. NO live claim: rule 20 stands, loading dist/ in Chrome is the user's step. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}
