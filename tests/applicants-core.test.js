@@ -276,6 +276,149 @@ test("an experience card splits into role, employer and dates even with no separ
   assert.deepEqual(Applicants.deriveCurrentPosition([]), { currentRole: null, currentCompany: null });
 });
 
+test("the employer is read from its own line when the card renders one, and never the dates", () => {
+  // THE DEFECT (3.9.4), from a live capture of the Insights-from-profile panel.
+  // That card gives each of the three its OWN line:
+  //
+  //   Business Development Executive
+  //   Brevity Software Solutions PVT. LTD.
+  //   2023 – 2026
+  //
+  // The reader took the line CARRYING the dates to be the company line, which
+  // on the compressed card it always is. `splitCompanyAndDates` then found the
+  // range at offset 0, had nothing to cut, and returned the whole string as the
+  // company — so `current_company` read "2023 – 2026", "2025 – 2026" and
+  // "Years employed from 2025 to Present" on consecutive rows of the exported
+  // CSV, with the real employer sitting unused in `details`.
+  const live = Applicants.parseExperienceBlock([
+    "Business Development Executive",
+    "Brevity Software Solutions PVT. LTD.",
+    "2023 – 2026"
+  ]);
+  assert.equal(live.title, "Business Development Executive");
+  assert.equal(live.company, "Brevity Software Solutions PVT. LTD.");
+  assert.equal(live.dateRange, "2023 – 2026", "and the range is kept, not swallowed by the company");
+  assert.deepEqual(live.details, [], "the employer is no longer left over as a detail line");
+
+  // The same card in the wording LinkedIn renders for a running job. It carries
+  // no dash at all, so only `PRESENT_PATTERN` finds it — and the whole line is
+  // still dates, not an employer.
+  const running = Applicants.parseExperienceBlock([
+    "Business Development Executive",
+    "Brevity Software Solutions PVT. LTD.",
+    "Years employed from 2025 to Present"
+  ]);
+  assert.equal(running.company, "Brevity Software Solutions PVT. LTD.");
+  assert.equal(running.current, true, "an empty range also cost the card its Present mark");
+
+  // Three columns are derived from this list and from nothing else, and all
+  // three were wrong or empty on the live run.
+  const derived = Applicants.deriveCurrentPosition([live, running]);
+  assert.equal(derived.currentRole, "Business Development Executive");
+  assert.equal(derived.currentCompany, "Brevity Software Solutions PVT. LTD.");
+  assert.ok(Applicants.totalExperienceFrom([live, running]),
+    "`total_experience` was empty on every row too — `totalExperienceFrom` skips an entry with no range");
+
+  // A LAST LINE OF DEFENCE at the point the value leaves for the record: an
+  // entry stored by an older build still holds the date range in `company`.
+  assert.equal(
+    Applicants.deriveCurrentPosition([{ title: "Business Development Executive", company: "2023 – 2026", current: true }]).currentCompany,
+    null,
+    "a date range is never handed back as an employer (rule 1: a blank beats a wrong value)"
+  );
+
+  // NOTHING THAT ALREADY WORKED MAY MOVE. The compressed card names the
+  // employer on the dated line, so it never reaches the new reader at all.
+  for (const [lines, company, dateRange] of [
+    [["HR Manager", "Naad Wellness • 2026-Present", "Experience verified"], "Naad Wellness", "2026-Present"],
+    [["Human Resources Manager", "Healthtrip • 2022-2025"], "Healthtrip", "2022-2025"],
+    [["HR Manager", "Naad Wellness 2026-Present"], "Naad Wellness", "2026-Present"],
+    [["Legal Assistant", "Bhatia and Khatri Law Office • 2024 - Present", "Drafted contracts"], "Bhatia and Khatri Law Office", "2024 - Present"],
+    [["Ground Engineer", "BBA Aviation • 2019-2023"], "BBA Aviation", "2019-2023"]
+  ]) {
+    const record = Applicants.parseExperienceBlock(lines);
+    assert.equal(record.company, company, `${lines[1]}: the working reader still answers first`);
+    assert.equal(record.dateRange, dateRange);
+  }
+});
+
+test("a date line is told from an employer by elimination, so a company that says Present survives", () => {
+  // The question the reader could not previously ask. It is answered by
+  // stripping the months, the connective words a date line is built from and
+  // every digit: a line with nothing left was only ever dates. An employer's
+  // name survives that stripping, which is what stops this swallowing the value
+  // it exists to protect.
+  for (const line of [
+    "2023 – 2026", "2025 - 2026", "2026", "Jan 2019 - Mar 2023",
+    "Years employed from 2025 to Present", "2020 – Present · 5 yrs 3 mos", "Present"
+  ]) {
+    assert.equal(Applicants.isDateOnlyLine(line), true, `${line}: is dates`);
+  }
+  for (const line of [
+    "Brevity Software Solutions PVT. LTD.", "UMENIT SOLUTIONS", "Naad Wellness",
+    "Naad Wellness • 2026-Present", "Present Solutions", "Current Affairs Weekly",
+    "GANDHINAGAR INSTITUTE OF TECHNOLOGY, GANDHINAGAR 715", "3M", "7-Eleven"
+  ]) {
+    assert.equal(Applicants.isDateOnlyLine(line), false, `${line}: is somebody's employer, whatever words it contains`);
+  }
+
+  // And the split says so rather than returning the line as a name.
+  assert.deepEqual(Applicants.splitCompanyAndDates("2023 – 2026"), { company: "", dateRange: "2023 – 2026" });
+  assert.deepEqual(Applicants.splitCompanyAndDates("• 2023 – 2026"), { company: "", dateRange: "2023 – 2026" },
+    "a leading separator is dropped the same way the education reader drops it");
+});
+
+test("the text fallback keeps a bare employer line with the title above it", async () => {
+  // The adapter's fallback — the reader that runs when the section's markup
+  // offers no card elements — grouped lines with a regex that spelled the
+  // COMPRESSED card's second line: a middot, a year, Present, verified. The
+  // Insights card's second line is the bare employer name and matches none of
+  // them, so the company opened a card of its own and the title was left as a
+  // one-line card with no employer at all.
+  const group = (lines) => {
+    const cards = [];
+    let current = [];
+    for (const line of lines) {
+      if (Applicants.continuesExperienceCard(line, current)) current.push(line);
+      else {
+        if (current.length) cards.push(current);
+        current = [line];
+      }
+    }
+    if (current.length) cards.push(current);
+    return cards;
+  };
+
+  assert.deepEqual(
+    group(["Business Development Executive", "Brevity Software Solutions PVT. LTD.", "2023 – 2026",
+      "Business Development Executive", "UMENIT SOLUTIONS", "2021 – 2023"]),
+    [["Business Development Executive", "Brevity Software Solutions PVT. LTD.", "2023 – 2026"],
+      ["Business Development Executive", "UMENIT SOLUTIONS", "2021 – 2023"]],
+    "two jobs, each whole"
+  );
+
+  // Unchanged on every shape the old regex already grouped.
+  assert.deepEqual(
+    group(["HR Manager", "Naad Wellness • 2026-Present", "Experience verified",
+      "Human Resources Manager", "Healthtrip • 2022-2025"]),
+    [["HR Manager", "Naad Wellness • 2026-Present", "Experience verified"],
+      ["Human Resources Manager", "Healthtrip • 2022-2025"]]
+  );
+
+  // BOUNDED to the one case that cannot be a whole card already: a card holding
+  // nothing but its title. A third line that names neither dates nor a
+  // separator still opens its own card, exactly as before.
+  assert.equal(Applicants.continuesExperienceCard("Drafted contracts", ["Legal Assistant", "Bhatia and Khatri • 2024-Present"]), false);
+  assert.equal(Applicants.continuesExperienceCard("Experience", ["Legal Assistant"]), false, "a section title opens a section, not an employer line");
+  assert.equal(Applicants.continuesExperienceCard("Can you start immediately?", ["Legal Assistant"]), false, "and neither is a screening question");
+  assert.equal(Applicants.continuesExperienceCard("Naad Wellness", []), false, "nothing continues a card that has not started");
+
+  // The rule lives in the core because the adapter has no jsdom to be tested in.
+  const adapter = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  assert.match(adapter, /Applicants\.continuesExperienceCard\(line, current\)/,
+    "the adapter asks the core rather than carrying a second copy of the rule");
+});
+
 test("education keeps the degree, which the connections record deliberately drops", () => {
   const record = Applicants.parseEducationBlock(["University of Delhi", "Bachelor of Arts, Psychology", "2018-2021"]);
   assert.equal(record.institution, "University of Delhi");

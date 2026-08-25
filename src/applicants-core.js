@@ -747,6 +747,56 @@
   const PRESENT_PATTERN = /\b(?:present|current|now|till date|to date)\b/i;
   const VERIFIED_PATTERN = /\b(?:experience verified|verified)\b/i;
 
+  // 3.9.4. The card above is not the only shape LinkedIn renders. The
+  // Insights-from-profile panel puts each of the three on its OWN line:
+  //   Business Development Executive
+  //   Brevity Software Solutions PVT. LTD.
+  //   2023 – 2026
+  // and the reader below took the line carrying the dates to be the company
+  // line, because on the compressed card it always is. `splitCompanyAndDates`
+  // then found the date range at offset 0, had nothing to cut, and returned the
+  // whole string as the company — so a live run saved "2023 – 2026",
+  // "2025 – 2026" and "Years employed from 2025 to Present" into
+  // `current_company` on consecutive rows, with the real employer sitting in
+  // `details` and the date range empty (which emptied `total_experience` too,
+  // since `totalExperienceFrom` skips an entry with no range).
+  //
+  // Everything below turns on one question the reader could not previously
+  // ask: **is this line dates, or is it an employer?**
+
+  /** Words that are part of how a date line is worded, not part of a name. */
+  const DATE_LINE_FILLER_PATTERN =
+    /\b(?:years?|yrs?|months?|mos?|employed|employment|working|worked|from|to|until|till|since|present|current|currently|now|date|dates|full[\s-]?time|part[\s-]?time|freelance|contract|permanent|internship)\b/gi;
+
+  const MONTH_WORD_PATTERN = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?/gi;
+
+  /**
+   * Is this whole line the dates, with no employer anywhere in it?
+   *
+   * Deliberately answered by ELIMINATION rather than by matching a date
+   * wording: strip the months, the connective words a date line is built from
+   * and every digit, and a line that has nothing left was only ever dates.
+   * A company name survives that stripping — "Brevity Software Solutions PVT.
+   * LTD." keeps every word of itself — which is what keeps this from swallowing
+   * the value it exists to protect. "Present Solutions • 2020-2024" keeps
+   * "Solutions" and is correctly NOT a date line.
+   *
+   * A line with no letters at all is decided first and on its own: no employer
+   * is spelled without letters, which is a rule `isEmployerCandidate` already
+   * states for the labelled reader.
+   */
+  function isDateOnlyLine(text) {
+    const value = cleanText(text);
+    if (!value) return false;
+    if (!/[a-z]/i.test(value)) return /\d/.test(value);
+    if (!DATE_RANGE_PATTERN.test(value) && !PRESENT_PATTERN.test(value)) return false;
+    const remainder = value
+      .replace(MONTH_WORD_PATTERN, " ")
+      .replace(DATE_LINE_FILLER_PATTERN, " ")
+      .replace(/[^a-z]/gi, " ");
+    return !cleanText(remainder);
+  }
+
   // ------------------------------------------------------- the section table
   //
   // Moved here from the DOM adapter in 3.9.0, byte for byte. It is pure
@@ -1027,6 +1077,14 @@
   function splitCompanyAndDates(line) {
     const text = cleanText(line);
     if (!text) return { company: "", dateRange: "" };
+    // There is no company in this string to find: it is the whole date line of
+    // a card that renders the employer above it. Returning `text` as the
+    // company here is what wrote a date range into `current_company` on every
+    // row of a live run — and rule 1 says a blank beats a wrong value. The
+    // leading separator is dropped the same way the education reader drops it.
+    if (isDateOnlyLine(text)) {
+      return { company: "", dateRange: cleanText(text.replace(/^[^0-9a-z]+/i, "")) };
+    }
     const parts = text.split(/\s*[•·|]\s*/).map((part) => cleanText(part)).filter(Boolean);
     if (parts.length > 1) {
       const dateAt = parts.findIndex((part) => DATE_RANGE_PATTERN.test(part) || PRESENT_PATTERN.test(part));
@@ -1064,10 +1122,31 @@
     const core = CORE();
     const title = core?.sanitizeRoleTitle ? core.sanitizeRoleTitle(meaningful[0]) || meaningful[0] : meaningful[0];
     const rest = meaningful.slice(1);
-    const companyLineAt = rest.findIndex((line) => DATE_RANGE_PATTERN.test(line) || PRESENT_PATTERN.test(line));
-    const companyLine = companyLineAt >= 0 ? rest[companyLineAt] : rest[0] || "";
-    const { company, dateRange } = splitCompanyAndDates(companyLine);
-    const details = rest.filter((line) => line !== companyLine);
+    const datedLineAt = rest.findIndex((line) => DATE_RANGE_PATTERN.test(line) || PRESENT_PATTERN.test(line));
+    const datedLine = datedLineAt >= 0 ? rest[datedLineAt] : rest[0] || "";
+    const split = splitCompanyAndDates(datedLine);
+    let company = split.company;
+    const dateRange = split.dateRange;
+    const used = [datedLine];
+
+    // SECOND READER, and it runs only where the first one found nothing: the
+    // dated line named no employer, which on the compressed card cannot happen
+    // and on the Insights-from-profile card always does. The employer is the
+    // line ABOVE the dates there, so that is looked at first; failing that, the
+    // first line of the card that is not itself dates. A layout whose dated
+    // line does carry the company never reaches this at all, which is the whole
+    // of the multi-UI guide's rule — add a reader after the working one.
+    if (!company) {
+      const above = datedLineAt > 0 ? rest[datedLineAt - 1] : "";
+      const named = above && !isDateOnlyLine(above)
+        ? above
+        : rest.find((line) => line !== datedLine && !isDateOnlyLine(line)) || "";
+      if (named) {
+        company = named;
+        used.push(named);
+      }
+    }
+    const details = rest.filter((line) => !used.includes(line));
 
     return {
       title,
@@ -1078,6 +1157,38 @@
       details: uniqueText(details),
       raw: cleaned.join("\n")
     };
+  }
+
+  /**
+   * Does this line continue the experience card being built, or open a new one?
+   *
+   * The adapter's text fallback — the reader that runs when the section's
+   * markup offers no card elements — grouped lines with a regex that spelled
+   * what a *compressed* card's second line looks like: a middot, a year, the
+   * word Present, the word verified. On the Insights-from-profile card the
+   * second line is the bare employer name and matches none of those, so the
+   * company opened a card of its own and the title was left as a one-line card
+   * with no employer at all.
+   *
+   * Lives here rather than in the adapter because it is string policy and the
+   * adapter cannot be unit-tested — there is no jsdom in this repository.
+   *
+   * The added clause is bounded to the one case that cannot be a card already:
+   * a card holding NOTHING BUT ITS TITLE. Absorbing a line there cannot split
+   * or merge anything that used to be whole, and every line the old regex
+   * accepted is still accepted first.
+   */
+  const EXPERIENCE_CONTINUATION_PATTERN = /[•·|]|\d{4}|\bpresent\b|\bverified\b/i;
+
+  function continuesExperienceCard(line, card = []) {
+    const text = cleanText(line);
+    if (!text) return false;
+    const lines = (Array.isArray(card) ? card : toLines(card)).map((entry) => cleanText(entry)).filter(Boolean);
+    if (!lines.length) return false;
+    if (EXPERIENCE_CONTINUATION_PATTERN.test(text)) return true;
+    // A section title or a screening question opens its own thing, never
+    // somebody's employer line.
+    return lines.length === 1 && !isSectionTitleLine(text) && !/\?\s*$/.test(text);
   }
 
   function experienceKey(record) {
@@ -1101,9 +1212,15 @@
     const list = (entries || []).filter(Boolean);
     if (!list.length) return { currentRole: null, currentCompany: null };
     const chosen = list.find((entry) => entry.current) || list[0];
+    const company = cleanText(chosen.company);
     return {
       currentRole: cleanText(chosen.title) || null,
-      currentCompany: cleanText(chosen.company) || null
+      // A date range is never an employer, whatever produced it. The parser
+      // above is the reason this column ever held one, and it is fixed — but
+      // this column is written from an accumulated entry that may have been
+      // stored by an older build or by a reader added later, so the refusal is
+      // stated here too, where the value actually leaves for the record.
+      currentCompany: company && !isDateOnlyLine(company) ? company : null
     };
   }
 
@@ -3621,6 +3738,7 @@
     parseQualificationBlock, qualificationKey, parseScreeningBlock, screeningKey,
     // history
     splitCompanyAndDates, parseExperienceBlock, experienceKey, deriveCurrentPosition,
+    isDateOnlyLine, continuesExperienceCard, EXPERIENCE_CONTINUATION_PATTERN,
     normalizeDateRange, totalExperienceFrom, parseEducationBlock, educationKey,
     // which section a heading names — the adapter's table, here so it is testable
     SECTION_PATTERNS, SECTION_KEYS, REQUIRED_SECTION_KEYS, normalizeSectionTitle, sectionKeyFor,

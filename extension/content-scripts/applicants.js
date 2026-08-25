@@ -2203,9 +2203,12 @@
       if (record && accumulator.addExperience(record) === "added") added += 1;
       current = [];
     };
-    const continuation = /[•·|]|\d{4}|\bpresent\b|\bverified\b/i;
+    // The grouping rule moved into the core in 3.9.4 so it can be unit-tested:
+    // the regex that used to live here spelled the COMPRESSED card's second
+    // line, and on a card that renders the employer on a bare line of its own
+    // that line opened a card instead of joining one.
     for (const line of ownSectionLines(section)) {
-      if (current.length && continuation.test(line)) current.push(line);
+      if (Applicants.continuesExperienceCard(line, current)) current.push(line);
       else {
         flush();
         current.push(line);

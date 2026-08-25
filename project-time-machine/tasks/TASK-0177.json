@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0177",
+  "name": "Read the company from the Insights-from-profile experience card instead of its date line",
+  "request": "Read the company from the Insights-from-profile experience card instead of its date line",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:30:35.179Z",
+  "completedAt": "2026-08-25T08:36:28.377Z",
+  "startCommit": "095ab123cb91d319ac5e7a60f3ac99ff953e0f0b",
+  "gitRef": "task/TASK-0177",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 564 tests passed / 0 failed (561 before, 3 added), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "TASK-0177: current_company held the date range, because the Insights-from-profile card puts the employer on its own line. THE DEFECT, from the user's live capture: that panel renders each experience entry as three separate lines - 'Business Development Executive' / 'Brevity Software Solutions PVT. LTD.' / '2023 - 2026' - and parseExperienceBlock takes the line CARRYING the dates to be the company line, which on the compressed card it always is. splitCompanyAndDates then found the range at offset 0, had nothing to cut, and returned the whole string as the company. Executed against the core, not reasoned about: company='2023 - 2026', dateRange='', details=['Brevity Software Solutions PVT. LTD.'] - which is exactly the CURRENT COMPANY column the user photographed, '2025 - 2026', 'Years employed from 2025 to Present', '2023 - 2026' on consecutive rows. THREE COLUMNS were wrong or empty at once, all derived from this one list: current_company held a date, current_employment_dates was empty because the range had been consumed as the name, and total_experience was empty on every row because totalExperienceFrom skips an entry with no range. The Present mark was lost too, so deriveCurrentPosition could not tell a running job from an ended one and fell back to first-in-list. THE FIX TURNS ON ONE QUESTION the reader could not previously ask - is this line dates, or is it an employer - answered by isDateOnlyLine by ELIMINATION rather than by matching a date wording: strip the months, the connective words a date line is built from and every digit, and a line with nothing left was only ever dates. A company name survives that stripping, which is what stops it swallowing the value it exists to protect: 'Present Solutions' and 'Current Affairs Weekly' are correctly NOT date lines, and asserted so. A line with no letters at all is decided first and on its own, which is a rule isEmployerCandidate already states for the labelled reader. THE NEW READER RUNS ONLY WHERE THE OLD ONE FOUND NOTHING, which is the multiple-UI guide's whole rule - add a reader after the working one, never replace it. The dated line is split exactly as before; only when it names no employer is the line ABOVE the dates looked at, then the first line that is not itself dates. Every previously-working shape is re-asserted in the test rather than assumed: the middot card, the welded card, the spaced-month card, BBA Aviation and the education refusal all answer identically. A LAST LINE OF DEFENCE at deriveCurrentPosition, where the value leaves for the record: a date range is never handed back as an employer whatever produced it, because an entry stored by an older build still holds one (rule 1, a blank beats a wrong value). THE TEXT FALLBACK had the same defect one level up and was moved into the core to be testable at all: it grouped lines with a regex spelling the COMPRESSED card's second line - a middot, a year, Present, verified - so the Insights card's bare employer line matched none of them, opened a card of its own, and left the title as a one-line card with no employer. continuesExperienceCard keeps that regex first and adds one bounded clause, a card holding NOTHING BUT ITS TITLE, which cannot split or merge anything that was already whole. No click added, no selector changed, no schema and no CSV column touched. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}
