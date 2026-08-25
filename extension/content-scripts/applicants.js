@@ -6515,15 +6515,29 @@
     const resultsByKey = new Map();
 
     /**
-     * Rows whose saved record carries nothing but a name.
+     * Rows this page reached but did not FINISH, and why — keyed by row.
      *
-     * The set the gate re-arms, and the reason this run can finish a page
-     * instead of only reaching the end of one. Membership is decided by
-     * `isCollectedApplicant` — the same test a LATER run uses to decide whom to
-     * come back for, which is the whole point: those were precisely the rows
-     * this run used to page straight past.
+     * The ledger the gate re-arms from, and the reason this run can finish a
+     * page instead of merely reaching the end of one. Two things put a row here,
+     * and the reason travels with it because one line saying "saved only a name"
+     * over a resume that was still being scanned would send the next
+     * investigation to the wrong place:
+     *
+     *   - the record carries nothing but a name — decided by
+     *     `isCollectedApplicant`, the same test a LATER run uses to choose whom
+     *     to come back for, which is the whole point: those were precisely the
+     *     rows this run used to page straight past;
+     *   - LinkedIn was still virus-scanning the resume — decided by
+     *     `hasPendingResume`. That state is TRANSIENT and clears on its own, so
+     *     it is the single most worthwhile thing on this surface to retry, and
+     *     it was the one nothing retried at all. Re-arming costs the applicant
+     *     one more open at the end of the page, by which time the scan has had
+     *     the whole page to finish.
+     *
+     * A Map rather than a Set: `planPageCompletion` asks only `has`, so the
+     * reason rides along at no cost to the policy.
      */
-    const thin = new Set();
+    const unfinished = new Map();
 
     /**
      * Rows already counted in `state.run.collected`.
@@ -6807,10 +6821,22 @@
             const completion = Applicants.planPageCompletion({
               pageKeys: roster.keys(),
               processed,
-              thin,
+              thin: unfinished,
               sweepsUsed: pageSweeps,
               maxSweeps: Applicants.MAX_PAGE_COMPLETION_SWEEPS
             });
+            // What is actually outstanding, in the recruiter's own words. One
+            // count of "unfinished" cannot tell a name-only record from a CV
+            // that was merely still being scanned, and those two want different
+            // things from whoever reads the line.
+            const why = (keys) => {
+              const counts = new Map();
+              for (const entry of keys) {
+                const reason = unfinished.get(entry) || "unfinished";
+                counts.set(reason, (counts.get(reason) || 0) + 1);
+              }
+              return [...counts].map(([reason, count]) => `${count} ${reason}`).join(", ");
+            };
             listDiagnostics.listScroll.pageCompletion = {
               sweeps: pageSweeps,
               thin: completion.thin,
@@ -6822,7 +6848,7 @@
               for (const stale of completion.rearm) processed.delete(stale);
               state.run.index = processed.size;
               state.run.lastError =
-                `${completion.rearm.length} applicant(s) on this page saved only a name; `
+                `${completion.rearm.length} applicant(s) on this page are unfinished (${why(completion.rearm)}); `
                 + `opening them again (pass ${pageSweeps} of ${Applicants.MAX_PAGE_COMPLETION_SWEEPS}) `
                 + "before moving to the next page.";
               state.run.updatedAt = new Date().toISOString();
@@ -6831,7 +6857,12 @@
               // is logged where it happens rather than only counted.
               console.warn(
                 `[Profile Vault ${BUILD_ID}] finishing this page before paging`,
-                { pass: pageSweeps, of: Applicants.MAX_PAGE_COMPLETION_SWEEPS, rows: completion.rearm }
+                {
+                  pass: pageSweeps,
+                  of: Applicants.MAX_PAGE_COMPLETION_SWEEPS,
+                  why: why(completion.rearm),
+                  rows: completion.rearm.map((entry) => ({ row: entry, reason: unfinished.get(entry) || "" }))
+                }
               );
               continue;
             }
@@ -6839,10 +6870,11 @@
               // Moving on with people left incomplete. Said out loud rather than
               // buried in a count: a silent truncation reads as "it collected
               // the page", which is the report this whole task came from.
+              const left = roster.keys().filter((entry) => unfinished.has(entry));
               console.warn(
                 `[Profile Vault ${BUILD_ID}] moving to the next page with ${completion.thin} applicant(s) `
-                + `still name-only after ${pageSweeps} extra pass(es)`,
-                { rows: roster.keys().filter((entry) => thin.has(entry)) }
+                + `still unfinished after ${pageSweeps} extra pass(es) (${why(left)})`,
+                { rows: left.map((entry) => ({ row: entry, reason: unfinished.get(entry) || "" })) }
               );
             }
             grown = await growApplicantList(listDiagnostics, () => unprocessedRows().length > 0);
@@ -6856,7 +6888,7 @@
               // are not on it — leaving either behind would spend page two's
               // sweeps on page one's failures.
               pageSweeps = 0;
-              thin.clear();
+              unfinished.clear();
               await sweepCurrentPage(roster, listDiagnostics);
               pageSettled = true;
             }
@@ -7212,8 +7244,17 @@
          * usable record for was retired in bulk further up, so within this run
          * the two answers cannot disagree.
          */
-        if (Applicants.isCollectedApplicant(saved)) thin.delete(key);
-        else thin.add(key);
+        if (!Applicants.isCollectedApplicant(saved)) {
+          unfinished.set(key, "saved only a name");
+        } else if (Applicants.hasPendingResume(saved)) {
+          // Everything else about this applicant was read; only the CV was not,
+          // because LinkedIn had not finished scanning it. Worth one more open —
+          // and `mergeApplicantRecord` guarantees the second read can only add
+          // the file, never undo the record the first one wrote.
+          unfinished.set(key, "LinkedIn was still virus-scanning the resume");
+        } else {
+          unfinished.delete(key);
+        }
         if (!countedCollected.has(key)) {
           countedCollected.add(key);
           state.run.collected += 1;
@@ -7246,6 +7287,27 @@
     }
 
     if (state.run.state === Applicants.RUN_STATE.RUNNING) state.run.state = Applicants.RUN_STATE.COMPLETED;
+    /**
+     * A resume the scan never released is the one failure with an ACTION, so it
+     * is said out loud rather than left in a warning on one record.
+     *
+     * LinkedIn's own notice reads "Please refresh the page now", and this
+     * extension deliberately will not reload the hiring page mid-run — that
+     * would tear down the list, the pager and the panel the walk is standing on.
+     * So the reload is the recruiter's to do, and they can only do it if
+     * somebody tells them it is worth doing. `hasPendingResume` now also keeps
+     * these applicants OUT of the collected index, so simply running again after
+     * the refresh reaches them; no `recollect` of the whole job is needed.
+     */
+    const scanning = [...unfinished].filter(([, reason]) => reason.includes("virus-scanning"));
+    if (scanning.length) {
+      const note =
+        `${scanning.length} resume(s) were still being virus-scanned by LinkedIn and were not saved. `
+        + "Refresh the hiring page and run again — those applicants are not marked collected, "
+        + "so the next run will go straight back for them.";
+      state.run.lastError = note;
+      console.warn(`[Profile Vault ${BUILD_ID}] ${note}`, { rows: scanning.map(([row]) => row) });
+    }
     state.run.updatedAt = new Date().toISOString();
 
     // Handed back where the recruiter left it, now that the run has finished

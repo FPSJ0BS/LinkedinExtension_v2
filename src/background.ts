@@ -2292,7 +2292,10 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
           jobId: record.job?.id ?? null,
           name: record.applicant?.name ?? "",
           // The one judgement, made by the core so there is one copy of it.
-          collected: Applicants.isCollectedApplicant(record)
+          // "Fully": an applicant whose resume LinkedIn was still virus-scanning
+          // has a usable record but an unfetched file, and skipping them would
+          // make a transient failure permanent.
+          collected: Applicants.isFullyCollectedApplicant(record)
         }))
     };
   }

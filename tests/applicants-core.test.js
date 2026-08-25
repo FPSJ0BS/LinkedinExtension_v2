@@ -1125,7 +1125,19 @@ test("only a record carrying something counts as collected", () => {
     Applicants.isCollectedApplicant(of({ qualifications: [{ requirement: "Bachelor's degree", result: "matched" }] })),
     true
   );
-  assert.equal(Applicants.isCollectedApplicant(of({ resume: { available: true } })), true);
+  // A resume counts once it has been LOOKED AT. 3.9.5 split that from "they
+  // have one": `available: true` with the default `not_attempted` is what the
+  // virus-scan path writes, and counting it made a transient miss permanent.
+  assert.equal(
+    Applicants.isCollectedApplicant(of({ resume: { available: true, downloadStatus: "downloaded" } })),
+    true
+  );
+  assert.equal(
+    Applicants.isCollectedApplicant(of({ resume: { available: true, downloadStatus: "link_only" } })),
+    true
+  );
+  assert.equal(Applicants.isCollectedApplicant(of({ resume: { available: true } })), false,
+    "seen but never fetched is a reason to come back, not a reason to skip");
   assert.equal(Applicants.isCollectedApplicant(of({ resume: { available: false } })), false);
   assert.equal(Applicants.isCollectedApplicant(null), false);
   assert.equal(Applicants.isCollectedApplicant({}), false);
@@ -3212,7 +3224,11 @@ test("a run resumes over the applicants it has not collected yet", async () => {
     workerSource.indexOf("if (type === APPLICANT_MESSAGES.COLLECTED) {"),
     workerSource.indexOf("if (type === APPLICANT_MESSAGES.AUTO_RUN) {")
   );
-  assert.match(collectedBranch, /collected: Applicants\.isCollectedApplicant\(record\)/, "the verdict still travels");
+  // 3.9.5: the fuller question — an applicant read in full whose resume was
+  // still being virus-scanned has a usable record but an unfetched file, and
+  // skipping them is what made the scan permanent.
+  assert.match(collectedBranch, /collected: Applicants\.isFullyCollectedApplicant\(record\)/,
+    "the verdict still travels");
   assert.ok(!/\.filter\(\(entry: any\) => entry\.collected\)/.test(collectedBranch),
     "but it must not be applied as a filter, or only one of the two questions can be answered");
 
@@ -3259,7 +3275,7 @@ test("a run resumes over the applicants it has not collected yet", async () => {
 
   const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
   const branch = worker.slice(worker.indexOf("APPLICANT_MESSAGES.COLLECTED"), worker.indexOf("APPLICANT_MESSAGES.CLEAR"));
-  assert.match(branch, /Applicants\.isCollectedApplicant\(record\)/, "one copy of the rule, in the core");
+  assert.match(branch, /Applicants\.isFullyCollectedApplicant\(record\)/, "one copy of the rule, in the core");
   assert.ok(!/applicants,\s*total/.test(branch), "the reply must be lean, not every stored record");
 });
 
@@ -3602,7 +3618,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
   );
   // A new page is a new roster, a new completion allowance and no inherited
   // failures — then settled before its first applicant is opened.
-  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) \{\s*\n\s*roster\.reset\(\);\s*\n\s*pageSettled = false;[\s\S]{0,400}?pageSweeps = 0;\s*\n\s*thin\.clear\(\);\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);/,
+  assert.match(run, /if \(listDiagnostics\.listScroll\.paged !== pagedBefore\) \{\s*\n\s*roster\.reset\(\);\s*\n\s*pageSettled = false;[\s\S]{0,400}?pageSweeps = 0;\s*\n\s*unfinished\.clear\(\);\s*\n\s*await sweepCurrentPage\(roster, listDiagnostics\);/,
     "a pager press is a new page: a new roster, a fresh allowance, settled before it is walked");
 
   // The roster learns from every list read the run already makes, so a row
@@ -8107,8 +8123,14 @@ test("3.9.4: the completion gate stands between the last row and the pager", asy
 
   // Usable is decided by the EXISTING test, not by a second copy of it: this is
   // the same line a later run uses to decide whom to come back for.
-  assert.match(run, /if \(Applicants\.isCollectedApplicant\(saved\)\) thin\.delete\(key\);\s*\n\s*else thin\.add\(key\);/,
+  // 3.9.5 widened the ledger from "thin" to "unfinished" and gave it a reason,
+  // because a resume LinkedIn was still scanning is a second way a page can be
+  // unfinished and reporting it as "saved only a name" would misdirect the next
+  // investigation.
+  assert.match(run, /if \(!Applicants\.isCollectedApplicant\(saved\)\) \{\s*\n\s*unfinished\.set\(key, "saved only a name"\);/,
     "the record that landed is judged, not merely counted");
+  assert.match(run, /\} else if \(Applicants\.hasPendingResume\(saved\)\) \{\s*\n[\s\S]{0,400}?unfinished\.set\(key, "LinkedIn was still virus-scanning the resume"\);/,
+    "and a resume left mid-scan is a reason to come back, with the reason recorded");
 
   // The trap that would have made the whole gate inert: the in-memory index is
   // what the bulk retirement consults, so a thin record put there would retire
@@ -8122,7 +8144,7 @@ test("3.9.4: the completion gate stands between the last row and the pager", asy
   assert.ok(!/results\.push\(/.test(run), "the append that would have duplicated a re-armed row is gone");
 
   // A new page owes its own allowance and holds none of the old page's failures.
-  assert.match(run, /pageSweeps = 0;\s*\n\s*thin\.clear\(\);/, "a pager press resets the page's allowance");
+  assert.match(run, /pageSweeps = 0;\s*\n\s*unfinished\.clear\(\);/, "a pager press resets the page's allowance");
 
   // Rule 9: this adds no control.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
@@ -8380,4 +8402,158 @@ test("3.9.4: the adapter hands the row's own address to the classifier", async (
 
   // Rule 9: this adds no control.
   assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+});
+
+
+// --------------------------------------------------------------------------
+// 3.9.5 — come back for a resume LinkedIn was still virus-scanning.
+//
+// THE LIVE REPORT: "profiles with good fit showing 'Scanning resume for
+// viruses. Please refresh the page now'" — followed by "so can you fix it and
+// you may be able to save the data."
+// --------------------------------------------------------------------------
+
+/** A record shaped like one the run actually writes. */
+function applicantWith(resume, extra = {}) {
+  return Applicants.normalizeApplicantRecord({
+    applicant: { name: "Asha Rao", resume, ...extra }
+  });
+}
+
+test("3.9.5: a resume left mid-scan is 'I did not look', never 'I looked and got nothing'", () => {
+  const S = Applicants.RESUME_STATUS;
+
+  // The scanning path is the only one that pairs "they have a CV" with "the file
+  // was never fetched", and that pairing is the whole test.
+  assert.equal(Applicants.hasPendingResume(applicantWith({ available: true, downloadStatus: S.NOT_ATTEMPTED })), true);
+
+  // Every status that means the resume WAS looked at is not pending — coming
+  // back for those would re-fetch files the run already has, or re-try a CV that
+  // genuinely is not there.
+  for (const status of [S.DOWNLOADED, S.ALREADY_SAVED, S.LINK_ONLY, S.FAILED, S.UNAVAILABLE]) {
+    assert.equal(Applicants.hasPendingResume(applicantWith({ available: true, downloadStatus: status })), false,
+      `${status} means the resume was looked at`);
+  }
+  // And an applicant with no CV at all is finished, not pending.
+  assert.equal(Applicants.hasPendingResume(applicantWith({ available: false, downloadStatus: S.NOT_ATTEMPTED })), false);
+});
+
+test("3.9.5: a scanning resume no longer marks an applicant collected on its own", () => {
+  const S = Applicants.RESUME_STATUS;
+
+  // THE DEFECT. `available: true` was one of the substantive fields, so an
+  // applicant whose resume was still being scanned was marked collected by the
+  // very field recording that the file had never been read.
+  assert.equal(
+    Applicants.isCollectedApplicant(applicantWith({ available: true, downloadStatus: S.NOT_ATTEMPTED })),
+    false,
+    "a record whose only content is an unfetched resume is not a collected applicant"
+  );
+  // Everything that means the resume was actually looked at still counts, so
+  // this cannot make a finished applicant look unfinished.
+  for (const status of [S.DOWNLOADED, S.ALREADY_SAVED, S.LINK_ONLY, S.FAILED]) {
+    assert.equal(Applicants.isCollectedApplicant(applicantWith({ available: true, downloadStatus: status })), true,
+      `${status} is a resume that was read`);
+  }
+});
+
+test("3.9.5: the refresh-and-run-again LinkedIn asks for actually reaches them", () => {
+  const S = Applicants.RESUME_STATUS;
+
+  // The case the page-completion gate alone cannot fix, and the reason
+  // `isFullyCollectedApplicant` exists. This applicant was read in FULL — name,
+  // contact, history — so `isCollectedApplicant` is correctly true and the gate
+  // does not see a thin record. Only the CV is missing. Judged by "do I have a
+  // usable record", every later run skipped them and the transient scan became a
+  // permanent hole.
+  const readInFull = applicantWith(
+    { available: true, downloadStatus: S.NOT_ATTEMPTED },
+    { contact: { email: "asha@example.com" }, experience: [{ title: "BDE" }] }
+  );
+  assert.equal(Applicants.isCollectedApplicant(readInFull), true, "the record is usable");
+  assert.equal(Applicants.isFullyCollectedApplicant(readInFull), false, "but there is still a file to fetch");
+
+  const finished = applicantWith(
+    { available: true, downloadStatus: S.DOWNLOADED, localReference: "Asha Rao.pdf" },
+    { contact: { email: "asha@example.com" } }
+  );
+  const noCv = applicantWith({ available: false, downloadStatus: S.NOT_ATTEMPTED }, { contact: { email: "a@b.com" } });
+  assert.equal(Applicants.isFullyCollectedApplicant(finished), true, "a finished applicant is skipped");
+  assert.equal(Applicants.isFullyCollectedApplicant(noCv), true, "an applicant with no CV is finished, not pending");
+
+  // And that is what the skip index is built from, so the next run walks past
+  // the two that are done and goes straight back for the one that is not.
+  const index = Applicants.createCollectedIndex(
+    [readInFull, finished, noCv].map((record, at) => ({ ...record, applicationId: String(at), job: { id: "J" } })),
+    { jobId: "J" }
+  );
+  assert.equal(index.has({ applicationId: "0" }), false, "the next run goes back for the scanning one");
+  assert.equal(index.has({ applicationId: "1" }), true, "and walks past the finished one");
+  assert.equal(index.has({ applicationId: "2" }), true, "and walks past the one with no CV");
+});
+
+test("3.9.5: the retry can only add the file, never undo the read that missed it", () => {
+  const S = Applicants.RESUME_STATUS;
+  // Rule 17 and rule 1 together: the second open re-reads the whole panel, so
+  // the merge is what makes re-arming free of side effects.
+  const first = applicantWith(
+    { available: true, downloadStatus: S.NOT_ATTEMPTED, viewerUrl: "https://viewer/1" },
+    { contact: { email: "asha@example.com" } }
+  );
+  const second = applicantWith({
+    available: true, downloadStatus: S.DOWNLOADED, url: "https://cdn/f.pdf", localReference: "Asha Rao.pdf"
+  });
+
+  const merged = Applicants.mergeApplicantRecord(first, second);
+  assert.equal(merged.applicant.resume.downloadStatus, S.DOWNLOADED, "the retry's file wins");
+  assert.equal(merged.applicant.resume.localReference, "Asha Rao.pdf", "and is kept");
+  assert.equal(merged.applicant.contact.email, "asha@example.com", "the first read is not flattened by the second");
+  assert.equal(Applicants.hasPendingResume(merged), false, "and the applicant is no longer pending");
+
+  // The reverse can never happen: "I did not look" must not overwrite a file.
+  const backwards = Applicants.mergeApplicantRecord(second, first);
+  assert.equal(backwards.applicant.resume.downloadStatus, S.DOWNLOADED,
+    "a later scan notice cannot undo a resume already on disk");
+});
+
+test("3.9.5: the completion gate re-arms a pending resume and says which reason", async () => {
+  // The ledger is a Map now, and the policy is unchanged by that — it asks only
+  // `has`, so the reason rides along for free.
+  const plan = Applicants.planPageCompletion({
+    pageKeys: ["a", "b", "c"],
+    processed: new Set(["a", "b", "c"]),
+    thin: new Map([
+      ["c", "LinkedIn was still virus-scanning the resume"],
+      ["a", "saved only a name"]
+    ])
+  });
+  assert.equal(plan.action, "rearm");
+  assert.deepEqual(plan.rearm, ["a", "c"], "still in the page's own order, whatever the reason");
+
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const run = withoutComments(source);
+  assert.match(run, /const unfinished = new Map\(\);/, "the ledger carries the reason");
+  assert.match(run, /thin: unfinished/, "and is what the gate is asked about");
+  // The reason reaches the recruiter rather than dying in a variable.
+  assert.match(run, /const why = \(keys\) => \{/, "the reasons are counted for the message");
+  assert.match(run, /are unfinished \(\$\{why\(completion\.rearm\)\}\)/, "and named in the run's own error line");
+
+  // And a run that ends still owing files says so, because LinkedIn's notice
+  // asks for a page refresh and this extension will not reload mid-run.
+  assert.match(run, /reason\.includes\("virus-scanning"\)/, "the end of the run counts what is still owed");
+  assert.match(run, /Refresh the hiring page and run again/, "and tells the recruiter what to do about it");
+});
+
+test("3.9.5: one rule for 'may I skip this applicant', shared by the worker and the index", async () => {
+  const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+  const worker = await readFile(resolve(root, "src/background.ts"), "utf8");
+
+  // Two callers asked the question and both must ask the same one — the worker's
+  // own comment has said "one copy of it" since the index was introduced.
+  assert.match(worker, /collected: Applicants\.isFullyCollectedApplicant\(record\)/,
+    "the worker judges with the full test");
+  assert.match(core, /const judged = typeof record\?\.collected === "boolean" \? record\.collected : isFullyCollectedApplicant\(record\);/,
+    "and so does the index when it has to judge for itself");
+  assert.match(core, /function isFullyCollectedApplicant\(record\) \{\s*\n\s*return isCollectedApplicant\(record\) && !hasPendingResume\(record\);/,
+    "and the rule is stated once");
 });

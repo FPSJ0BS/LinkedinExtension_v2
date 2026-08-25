@@ -1,0 +1,34 @@
+{
+  "schema": 2,
+  "id": "TASK-0183",
+  "name": "Come back for a resume LinkedIn was still virus-scanning, instead of recording it as collected and never looking again",
+  "request": "Come back for a resume LinkedIn was still virus-scanning, instead of recording it as collected and never looking again",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T10:10:23.924Z",
+  "completedAt": "2026-08-25T10:16:26.259Z",
+  "startCommit": "ac1b757b28c579a8cfc5bc2a0c58160e255ae10c",
+  "gitRef": "task/TASK-0183",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 631 tests, doc links, 31 build files validated"
+  ],
+  "result": "TASK-0183: come back for a resume LinkedIn was still virus-scanning, instead of recording it as collected and never looking again. THE LIVE REPORT: 'profiles with good fit showing Scanning resume for viruses. Please refresh the page now', then 'can you fix it and you may be able to save the data.' THE RATING IS NOT THE CAUSE and that matters for where to look: the notice is LinkedIn's own server-side scan on the attachment, and 3.9.1 already recognised it, waited 5s, pressed nothing, reloaded nothing and recorded NOT_ATTEMPTED rather than UNAVAILABLE - the applicant HAS a CV, that pass simply could not see it, and rule 1 says a blank beats a wrong value. All of that was right and is untouched. The reason it showed up on the rated applicants is TASK-0182's shadow: until that fix those rows were never opened, so the resume step was never reached for them, and every resume that did get read was an unrated one by construction. WHAT WAS MISSING IS THE COMING BACK, and it is a two-level hole. Within a run: available:true is one of the substantive fields isCollectedApplicant counts, so an applicant whose resume was left mid-scan was marked collected by the very field recording that the file was never fetched. Across runs, and this is the half the page-completion gate cannot reach: an applicant read in FULL whose only gap is the CV passes isCollectedApplicant correctly - the record IS usable - so the gate does not see a thin record and every later run skipped them. A transient failure, the one on this surface most certain to have cleared a minute later, became the only permanent one. THREE CHANGES. (1) hasPendingResume: available:true paired with NOT_ATTEMPTED, which is exact - that pairing is written by the scanning path alone, while LINK_ONLY, FAILED and UNAVAILABLE all mean the resume WAS looked at and none of them comes back. It is 'I did not look', never 'I looked and got nothing'. (2) isCollectedApplicant no longer counts a resume that was seen but never fetched, so a record whose only content is an unfetched CV is not a collected applicant. (3) isFullyCollectedApplicant - 'do I have a usable record' and 'is there nothing left to fetch' are two questions and conflating them is what made this permanent. Both callers now ask the fuller one through a single core rule, which is what the worker's own comment ('one copy of it') always asked for, so the refresh-and-run-again LinkedIn itself demands actually reaches them and no recollect of the whole job is needed. THE GATE'S LEDGER WIDENED FROM 'thin' TO 'unfinished' and carries a REASON per row, because reporting a scanned-out CV as 'saved only a name' would send the next investigation to the wrong place; it is a Map now and planPageCompletion needed no change at all, since it asks only has(). The retry costs one more open at the end of the page, by which time the scan has had the whole page to finish, and it is free of side effects because mergeApplicantRecord already guarantees NOT_ATTEMPTED never overwrites and a later DOWNLOADED wins - executed both directions rather than assumed. AND THE RUN SAYS WHAT IS STILL OWED: LinkedIn's notice asks for a page refresh, this extension deliberately will not reload mid-run because that tears down the list, the pager and the panel the walk stands on, so the reload is the recruiter's to do and they can only do it if told it is worth doing. Verified by execution across every RESUME_STATUS, the index both ways, and the merge both directions. Six new tests; five existing assertions updated where they pinned the old shape, including the one that asserted available:true alone means collected - which is the defect. No new click - still eight - no selector, no schema, no CSV column, no permission. NO live claim: rule 20 stands. Files: src/applicants-core.js, src/background.ts, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

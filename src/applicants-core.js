@@ -3352,8 +3352,62 @@
       || filled(applicant.experience)
       || filled(applicant.education)
       || filled(applicant.skills)
-      || resume.available === true
+      // A resume that was SEEN but never fetched is not a reason to skip
+      // somebody — it is the reason to come back. `available: true` used to
+      // count on its own, so an applicant whose CV was still being virus-scanned
+      // was marked collected by the very field recording that the file was never
+      // read, and no later run would look again. See `hasPendingResume`.
+      || (resume.available === true && resume.downloadStatus !== RESUME_STATUS.NOT_ATTEMPTED)
     );
+  }
+
+  /**
+   * Did this run SEE a resume it could not read, and should it come back?
+   *
+   * **THE LIVE SYMPTOM: "Scanning resume for viruses. Please refresh the page
+   * now."** LinkedIn scans an attachment server-side and puts that notice where
+   * the resume card belongs while it does. 3.9.1 taught the run to recognise it
+   * and to record `NOT_ATTEMPTED` rather than `UNAVAILABLE` — the applicant has
+   * a CV, this pass simply could not see it, and rule 1 says a blank beats a
+   * wrong value. That part was right and is untouched.
+   *
+   * **What was missing is the coming back.** `available: true` is one of the
+   * substantive fields `isCollectedApplicant` counts, so an applicant whose
+   * resume was left mid-scan was marked COLLECTED on the strength of the very
+   * field that says the file was never fetched. Every later run then skipped
+   * them, and the page-completion gate did not re-arm them either, because a
+   * record with a contact and an employment history is not thin. The scan is
+   * TRANSIENT — it is the one failure on this surface that is all but certain to
+   * have cleared a minute later — and it was the one nothing ever retried.
+   *
+   * `NOT_ATTEMPTED` is the whole test, and it is exact: it is the default for a
+   * record whose resume step never ran, and the scanning path is the only place
+   * that pairs it with `available: true`. `LINK_ONLY`, `FAILED` and
+   * `UNAVAILABLE` all mean the resume WAS looked at, so none of them comes back
+   * here — this is "I did not look", never "I looked and got nothing".
+   */
+  function hasPendingResume(record) {
+    const resume = record?.applicant?.resume || {};
+    return resume.available === true && resume.downloadStatus === RESUME_STATUS.NOT_ATTEMPTED;
+  }
+
+  /**
+   * May a LATER run skip this applicant entirely?
+   *
+   * "Do I have a usable record" and "is there nothing left to fetch" are two
+   * questions, and conflating them is what made the virus-scan notice permanent.
+   * An applicant read in full whose only gap is the CV passes
+   * `isCollectedApplicant` on the strength of their contact and their history —
+   * correctly, the record IS usable — and was therefore skipped by every run
+   * after the one that missed the file, so the transient failure became a
+   * permanent hole. The page-completion gate catches it inside a run; this is
+   * what makes the refresh-and-run-again that LinkedIn itself asks for actually
+   * reach them.
+   *
+   * The one judgement, in the core, so the worker and the index share a copy.
+   */
+  function isFullyCollectedApplicant(record) {
+    return isCollectedApplicant(record) && !hasPendingResume(record);
   }
 
   /**
@@ -3386,7 +3440,7 @@
     const wantedJob = cleanText(jobId).toLowerCase();
 
     for (const record of records || []) {
-      const judged = typeof record?.collected === "boolean" ? record.collected : isCollectedApplicant(record);
+      const judged = typeof record?.collected === "boolean" ? record.collected : isFullyCollectedApplicant(record);
       if (!judged) continue;
       const recordJob = cleanText(record?.job?.id ?? record?.jobId ?? "").toLowerCase();
       if (wantedJob && recordJob && recordJob !== wantedJob) continue;
@@ -3662,6 +3716,9 @@
   function planPageCompletion({
     pageKeys = [],
     processed = new Set(),
+    // Rows this page reached but did not FINISH — a record that saved nothing
+    // but a name, or one whose resume LinkedIn was still virus-scanning. A Set
+    // or a Map; only `has` is asked of it, so the caller may carry the reason.
     thin = new Set(),
     sweepsUsed = 0,
     maxSweeps = MAX_PAGE_COMPLETION_SWEEPS
@@ -4056,7 +4113,8 @@
     applicantId, normalizeApplicantRecord, mergeApplicantRecord, APPLICANT_SCALAR_FIELDS,
     createApplicantAccumulator, buildApplicantRecord, buildApplicantListRecord,
     // the run
-    RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
+    RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, hasPendingResume,
+    isFullyCollectedApplicant, createCollectedIndex,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
