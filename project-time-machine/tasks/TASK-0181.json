@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "id": "TASK-0181",
+  "name": "Applicant messaging: custom messages and reusable templates",
+  "request": "Applicant messaging: custom messages and reusable templates",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T09:35:10.994Z",
+  "completedAt": "2026-08-25T09:47:31.817Z",
+  "startCommit": "aba80543f962aa4f8e9a075de5bd765113a8dfec",
+  "gitRef": "task/TASK-0181",
+  "files": [
+    {
+      "change": "added",
+      "path": "src/message-templates-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/template-store.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/message-templates-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/template-store.test.js",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 618 tests (48 new, 0 fail), doc links, build validation"
+  ],
+  "result": "Applicant messaging, phases 1-2 only: the two PURE cores, landed unwired and inert. src/message-templates-core.js parses {{variable}} and {{variable|fallback}} bodies, maps them onto an applicant's already-collected record, and previews the result; its load-bearing rule is that an UNRESOLVED variable BLOCKS the message rather than warning about it, because 'Hi ,' reaching a real person is a wrong value and rule 1 says a wrong value is worse than a blank one. Twelve variables, each declared once in a frozen table the readers cannot drift from, and a hand-written scanner rather than a regex so the /g lastIndex hazard has no vector. src/template-store.js is CRUD over chrome.storage.local, NOT a new IndexedDB store: the profile-table-collector database holds every collected profile and applicant, and a schema bump against a live database risks that data to store what is only small config. It takes an injected storage adapter and an injected validator, so it is testable in Node with no chrome and no DOM, and it refuses to write a record the validator rejects. DELIBERATELY NOT LANDED, and reverted rather than left half-applied: the click-policy carve-out that would let the applicant panel's own Message control through the denylist, and the composer insertion that would type into it. Both were written and both worked against the core, but they amend CLAUDE.md rule 5 - which names message, send and inmail as permanently forbidden - and an amendment belongs in its own task with the doc changed in the same breath, not dormant in a repo where nothing calls it. The existing assertion at tests/applicants-core.test.js:91 correctly went red against that change and is the reason it is not here. NOTHING IN THIS COMMIT IS REACHABLE FROM THE EXTENSION: no message type, no relay, no UI, no click, no selector and no CSV column is touched, and the denylist is byte-for-byte what it was. The reverted work is preserved as a patch and as tm-checkpoint abe39b083b, and it re-applies cleanly to this HEAD. Files: src/message-templates-core.js, src/template-store.js, tests/message-templates-core.test.js, tests/template-store.test.js."
+}
