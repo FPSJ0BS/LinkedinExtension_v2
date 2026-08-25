@@ -111,7 +111,17 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    afterwards; a details view that never loads leaves the section as the profile painted it, never
    half of one member's list under another's name.
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
-   control · a row of the applicant list · the resume viewer's own Download.
+   control · a row of the applicant list · the resume viewer's own Download · **the applicant panel's
+   overflow menu, opened only to reach the contact disclosure inside it.**
+
+   That last one is the eighth click and the newest (3.9.1). On the captured layout the panel offers
+   no Contact control at all — the address and the number are behind `More…` — so every applicant was
+   saved with an empty email and an empty mobile. Opening a menu renders controls LinkedIn is already
+   offering this recruiter: it sends nothing, changes nothing, and Escape undoes it. What makes it
+   safe is not the opening but **what may be pressed next** — only an item the same classifier allows
+   for the contact disclosure, so every ATS action sitting in that menu stays refused by the denylist.
+   The menu is closed on every path out, including the failure paths, because a menu left open over
+   the panel is the next applicant's problem.
 
    **On hiring pages a control that navigates is refused, even when its label reads like an
    expander.** "See full profile" sits inside the applicant panel and matched the expander rule until

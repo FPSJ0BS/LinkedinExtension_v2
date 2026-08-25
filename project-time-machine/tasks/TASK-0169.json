@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0169",
+  "name": "Collect contact details from behind the applicant panel's More menu",
+  "request": "Collect contact details from behind the applicant panel's More menu",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T07:01:41.174Z",
+  "completedAt": "2026-08-25T07:08:56.962Z",
+  "startCommit": "dcd655df8911a08fadbd2ea6ca5ad047b50b34d9",
+  "gitRef": "task/TASK-0169",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 541 tests passed (was 536), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "Collect contact details from behind the applicant panel's More menu, and raise the click budget to eight deliberately. THE DEFECT, from the user's live capture: the applicant panel's only buttons are 'Rate as', 'Message' and 'More...' - there is no Contact control at all, and the address and the number are behind the last of them. findControl(panel, CONTACT) therefore returned nothing and every applicant on that layout was saved with an empty email and an empty mobile, silently, because 'no-contact-control' is a diagnostics field and not a warning. THE FALLBACK IS ORDERED, which is the same safety argument every phase of 3.9.0 rested on: the panel's own Contact control is still looked for FIRST and the menu is opened only where that found nothing, so a layout that already works cannot change. Two menu shapes are handled and the first costs no further click - a menu that prints the address and the number is read where it stands; only a menu that offers the disclosure as an item gets a second press, and that item is classified for CONTROL_PURPOSE.CONTACT exactly as it would be in the panel. carriesContactDetails is deliberately STRICTER than findContactDisclosure's own carries test, which accepts the word 'contact' appearing anywhere - every action menu contains that word, and reading an ATS menu as somebody's details would be a rule 2 violation of the worst kind. WHY OPENING IT IS SAFE is a different question from why it is needed: opening a menu renders controls LinkedIn is already offering this recruiter, sends nothing, changes nothing and is undone by Escape; what makes it safe is what may be pressed NEXT, and the denylist runs before every allowlist, so Reject, Move to, Archive, Rate and Message stay refused inside the menu exactly as they are in the panel. The opener is classified rather than assumed - CONTACT_MENU needs a whole-label match plus proof it came from inside the panel - and the menu is returned only if it APPEARED, so a surface already on screen from the previous applicant can never be read. The menu is closed on all five exits, including the success path, where the disclosure's own Escape does not reliably take its parent menu with it. RULE 2 IS UNTOUCHED: trusted:true is still at exactly one site and anything off the click path still carries allow:['email']. THE EIGHTH CLICK IS A NEW CONTROL, not a redistributed one, and that is made visible rather than hidden: all sixteen budget assertions were raised from seven to eight, and the Phase 1 ownership tripwire - which exists precisely to catch a click that moves house - gained openContactMenu as a named eighth owner. CLAUDE.md rule 5 was amended in the same task, which is the order the rule requires. FOUND WHILE HERE, and fixed: normalising this file's line endings to the repo's canonical LF exposed a test that had been passing vacuously on every CRLF checkout - a source slice ended on a marker containing a bare backslash-n, which never matched, so indexOf returned -1, slice(start,-1) ran to the end of the file, and its assertions were matching some other part of the source. It was hiding a constant renamed in 3.9.0 (COLUMN_TEXT_SHARE, now COLUMN_TEXT_FLOOR). The marker is now newline-agnostic and the slice asserts its own length. Five new tests cover the ordering, that nothing but a CONTACT item is ever looked up inside the menu, that every exit closes it, that a menu must really show details to be read as one, and that the eighth click is the only new one - with the three identity checks and the seventeen-field schema re-asserted."
+}

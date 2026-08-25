@@ -2706,6 +2706,88 @@
   }
 
   /**
+   * Does this surface actually show the applicant's contact details?
+   *
+   * Used to tell the two shapes of the overflow menu apart: one lists an item
+   * that opens a disclosure, the other prints the address and the number in the
+   * menu itself. Deliberately stricter than `findContactDisclosure`'s own
+   * `carries` test — a menu is full of words, and "contact" appearing in an item
+   * label is not a contact detail. Only a real address, a real `tel:`, or a
+   * labelled field counts.
+   */
+  function carriesContactDetails(element) {
+    if (!element) return false;
+    if (element.querySelector("a[href^='mailto:'],a[href^='tel:']")) return true;
+    const text = cleanText(element.innerText || "");
+    if (!text) return false;
+    return Boolean(Core.EMAIL_PATTERN?.test(text)) || /\b(?:phone|mobile|email)\b\s*[:·]/i.test(text);
+  }
+
+  /**
+   * Open the applicant panel's overflow menu, once, to reach the contact
+   * disclosure inside it (3.9.1, rule 9j).
+   *
+   * WHY THIS EXISTS. The first live capture of the applicants page shows an
+   * applicant panel with no Contact control at all: the buttons are "Rate as",
+   * "Message" and "More...", and the address and the number are behind the last
+   * of those. `findControl(panel, CONTACT)` therefore returned nothing and every
+   * applicant on that layout was saved with an empty email and an empty mobile —
+   * silently, because "no-contact-control" is a diagnostics field, not a warning.
+   *
+   * WHY IT IS SAFE, which is a different question from why it is needed:
+   *
+   *   - Opening a menu renders controls LinkedIn is already offering this
+   *     recruiter. It sends nothing, changes nothing, and is undone by Escape.
+   *   - What makes it safe is not the opening but what may be pressed next. The
+   *     caller looks inside the opened menu for a control this same classifier
+   *     allows for `CONTROL_PURPOSE.CONTACT` and for nothing else, so the
+   *     denylist — which runs before every allowlist — still refuses Reject,
+   *     Move to, Archive, Rate, Message and the rest, exactly as it does when
+   *     they sit in the panel.
+   *   - The opener itself is classified, not assumed: `CONTACT_MENU` requires a
+   *     whole-label match and proof the element came from inside the panel.
+   *   - The menu is closed on every path, including the failure paths.
+   *
+   * Returns the menu only if it APPEARED — a surface already on screen before
+   * the press is somebody else's, and on a slow teardown between applicants that
+   * is the previous applicant's menu. Same reasoning as `findContactDisclosure`'s
+   * third binding and `watchResumeRequests`' `buffered: false`.
+   */
+  async function openContactMenu(panel, diagnostics, before) {
+    const opener = findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT_MENU);
+    if (!opener) return { menu: null, reason: "no-contact-menu" };
+
+    diagnostics.contact.menuLabel = opener.verdict.label || "more";
+    try {
+      opener.element.click();
+      diagnostics.contact.menuClicked = true;
+    } catch (error) {
+      return { menu: null, reason: `menu-click-failed:${error?.message || error}` };
+    }
+
+    const list = applicantList();
+    const menu = await waitFor(() => {
+      for (const element of contactSurfaceCandidates()) {
+        if (!isVisible(element)) continue;
+        // Never the recruiter's own list, whatever it contains.
+        if (list && (element.contains(list) || element === list)) continue;
+        // It has to be new. That is the whole binding.
+        if (Array.isArray(before) && before.includes(element)) continue;
+        // ...and it has to be the thing this opener controls, or contain it.
+        const named = opener.element.getAttribute("aria-controls") || "";
+        const target = named ? document.getElementById(named.split(/\s+/)[0]) : null;
+        if (target && !(element === target || element.contains(target))) continue;
+        return element;
+      }
+      return null;
+    }, { timeoutMs: OVERLAY.OPEN_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "contact-menu" });
+
+    if (!menu) return { menu: null, reason: "menu-did-not-open" };
+    diagnostics.contact.menuOpened = true;
+    return { menu, reason: "" };
+  }
+
+  /**
    * Open the applicant's contact disclosure, read it, and close it again.
    *
    * Run after the panel scan has settled, for the same reason the profile
@@ -2716,7 +2798,10 @@
   async function openContactAndCollect(panel, accumulator, diagnostics) {
     diagnostics.contact = {
       clicked: false, opened: false, reason: "", added: 0,
-      waitedToOpenMs: 0, waitedToLoadMs: 0, reads: 0, loadedFully: false
+      waitedToOpenMs: 0, waitedToLoadMs: 0, reads: 0, loadedFully: false,
+      // The 3.9.1 menu route. `viaMenu` is what tells a layout that hides the
+      // details behind "More..." from one that never had them.
+      viaMenu: false, menuLabel: "", menuClicked: false, menuOpened: false, menuClosed: true
     };
 
     // Opened on every applicant, unconditionally. The recruiter screen puts the
@@ -2726,29 +2811,68 @@
     // already found can only ever add.
     assertRunnable();
 
-    const control = findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT);
+    // Sampled BEFORE anything is pressed, so a surface that appears afterwards is
+    // known to be the one this press opened rather than one already on screen
+    // from the applicant before. The same reasoning as watchResumeRequests'
+    // buffered:false. Re-sampled below if the menu route adds a second press.
+    let surfacesBefore = contactSurfaceCandidates();
+
+    let control = findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT);
+    let menu = null;
+    // The surface to read, when it needs no second press because the menu itself
+    // printed the details.
+    let opened = null;
+
     if (!control) {
-      diagnostics.contact.reason = "no-contact-control";
-      return 0;
+      // No Contact control in the panel. On the captured layout that is not the
+      // same as "this applicant has no contact details" — they are behind the
+      // overflow menu — so look there before giving up. Every ATS action in that
+      // menu stays refused by the denylist; see `openContactMenu`.
+      const menuStep = await openContactMenu(panel, diagnostics, surfacesBefore);
+      menu = menuStep.menu;
+      if (!menu) {
+        diagnostics.contact.reason = menuStep.reason || "no-contact-control";
+        return 0;
+      }
+      diagnostics.contact.viaMenu = true;
+
+      // Two shapes, and the first one costs no further click at all: some menus
+      // print the address and the number outright. Only a real address, a real
+      // `tel:` or a labelled field counts as printing them — the word "contact"
+      // in an item label does not.
+      if (carriesContactDetails(menu)) {
+        opened = menu;
+      } else {
+        // Otherwise the menu offers the disclosure as an item, and THAT is the
+        // allowlisted contact control — classified here exactly as it would be
+        // in the panel, and proven to have come from inside the menu we opened.
+        control = findControl(menu, Applicants.CONTROL_PURPOSE.CONTACT);
+        if (!control) {
+          diagnostics.contact.reason = "menu-has-no-contact-item";
+          diagnostics.contact.menuClosed = await closeOpenedOverlay(menu);
+          return 0;
+        }
+        // Re-sampled now that the menu is on screen, so "it appeared when we
+        // pressed" still means the disclosure and not the menu itself.
+        surfacesBefore = contactSurfaceCandidates();
+      }
     }
 
-    // Sampled BEFORE the click, so a surface that appears afterwards is known
-    // to be the one this press opened rather than one already on screen from
-    // the applicant before. The same reasoning as watchResumeRequests' buffered:false.
-    const surfacesBefore = contactSurfaceCandidates();
-
-    try {
-      control.element.click();
-      diagnostics.contact.clicked = true;
-    } catch (error) {
-      diagnostics.contact.reason = `click-failed:${error?.message || error}`;
-      return 0;
+    if (!opened) {
+      try {
+        control.element.click();
+        diagnostics.contact.clicked = true;
+      } catch (error) {
+        diagnostics.contact.reason = `click-failed:${error?.message || error}`;
+        if (menu) diagnostics.contact.menuClosed = await closeOpenedOverlay(menu);
+        return 0;
+      }
     }
 
     // 1. Wait for the disclosure to mount. It is fetched, so it appears a beat
     //    after the click, and on a throttled tab that beat is seconds.
     const started = Date.now();
-    const overlay = await waitFor(() => findContactDisclosure(panel, control, surfacesBefore), {
+    const overlay = opened || await waitFor(() => findContactDisclosure(panel, control, surfacesBefore), {
       timeoutMs: OVERLAY.OPEN_TIMEOUT_MS,
       pollMs: OVERLAY.POLL_MS,
       label: "contact-disclosure"
@@ -2756,6 +2880,7 @@
     diagnostics.contact.waitedToOpenMs = Date.now() - started;
     if (!overlay) {
       diagnostics.contact.reason = "disclosure-did-not-open";
+      if (menu) diagnostics.contact.menuClosed = await closeOpenedOverlay(menu);
       return 0;
     }
     diagnostics.contact.opened = true;
@@ -2806,6 +2931,13 @@
     diagnostics.contact.loadedFully = step.settled;
     diagnostics.contact.reason = added ? "collected" : step.settled ? "disclosure-had-nothing" : `never-settled:${step.reason}`;
     diagnostics.contact.closed = await closeOpenedOverlay(live);
+    // The menu route leaves two things on screen, not one, and the disclosure's
+    // own Escape does not reliably take its parent menu with it. Closed
+    // unconditionally and last: `closeOpenedOverlay` returns true straight away
+    // for something already gone, so this costs nothing when the disclosure
+    // closed both, and it is what stops an ATS action menu being left open over
+    // the panel the next applicant is about to be read from.
+    if (menu && menu !== live) diagnostics.contact.menuClosed = await closeOpenedOverlay(menu);
     return added;
   }
 

@@ -1007,7 +1007,7 @@ test("the applicants adapter clicks only its gated controls", async () => {
   // one call site: a second site for a control rule 9 already names would raise
   // this number without adding a control, and the number is only worth asserting
   // while it counts controls.
-  assert.equal(clicks.length, 7, `only six gated controls and one dismiss may be clicked, found ${clicks.length}`);
+  assert.equal(clicks.length, 8, `only seven gated controls and one dismiss may be clicked, found ${clicks.length}`);
   assert.equal(
     (source.match(/control\.element\.click\(\)/g) || []).length,
     5,
@@ -1108,11 +1108,24 @@ test("the panel is re-resolved and the whole column is walked, not one screenful
 
 test("a scroll box inside the panel is offered as well as every ancestor", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
-  const candidates = source.slice(source.indexOf("function scrollCandidates"), source.indexOf("/**\n   * The container that actually moves"));
+  // The end marker is matched newline-agnostically ON PURPOSE. Written with a
+  // bare \n it never matched on a CRLF checkout: `indexOf` returned -1, and
+  // `slice(start, -1)` silently ran to the end of the file — so every assertion
+  // below was matching some other part of the source rather than this function.
+  // Same defect the Phase 11 slices were fixed for; this one was missed, and it
+  // hid a stale constant name (`COLUMN_TEXT_SHARE`, renamed in 3.9.0) for a
+  // whole release.
+  const endOfCandidates = source.search(/\/\*\*\r?\n   \* The container that actually moves/);
+  assert.ok(endOfCandidates > 0, "the end marker must be found, or the slice is the whole file");
+  const candidates = source.slice(source.indexOf("function scrollCandidates"), endOfCandidates);
+  assert.ok(candidates.length > 300 && candidates.length < 4000,
+    "and the slice must be the function, not the file");
 
   // Which side of the scroller `applicantPanel()` lands on is markup's choice.
   assert.match(candidates, /root\.querySelectorAll\("div,section,main,ul,ol,\[role='list'\]"\)/, "descendants must be offered too");
-  assert.match(candidates, /COLUMN_TEXT_SHARE/, "but only ones that carry essentially the whole panel");
+  // 3.9.0 turned the hard 60% gate into a floor plus a score; the constant was
+  // renamed with it and this assertion was not.
+  assert.match(candidates, /COLUMN_TEXT_FLOOR/, "but only ones that carry a real share of the panel");
   assert.match(candidates, /Applicants\.COLUMN_SCROLL_EPSILON/, "and only ones that can actually move");
   assert.match(source, /carriesContent: carriesContent === null \? holdsRoot : Boolean\(carriesContent\)/,
     "a descendant holds no ancestor, so it has to be told that it carries the content");
@@ -2234,8 +2247,8 @@ test("the run walks the list by identity, so a position can never address the wr
     "the panel is opened unless the PANEL ITSELF already says it shows this row");
   assert.ok(!/rowId !== openId/.test(withoutComments(source)),
     "the address bar can no longer decide on its own that an applicant is already open");
-  // Still exactly seven click call sites: this adds no control (rule 9).
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  // Still exactly eight click call sites: this adds no control (rule 9).
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("a control in the list header can never retire the open applicant's row", async () => {
@@ -3153,7 +3166,7 @@ test("coming back to an unfinished job run resumes it, but a completed run stays
 
   // And it costs no new click: the restart replays the run, it does not invent
   // a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("the worker lifecycle admits one newest execution and never reopens a completed run", async () => {
@@ -3434,7 +3447,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     "every list scan feeds the roster");
 
   // Rule 9: this adds no control, on any path.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("a roster seeded before the page is settled walks it from the middle, not the top", () => {
@@ -3597,7 +3610,7 @@ test("an applicant is opened, read and saved exactly once, and 'already open' is
     "and a collected row joins that ledger before the walk moves on");
 
   // Rule 9: none of this adds a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
@@ -3691,7 +3704,7 @@ test("an arrival survives a lost race, a back button and a bfcache restore", asy
   assert.match(source, /if \(previous\?\.pageShowHandler\) window\.removeEventListener\("pageshow", previous\.pageShowHandler\)/);
 
   // And none of it costs a click: the restart replays the run, it invents no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("coming back to the tab restarts the run, and the page says so", async () => {
@@ -3770,7 +3783,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
   assert.match(source, /previous\.noticeElement\.remove\(\)/);
 
   // Still no new control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 });
 
 test("the run collects every page of the applicant list, not only the first", async () => {
@@ -4158,7 +4171,7 @@ test("the panel Download probe observes and never presses", async () => {
   assert.ok(!/return \{ element/.test(probe), "and must not hand an element back to be pressed");
 
   // The click budget is untouched: rule 9 governs controls that are pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "still exactly seven clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
 
   // And what it found reaches the recruiter's console, which is the point.
   assert.match(source, /panelDownloadLabels: resume\.panelDownloadLabels \|\| \[\]/,
@@ -4409,10 +4422,10 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
   assert.match(source, /options\.recollect === true/, "which the walk still honours");
 
   // The click budget is a count of CONTROLS (rule 9), and no control was
-  // removed here — only a caller. Seven: six gated opens plus one shared
+  // removed here — only a caller. Eight: seven gated opens plus one shared
   // dismiss.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7,
-    "applicants.js must still click exactly seven times");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8,
+    "applicants.js must still click exactly eight times");
 });
 
 // ------------------------------------------------- pacing the walk to the page
@@ -4625,7 +4638,7 @@ test("reading back where Chrome put the file is answered sooner, never given les
 // moved.
 //
 // The two that matter most are #7 and #10/#11. A `.click()` COUNT cannot see a
-// click that moves house — the same seven calls redistributed across different
+// click that moves house — the same calls redistributed across different
 // functions would pass every existing budget assertion while pressing something
 // new — so #7 pins the OWNER of each one. #10 and #11 are the schema and rule-19
 // tripwires for all twelve phases: they are what makes "the applicant record and
@@ -4787,18 +4800,23 @@ test("Phase 1 tripwire: phone is never taken from the rendered panel, and only o
   assert.ok(!/allow: \[[^\]]*phone/.test(source), "no reader may allow a phone off the click path");
 });
 
-test("Phase 1 tripwire: seven clicks, and each one is owned by a named function", async () => {
+test("Phase 1 tripwire: eight clicks, and each one is owned by a named function", async () => {
   // Guards phases 9 and 11, and it is the assertion the existing budget checks
   // cannot make. `.click()` counted seven times says nothing about WHERE the
   // seven are: the same total redistributed — a second press inside the contact
   // path, say, paid for by dropping the dismiss — passes every count in this
   // file while pressing something the allowlist never sanctioned.
   //
-  // So the owners are named. Six gated opens plus one shared dismiss, one each.
+  // So the owners are named. Seven gated opens plus one shared dismiss, one each.
+  // The eighth arrived in 3.9.1: `openContactMenu`, which opens the overflow menu
+  // that hides the contact disclosure on the captured layout. It is a NEW OWNER
+  // rather than a redistribution, which is exactly what this test exists to make
+  // visible — and CLAUDE.md rule 5 was amended in the same task.
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
   const owners = [
     "closeOpenedOverlay",      // the dismiss, shared by every overlay we opened
     "openContactAndCollect",   // the contact disclosure
+    "openContactMenu",         // the overflow menu that hides it (3.9.1, rule 9j)
     "expandCollapsedSections", // a collapsed section's own expander
     "clickResumeDownload",     // the resume viewer's own Download
     "collectResume",           // the resume control
@@ -4807,13 +4825,13 @@ test("Phase 1 tripwire: seven clicks, and each one is owned by a named function"
   ];
 
   assert.equal((source.match(/\.click\(\)/g) || []).length, owners.length,
-    "the click budget is seven: six gated opens and one shared dismiss");
+    "the click budget is eight: seven gated opens and one shared dismiss");
 
   const declarations = adapterFunctions(source);
   const found = [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(declarations, match.index));
 
   assert.deepEqual([...found].sort(), [...owners].sort(),
-    "every click is owned by exactly one of the seven sanctioned functions — none may move house");
+    "every click is owned by exactly one of the eight sanctioned functions — none may move house");
 });
 
 test("Phase 1 tripwire: the panel's column scrolls, the position is always restored, and only three functions move the list", async () => {
@@ -5601,7 +5619,7 @@ test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and 
   assert.match(signals, /held\.panel\?\.isConnected/, "a remount re-measures rather than answering from a detached node");
 
   // The click budget is untouched by any of this.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
 });
 
 // ------ Phase 5 of the multiple-LinkedIn-UI support guide: the fallbacks
@@ -5802,7 +5820,7 @@ test("Phase 5: a document card names the file when there is no viewer to ask", a
   assert.match(card, /DOCUMENT_EXTENSION_PATTERN\.test\(line\)/, "a file name is a line carrying a document extension");
   assert.match(card, /VIEWER_NOISE_PATTERN\.test\(line\)/, "and not one of the viewer's own chrome lines");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
 });
 
 test("Phase 5: the labelled reader refuses the posting's own title and company", async () => {
@@ -5995,7 +6013,7 @@ test("Phase 6: the header window ends at the first section on SCREEN, not the fi
   assert.match(own, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
   assert.ok(!/const cut = rest\.findIndex/.test(source), "and no longer carries its own copy");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
 });
 
 
@@ -6174,7 +6192,7 @@ test("Phase 7: whether the left list moved is measured on the page, because it c
   // The panel's own position is still restored on every path, failure included.
   const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
   assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "and the click budget is still seven");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the click budget is still eight");
 });
 
 
@@ -6422,8 +6440,8 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
   assert.match(capture, /snapshot\.raw\?\.applicant_header/,
     "and the header window is the one the extraction already read, not a second reading");
 
-  // Still seven clicks in the whole file.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  // Still eight clicks in the whole file.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
 
   // Stop is still matched before every other branch that does work.
   const handler = source.slice(source.indexOf("state.handler = (message"), source.length);
@@ -6453,7 +6471,7 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
 // current file naming and download behaviour, and never reuse a previous
 // applicant's resume link."
 //
-// Every widening here is READ-ONLY. The click budget is still seven.
+// Every widening here is READ-ONLY. The click budget is still eight.
 
 test("Phase 11: the contact disclosure gained four surfaces and got stricter, not looser", async () => {
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
@@ -6502,7 +6520,7 @@ test("Phase 11: the contact disclosure gained four surfaces and got stricter, no
   assert.ok(!/allow: \[[^\]]*phone/.test(source), "and no reader takes a number off the click path");
 });
 
-test("Phase 11: every resume variant is reached without an eighth click", async () => {
+test("Phase 11: every resume variant is reached without a click of its own", async () => {
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
 
   // A viewer that describes itself as a document, held to a HIGHER bar than the
@@ -6526,7 +6544,7 @@ test("Phase 11: every resume variant is reached without an eighth click", async 
   assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
 
   // And none of it costs a click.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is still seven");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
   const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
     .map((match) => ({ name: match[1], at: match.index }));
   const ownerOf = (offset) => {
@@ -6539,7 +6557,9 @@ test("Phase 11: every resume variant is reached without an eighth click", async 
   };
   assert.deepEqual(
     [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(match.index)).sort(),
-    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "selectApplicantRow"],
+    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "selectApplicantRow"],
+    // `openContactMenu` is the eighth, added in 3.9.1 to reach the contact
+    // disclosure — NOT the resume. Every resume variant above still costs nothing.
     "and each one is still owned by its own gated function — none moved house"
   );
 });
@@ -6665,7 +6685,7 @@ test("Phase 12: twelve phases changed no schema, no CSV and no click", async () 
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "seven clicks in, seven clicks out");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "eight clicks in, eight clicks out");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -6803,8 +6823,151 @@ test("3.9.1: correcting the expander added no click and moved no schema", async 
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
   // This task changed policy only. Not one call site moved.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
 
+  assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt",
+    "contact", "resume", "experience", "education", "skills",
+    "screeningResponses", "qualifications", "applicationStatus"
+  ], "the same seventeen applicant fields");
+});
+
+// ---------------------------------------------------------------------------
+// 3.9.1 — the contact disclosure behind the overflow menu
+//
+// The live capture shows an applicant panel whose only buttons are "Rate as",
+// "Message" and "More...", with the address and the number behind the last of
+// them. `findControl(panel, CONTACT)` found nothing, so every applicant on that
+// layout saved an empty email and an empty mobile — silently, because
+// "no-contact-control" is a diagnostics field and not a warning.
+//
+// This is the eighth click, and it is a NEW control rather than a redistributed
+// one. CLAUDE.md rule 5 was amended in the same task, which is the order the
+// rule itself requires.
+// ---------------------------------------------------------------------------
+
+test("3.9.1: the menu is a fallback, and the panel's own control is still tried first", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const contact = source.slice(
+    source.indexOf("async function openContactAndCollect"),
+    source.indexOf("const MAX_EXPANSIONS")
+  );
+  assert.ok(contact.length > 800, "the contact step must be found, not an empty slice");
+
+  // ORDER IS THE WHOLE SAFETY ARGUMENT, exactly as it is for every other
+  // fallback in this series: the working reader runs first and the new one only
+  // runs where it found nothing, so a layout that already works cannot change.
+  const direct = contact.indexOf("findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT)");
+  const menu = contact.indexOf("openContactMenu(panel");
+  assert.ok(direct > 0 && menu > direct,
+    "the panel's own Contact control is looked for before the menu is ever opened");
+  assert.match(contact, /if \(!control\) \{[\s\S]{0,400}?openContactMenu/,
+    "and the menu is only opened when there was no Contact control at all");
+});
+
+test("3.9.1: opening the menu does not widen what may be pressed inside it", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const contact = source.slice(
+    source.indexOf("async function openContactMenu"),
+    source.indexOf("const MAX_EXPANSIONS")
+  );
+
+  // The only thing pressed inside the opened menu is something this classifier
+  // allows for CONTACT. Nothing is found by label, nothing by position.
+  assert.match(contact, /findControl\(menu, Applicants\.CONTROL_PURPOSE\.CONTACT\)/,
+    "the item pressed inside the menu is classified as a contact control");
+  assert.ok(!/findControl\(menu, Applicants\.CONTROL_PURPOSE\.(?!CONTACT\))/.test(contact),
+    "and nothing else inside the menu is ever looked up");
+
+  // The opener itself is classified too — it is not found by matching "More".
+  assert.match(contact, /findControl\(panel, Applicants\.CONTROL_PURPOSE\.CONTACT_MENU\)/,
+    "the opener is classified, not assumed");
+
+  // Rule 2 is untouched: the one trusted read in the file is still the one.
+  assert.equal((source.match(/trusted: true/g) || []).length, 1,
+    "exactly one trusted contact read in the whole file");
+  assert.match(source, /allow: \["email"\]/,
+    "and anything not behind our own click still may not yield a phone number");
+});
+
+test("3.9.1: the menu is closed on every path out of the contact step", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const contact = source.slice(
+    source.indexOf("async function openContactAndCollect"),
+    source.indexOf("const MAX_EXPANSIONS")
+  );
+
+  // An ATS action menu left open over the panel is the next applicant's problem,
+  // so every `return` after the menu opens has to close it first. Counted rather
+  // than eyeballed: the failure paths plus the success path.
+  const closes = (contact.match(/closeOpenedOverlay\(menu\)/g) || []).length;
+  assert.ok(closes >= 4, `every exit after the menu opens must close it, found ${closes}`);
+  assert.match(contact, /if \(menu && menu !== live\) diagnostics\.contact\.menuClosed = await closeOpenedOverlay\(menu\)/,
+    "including the success path, where the disclosure's own Escape may not take the menu with it");
+
+  // And the menu route is on the record, so a run can be told from one where the
+  // applicant genuinely had no contact details.
+  for (const field of ["viaMenu", "menuOpened", "menuClosed"]) {
+    assert.ok(contact.includes(field), `diagnostics must report ${field}`);
+  }
+});
+
+test("3.9.1: a menu only counts as the disclosure when it really shows the details", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const carries = source.slice(
+    source.indexOf("function carriesContactDetails"),
+    source.indexOf("async function openContactMenu")
+  );
+  assert.ok(carries.length > 200, "the test must be found, not an empty slice");
+
+  // Stricter than `findContactDisclosure`'s own `carries`, deliberately: that one
+  // accepts the WORD "contact" appearing in an element, which every action menu
+  // does. Only a real address, a real tel: link, or a labelled field counts here,
+  // because getting this wrong means reading an ATS menu as somebody's details.
+  assert.match(carries, /mailto:|tel:/, "a real link counts");
+  assert.match(carries, /EMAIL_PATTERN/, "a real address counts");
+  assert.ok(!/contact info\|email\|phone\|mobile/.test(carries),
+    "the loose word test from findContactDisclosure must NOT be reused here");
+
+  // The menu is only ever read directly when it passes that test; otherwise the
+  // step looks for the item and presses it.
+  const contact = source.slice(
+    source.indexOf("async function openContactAndCollect"),
+    source.indexOf("const MAX_EXPANSIONS")
+  );
+  assert.match(contact, /if \(carriesContactDetails\(menu\)\) \{[\s\S]{0,120}?opened = menu;/,
+    "a menu that prints the details is read where it stands, with no second press");
+});
+
+test("3.9.1: the eighth click is a new control, and it is the only new one", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "seven gated opens and one shared dismiss");
+  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 5,
+    "the five verdict-gated opens are unchanged");
+  assert.equal((source.match(/opener\.element\.click\(\)/g) || []).length, 1,
+    "and the new one is the menu opener, once");
+
+  // The identity proof is untouched: still exactly three throwing checks.
+  const extract = source.slice(
+    source.indexOf("async function extractApplicant"),
+    source.indexOf("async function collectApplicantsOnPage")
+  );
+  assert.equal((extract.match(/assertExpectedApplicant\(/g) || []).length, 3,
+    "the three identity checks are still three");
+
+  // And the record shape did not move.
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
     "currentRole", "currentCompany", "totalExperience",
