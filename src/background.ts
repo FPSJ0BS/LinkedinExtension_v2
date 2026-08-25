@@ -20,7 +20,7 @@ const TabsCore: any = (globalThis as any).ProfileVaultTabs;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-26-react-v3.12.0";
+const BUILD_ID = "2026-08-25-react-v3.11.0";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -1864,21 +1864,11 @@ async function settleAutoRunFor(jobId: string, report: any): Promise<any> {
 async function resumeReloadFor(
   jobId: string,
   spend: boolean,
-  owed: number,
-  unproductive: number
+  applicantKey: string,
+  recovered: number
 ): Promise<any> {
   const key = String(jobId || "").trim();
-  // No job id, so nothing can be recorded against anything. Reported as a run of
-  // unproductive cycles for the same fail-closed reason as the missing lease
-  // below: an answer that cannot be written down must not read as permission.
-  if (!key) {
-    return {
-      ok: true,
-      cycles: 0,
-      unproductive: Number(Applicants.MAX_UNPRODUCTIVE_RESUME_CYCLES) || 2,
-      lastOwed: -1
-    };
-  }
+  if (!key) return { ok: true, reloads: 0, applicantReloads: 0, fruitless: 0 };
   const runs = await readAutoRuns();
   const entry = runs[key];
   /**
@@ -1900,40 +1890,29 @@ async function resumeReloadFor(
    * do not permit it.
    */
   if (!entry || typeof entry !== "object") {
-    // Reported as a full run of unproductive cycles, which is the only shape of
-    // "no" this policy has left. There is no ceiling to report as spent any
-    // more, so the refusal has to be expressed as the thing that actually stops
-    // recovery — and it must be expressed, or a page with no lease reloads for
-    // ever on an answer nothing can ever write down.
+    // Every bound reported as already spent, not just the total: a caller that
+    // reads only one of them must not be able to find an allowance here.
     return {
       ok: true,
-      cycles: 0,
-      unproductive: Number(Applicants.MAX_UNPRODUCTIVE_RESUME_CYCLES) || 2,
-      lastOwed: -1
+      reloads: Number(Applicants.MAX_RESUME_RELOADS) || 12,
+      applicantReloads: Number(Applicants.MAX_APPLICANT_RESUME_RELOADS) || 2,
+      fruitless: Number(Applicants.MAX_FRUITLESS_RESUME_RELOADS) || 3
     };
   }
-  // Read through the core so the productivity comparison — is this walk leaving
-  // strictly fewer owed than the last reload did? — is the same one written
-  // there, rather than a second copy that can drift from it.
-  const current = Applicants.readResumeReloadState(entry, { owed });
+  // The three counters this applicant's next reload is judged against. Read
+  // through the core so the "is this the same applicant" comparison is the same
+  // one `noteResumeReload` makes when it spends.
+  const current = Applicants.readResumeReloadState(entry, { applicantKey });
   if (!spend) return { ok: true, ...current };
 
-  const noted = Applicants.noteResumeReload(entry, { now: nowIso(), owed, unproductive });
+  const noted = Applicants.noteResumeReload(entry, { now: nowIso(), applicantKey, recovered });
   if (!noted.changed) return { ok: true, ...current };
   runs[key] = noted.entry;
   // Persisted BEFORE the caller reloads, which is the whole point of the round
   // trip: the document that asked is about to stop existing, and its successor
   // reads this count to decide whether it may ask again.
   await chrome.storage.local.set({ [AUTO_RUN_KEY]: runs }).catch(() => undefined);
-  // Read back from what was PERSISTED rather than echoing the request, so the
-  // caller's "did the cycle count actually rise by one?" test is answered by the
-  // lease and not by its own arithmetic coming back to it.
-  return {
-    ok: true,
-    cycles: Math.max(0, Number(noted.entry.resumeCycles) || 0),
-    unproductive: Math.max(0, Number(noted.entry.resumeUnproductiveCycles) || 0),
-    lastOwed: Number(noted.entry.resumeOwedAtLastReload)
-  };
+  return { ok: true, ...Applicants.readResumeReloadState(noted.entry, { applicantKey }) };
 }
 
 /**
@@ -2434,20 +2413,18 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
   }
 
   if (type === APPLICANT_MESSAGES.RESUME_RELOAD) {
-    // The persisted half of the prime-reload-harvest cycle. The page asks with
-    // `spend: false` at the end of a walk to learn whether its last cycle
-    // recovered anything, and with `spend: true` immediately before it reloads —
-    // the record has to be durable by the time the document goes, because the
-    // document is what goes.
+    // The persisted half of the stale-attachment-session recovery. The page
+    // asks with `spend: false` to find out what it has left, and with
+    // `spend: true` immediately before it reloads — the count has to be durable
+    // by the time the document goes, because the document is what goes.
     //
     // The worker decides nothing about *whether* to reload; it only keeps the
-    // one number the page cannot keep for itself, which is how many applicants
-    // were owed a resume last time round.
+    // number the page cannot keep for itself.
     return resumeReloadFor(
       String(message?.jobId || ""),
       message?.spend === true,
-      Number(message?.owed) || 0,
-      Number(message?.unproductive) || 0
+      String(message?.applicantKey || ""),
+      Number(message?.recovered) || 0
     );
   }
 

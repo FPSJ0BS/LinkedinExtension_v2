@@ -1,0 +1,76 @@
+{
+  "schema": 2,
+  "id": "TASK-0200",
+  "name": "Rollback of TASK-0194 (Prime the whole list, reload once, harvest until a cycle recovers nothing)",
+  "request": "Rollback of TASK-0194 (Prime the whole list, reload once, harvest until a cycle recovers nothing)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:42:20.751Z",
+  "completedAt": "2026-08-25T22:42:23.554Z",
+  "startCommit": "f73d451bcaa49ac03fa8267c864263e40e83c88a",
+  "commit": null,
+  "gitRef": "task/TASK-0200",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-25T22-42-20-414Z created and verified"
+  ],
+  "result": "Reversed TASK-0194 — Prime the whole list, reload once, harvest until a cycle recovers nothing",
+  "target": {
+    "taskId": "TASK-0194",
+    "taskName": "Prime the whole list, reload once, harvest until a cycle recovers nothing",
+    "commit": "ae4335ff57520f9c7110ff0b6a3301bdd99e2d91"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-25T22-42-20-414Z",
+    "commit": "f73d451bcaa49ac03fa8267c864263e40e83c88a"
+  }
+}
