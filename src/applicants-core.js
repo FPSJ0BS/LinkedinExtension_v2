@@ -454,78 +454,6 @@
     return APPLICANT_MENU_OPENER_PATTERN.test(label) || APPLICANT_MENU_OPENER_WITHIN_PATTERN.test(label);
   }
 
-  /**
-   * The applicant panel's own `Message` control (3.10.0, rule 9k).
-   *
-   * THE ONE LABEL THE DENYLIST IS LIFTED FOR, and only ever for
-   * `CONTROL_PURPOSE.MESSAGE_COMPOSE`. `message` is on
-   * `FORBIDDEN_APPLICANT_CONTROL_PATTERN` and stays there for every other
-   * purpose, so a stray "Message" reached by the resume reader or the section
-   * expander is refused exactly as it was before this existed.
-   *
-   * Anchored on the WHOLE label, which is what keeps it from becoming a hole:
-   *
-   *   - `send` can never match it. The composer's own Send button reads `Send`,
-   *     `Press Enter to Send`, or a paper-plane whose name is `Send` — none of
-   *     them begin with `message`, so the control that would actually deliver
-   *     the message cannot be classified as allowed by any caller, for any
-   *     purpose. **That is the mechanism behind "the extension never sends",
-   *     not a promise in a comment.**
-   *   - `InMail` can never match it. It is a different product, it spends the
-   *     recruiter's credits, and it is on the denylist and on the tail pattern.
-   *
-   * The optional tail is the accessible-name idiom this file already documents
-   * for the overflow menu: a real control reads `Message` in text and
-   * `Message Gaurang Agarwal` once the screen-reader half is included.
-   */
-  const APPLICANT_MESSAGE_CONTROL_PATTERN =
-    /^message(?:\s+[\p{L}\p{M}][\p{L}\p{M}'’.\-\s]{0,60})?$/u;
-
-  /**
-   * Words that, following `Message`, mean it is not this applicant's own
-   * composer — and the first four are the whole reason this pattern exists.
-   *
-   * `Message all`, `Message everyone`, `Message selected` and `Message
-   * candidates` are BULK controls. Bulk messaging is the one thing this feature
-   * is built not to do: the design is one applicant, one composer, one human
-   * pressing Enter. A control offering to message a set is refused here, before
-   * `inContainer` is even consulted, so being inside the right panel cannot
-   * rescue it.
-   *
-   * **`send` is on this list because of a hole a test found, not a hole
-   * imagined.** The exemption above is granted on the strength of the anchored
-   * `label`, and `label` prefers the visible TEXT — so a control reading
-   * `Message` whose accessible name reads `Send message` was exempted from the
-   * denylist and allowed, even though `send` is the one token that must never
-   * survive. The claim in the exemption's own comment — that a Send control
-   * cannot match an allowlist anchored on `message` — was therefore false for
-   * exactly the shape that matters. It is true now, because this pattern is
-   * asked of the label AND the accessible name together.
-   *
-   * The cost of being wrong in this direction is one refused Message button and
-   * a `not-a-message-control` reason in the diagnostics, which is a thing the
-   * user can report and this project can widen deliberately. The cost of being
-   * wrong in the other direction is a message sent by a machine. So it fails
-   * closed.
-   */
-  const APPLICANT_MESSAGE_CONTROL_FORBIDDEN_TAIL =
-    /\b(?:all|everyone|every|selected|multiple|bulk|candidates|applicants|request|requests|setting|settings|preference|preferences|template|templates|inmail|premium|send|sends|sending|submit|deliver)\b/i;
-
-  /**
-   * Is this the panel's own Message control?
-   *
-   * The anchored pattern is asked of the label, and the tail refusal of the
-   * label AND the accessible name together, so `Message` sitting beside an
-   * aria-label of `Message all 665 applicants` is refused on the second test.
-   */
-  function isApplicantMessageControlLabel(label, combined = "") {
-    const name = normalizeLabel(label);
-    if (!name) return false;
-    if (!APPLICANT_MESSAGE_CONTROL_PATTERN.test(name)) return false;
-    if (APPLICANT_MESSAGE_CONTROL_FORBIDDEN_TAIL.test(name)) return false;
-    return !APPLICANT_MESSAGE_CONTROL_FORBIDDEN_TAIL.test(normalizeLabel(combined));
-  }
-
   /** What a caller may ask permission for. Anything else is refused. */
   const CONTROL_PURPOSE = Object.freeze({
     CONTACT: "contact",
@@ -542,30 +470,6 @@
      * every destructive action the menu contains.
      */
     CONTACT_MENU: "contact-menu",
-    /**
-     * The applicant panel's own `Message` control, opened ONLY so the recruiter's
-     * own reviewed text can be typed into LinkedIn's composer (3.10.0, rule 9k).
-     *
-     * This is the eighth click and the first one that opens something the
-     * recruiter would use to *contact* somebody, so it is worth being exact
-     * about what it does and does not license.
-     *
-     * **It does not send.** The composer LinkedIn opens says "Press Enter to
-     * Send", and the human presses it. Nothing in this extension classifies,
-     * finds or presses a Send control — `send` is on the denylist for every
-     * purpose including this one, and the allowlist pattern above is anchored
-     * on `message`, so no Send control can match it.
-     *
-     * **It is not bulk.** One applicant, one composer, one press, driven by the
-     * user from the dashboard. There is no queue over the list, and a control
-     * offering to message a set of applicants is refused by name.
-     *
-     * **The text is the recruiter's.** It is composed and previewed in this
-     * extension's own UI and inserted verbatim; nothing is generated, and a
-     * message still carrying an unresolved variable is blocked before it ever
-     * reaches the page (rule 1 — a wrong value is worse than a blank one).
-     */
-    MESSAGE_COMPOSE: "message-compose",
     RESUME: "resume",
     /**
      * The opened viewer's own Download control (3.7.9, rule 9i).
@@ -997,30 +901,7 @@
       ? FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(text))
         || FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(ariaLabel))
       : FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(combined);
-    if (forbidden) {
-      // ONE EXEMPTION (3.10.0), written INSIDE the existing refusal rather than
-      // as an earlier branch, so the denylist keeps its place as the first thing
-      // that happens to any control — and so the row rule above keeps deciding
-      // what `forbidden` even means. `message` is a forbidden token and it
-      // remains one for every purpose except the one whose entire job is to open
-      // the composer, and even there only for a control whose WHOLE label is the
-      // panel's own `Message`.
-      //
-      // Everything else the denylist carries, `send` and `inmail` above all, is
-      // untouched: a Send control cannot match an allowlist anchored on
-      // `message`, so it stays forbidden for every caller, for every purpose.
-      // **That is the mechanism behind "this extension never sends"** — not a
-      // promise in a comment, but the absence of any string that could classify
-      // a Send control as allowed.
-      //
-      // A proven applicant row can never reach this exemption: a row is asked
-      // for with `CONTROL_PURPOSE.APPLICANT_ROW` and never with MESSAGE_COMPOSE,
-      // so the narrower row test above is left exactly as TASK-0182 wrote it,
-      // and "Send InMail" on a row is still refused by it.
-      const exempt = purpose === CONTROL_PURPOSE.MESSAGE_COMPOSE
-        && isApplicantMessageControlLabel(label, combined);
-      if (!exempt) return refuse("forbidden-action", true);
-    }
+    if (forbidden) return refuse("forbidden-action", true);
 
     if (purpose === CONTROL_PURPOSE.CONTACT) {
       if (!APPLICANT_CONTACT_CONTROL_PATTERN.test(label)) return refuse("not-a-contact-control");
@@ -1067,20 +948,6 @@
       if (!inContainer) return refuse("outside-applicant-panel");
       return { allowed: true, forbidden: false, label, purpose, reason: "contact-menu" };
     }
-    if (purpose === CONTROL_PURPOSE.MESSAGE_COMPOSE) {
-      // "See full profile" sits inches from this control in the same panel and
-      // leaves the applicants page, taking the panel, the list and the pager
-      // with it. Refused first, for the same reason the disclosure branch
-      // refuses it, and with the same reason string so the two agree.
-      if (APPLICANT_NAVIGATION_CONTROL_PATTERN.test(combined)) return refuse("navigates-away");
-      if (!isApplicantMessageControlLabel(label, combined)) return refuse("not-a-message-control");
-      // The panel is mandatory proof. `Message` labels the global nav item, the
-      // messaging overlay's own compose button and a control in every row of
-      // the recruiter's other tools; only the one enumerated from inside THIS
-      // applicant's panel is addressed to the applicant the caller means.
-      if (!inContainer) return refuse("outside-applicant-panel");
-      return { allowed: true, forbidden: false, label, purpose, reason: "message-compose" };
-    }
     if (purpose === CONTROL_PURPOSE.APPLICANT_ROW) {
       if (!inContainer) return refuse("outside-applicant-list");
       return { allowed: true, forbidden: false, label, purpose, reason: "applicant-row" };
@@ -1121,117 +988,6 @@
       };
     }
     return refuse("unknown-purpose");
-  }
-
-  // ------------------------------------------------------ the composer
-  // Everything below decides whether the recruiter's reviewed text may be typed
-  // into LinkedIn's own composer, and into WHICH composer. None of it sends: the
-  // composer says "Press Enter to Send" and the human presses it.
-
-  /**
-   * How the composer's recipient was matched against the intended applicant.
-   *
-   * Named rather than boolean because the reason is what a failed insertion
-   * reports, and "the composer was addressed to somebody else" and "the composer
-   * never said who it was addressed to" are different defects with different
-   * fixes.
-   */
-  const COMPOSER_MATCH = Object.freeze({
-    PROFILE: "profile-url",
-    NAME: "name",
-    UNKNOWN: "unknown-recipient",
-    MISMATCH: "different-recipient",
-    MULTIPLE: "multiple-recipients"
-  });
-
-  /**
-   * Is this composer addressed to the applicant the caller means?
-   *
-   * **This is the same lesson as the applicant panel, and it is the one that
-   * costs the most if it is wrong.** CLAUDE.md already says the address bar is
-   * not identity — LinkedIn routes ahead of the render, so the URL names the
-   * next applicant while the previous panel is still on screen. A composer is
-   * worse: the messaging overlay persists across applicants, so a stale
-   * conversation with the PREVIOUS person is exactly what is on screen at the
-   * moment the next one is opened. Getting this wrong does not cost a field of
-   * a record, it sends one applicant's message to another applicant.
-   *
-   * So the composer must say who it is addressed to, out of its own markup, and
-   * agree. Silence is refused — never assumed to be the intended person.
-   *
-   * `observed.profileUrls` and `observed.names` come from the recipient pill the
-   * screenshot shows ("Gaurang Agarwal ✕") and from the profile link beside it.
-   * More than one distinct recipient is a group message and is refused outright:
-   * this feature addresses one applicant at a time.
-   */
-  function verifyComposerRecipient({ expected = {}, observed = {} } = {}) {
-    const wantUrl = canonicalApplicantProfileUrl(expected.profileUrl);
-    const wantName = normalizeLabel(expected.name);
-
-    const urls = uniqueText((observed.profileUrls || []).map(canonicalApplicantProfileUrl).filter(Boolean));
-    const names = uniqueText((observed.names || []).map((value) => normalizeLabel(value)).filter(Boolean));
-
-    if (urls.length > 1 || names.length > 1) {
-      return { matched: false, reason: COMPOSER_MATCH.MULTIPLE, on: "" };
-    }
-    // The profile URL is the identity when it is there — it is the datum, not a
-    // rendering of it, the same reason `mailto:` outranks running text.
-    if (wantUrl && urls.length === 1) {
-      return urls[0] === wantUrl
-        ? { matched: true, reason: COMPOSER_MATCH.PROFILE, on: urls[0] }
-        : { matched: false, reason: COMPOSER_MATCH.MISMATCH, on: urls[0] };
-    }
-    if (wantName && names.length === 1) {
-      return names[0] === wantName
-        ? { matched: true, reason: COMPOSER_MATCH.NAME, on: names[0] }
-        : { matched: false, reason: COMPOSER_MATCH.MISMATCH, on: names[0] };
-    }
-    return { matched: false, reason: COMPOSER_MATCH.UNKNOWN, on: "" };
-  }
-
-  /** `/in/<slug>`, so a tracking query cannot make one person look like two. */
-  function canonicalApplicantProfileUrl(value) {
-    const raw = cleanText(value);
-    if (!raw) return "";
-    const match = /\/in\/([^/?#\s]+)/i.exec(raw);
-    return match ? `/in/${decodeURIComponent(match[1]).toLowerCase()}` : "";
-  }
-
-  /** Whitespace-insensitive, because a contenteditable renders its own breaks. */
-  function composerTextMatches(observed, intended) {
-    const left = cleanText(observed).replace(/\s+/g, " ").trim();
-    const right = cleanText(intended).replace(/\s+/g, " ").trim();
-    return Boolean(right) && left === right;
-  }
-
-  /**
-   * May this text be typed into this composer?
-   *
-   * The refusals, and what each one prevents:
-   *
-   *   - **an empty or blocked message.** A message still carrying an unresolved
-   *     variable never reaches the page (rule 1): "Hi ," is a wrong value, and a
-   *     wrong value is worse than a blank one. The preview decides `blocked`;
-   *     this refuses to act on it a second time, at the last point before the
-   *     text leaves.
-   *   - **a composer that already has text in it.** That text is the
-   *     recruiter's own draft, or the tail of a real conversation. Appending to
-   *     it would silently corrupt something a human wrote, so the insertion is
-   *     refused and the reason says why — it is never merged, never cleared.
-   *   - **a recipient that does not match.** Decided by `verifyComposerRecipient`
-   *     above, and re-asked here so no caller can skip it.
-   */
-  function planComposerInsertion({ text = "", existingText = "", blocked = false, recipient = null } = {}) {
-    const body = cleanText(text);
-    const refuse = (reason) => ({ allowed: false, reason, text: "" });
-
-    if (blocked) return refuse("message-blocked");
-    if (!body) return refuse("empty-message");
-    if (cleanText(existingText)) return refuse("composer-not-empty");
-    if (!recipient || recipient.matched !== true) {
-      return refuse(recipient?.reason || COMPOSER_MATCH.UNKNOWN);
-    }
-    return { allowed: true, reason: "insertable", text: body };
   }
 
   // -------------------------------------------------------- qualifications
@@ -4868,11 +4624,6 @@
     APPLICANT_PAGINATION_PATTERN, APPLICANT_PAGINATION_PHRASE_PATTERN,
     classifyApplicantControl, pageNumberFrom, paginationLabel,
     saysCurrentPage, planPagerOrdinalStep,
-    // messaging the applicant — the composer is opened, never sent
-    APPLICANT_MESSAGE_CONTROL_PATTERN, APPLICANT_MESSAGE_CONTROL_FORBIDDEN_TAIL,
-    isApplicantMessageControlLabel,
-    COMPOSER_MATCH, verifyComposerRecipient, composerTextMatches, planComposerInsertion,
-    canonicalApplicantProfileUrl,
     // qualifications and screening
     QUALIFICATION_CATEGORY, QUALIFICATION_RESULT, QUALIFICATION_SOURCE,
     qualificationCategoryOf, classifyQualificationResult, classifyQualificationSource,

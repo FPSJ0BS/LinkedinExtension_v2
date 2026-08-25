@@ -1,4 +1,4 @@
-import { APPLICANT_MESSAGES, IMPORT_MESSAGES, MESSAGING_MESSAGES, PROFILE_MESSAGES, CONNECTION_MESSAGES, STOP_ALL } from "./messages.js";
+import { APPLICANT_MESSAGES, IMPORT_MESSAGES, PROFILE_MESSAGES, CONNECTION_MESSAGES, STOP_ALL } from "./messages.js";
 import * as Queue from "./import-queue-core.js";
 import { loadState, saveSession, replaceItems, putItem } from "./queue-db.js";
 import { findByProfileUrl, saveProfile } from "./db.js";
@@ -2591,128 +2591,6 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
   return { ok: false, error: `Unknown applicant command: ${type}` };
 }
 
-// --------------------------------------------------- messaging one applicant
-// The recruiter composes one message to ONE applicant on the extension's own
-// page; the composer that receives it is LinkedIn's, on the recruiter's own
-// hiring tab. The worker's whole part in that is this relay: one request in,
-// one `chrome.tabs.sendMessage` out, one answer back, verbatim.
-//
-// There is no loop, no queue, no batch and no retry — a second applicant is a
-// second request the recruiter makes deliberately — and there is no SEND,
-// because LinkedIn's composer says "Press Enter to Send" and the human is the
-// one who presses it.
-
-/** Observation only, and answered synchronously by the page. */
-const MESSAGE_PROBE_TIMEOUT_MS = PING_TIMEOUT_MS * 2;
-/**
- * An insertion waits on LinkedIn's own composer — 8s on the page — and then
- * types into it, so the budget is generous. Bounded all the same: a dashboard
- * left waiting forever is the one outcome worse than a refusal it can read.
- */
-const MESSAGE_INSERT_TIMEOUT_MS = 30000;
-
-/**
- * The recruiter's own hiring tab: found, never made.
- *
- * Deliberately NOT `resolveApplicantTab`, which re-opens the last hiring page
- * when there is none. That is right for a collection command — the recruiter
- * pressed a button to be taken to the work — and wrong here: composing a
- * message is not a request to go anywhere. So this only looks, the active tab
- * first and then any hiring tab, and reports finding nothing rather than
- * creating, activating, focusing, reloading or closing anything. Rule 13: the
- * hiring tab is the recruiter's own page.
- */
-async function findHiringTab(): Promise<any> {
-  const active = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
-  const current = (active || []).find(
-    (tab: any) => tab?.id && HIRING_URL_PATTERN.test(String(tab?.url || ""))
-  );
-  if (current?.id) return current;
-
-  const all = await chrome.tabs.query({
-    url: [
-      "https://www.linkedin.com/hiring/*",
-      "https://linkedin.com/hiring/*",
-      "https://www.linkedin.com/talent/*",
-      "https://linkedin.com/talent/*"
-    ]
-  }).catch(() => []);
-  return (all || []).find((tab: any) => tab?.id) || null;
-}
-
-/**
- * A relay failure, in the shape the caller already handles.
- *
- * The dashboard renders `reason` as it stands, so every failure keeps its own
- * name: "no hiring tab is open", "nothing is listening on it" and "it did not
- * answer in time" are three different things to do next, and flattening them
- * into one message is what makes a button look broken.
- */
-function messagingFailure(reason: string, error: unknown): any {
-  return {
-    ok: false,
-    inserted: false,
-    reason,
-    error: error instanceof Error ? error.message : String(error || reason),
-    buildId: BUILD_ID,
-    surface: "background"
-  };
-}
-
-/** Tell "nothing is listening there" apart from every other thrown failure. */
-function relayFailureReason(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error || "");
-  if (/receiving end does not exist|could not establish connection|message port closed/i.test(text)) {
-    return "no-receiving-end";
-  }
-  if (/did not respond in time/i.test(text)) return "relay-timeout";
-  return "relay-failed";
-}
-
-async function handleMessagingCommand(type: string, message: any): Promise<any> {
-  const applicant = message?.applicant || {};
-
-  let tab: any = null;
-  try {
-    tab = await findHiringTab();
-  } catch (error) {
-    return messagingFailure("hiring-tab-lookup-failed", error);
-  }
-  if (!tab?.id) {
-    return messagingFailure(
-      "no-hiring-tab",
-      "Open your job's Applicants page in LinkedIn and select this applicant, then try again."
-    );
-  }
-
-  try {
-    const response = type === MESSAGING_MESSAGES.PROBE
-      // Observation only. The panel verdict, the control verdict and the
-      // composer state are the page's own answer, and the dashboard is the
-      // thing that reads them — so it is passed straight through.
-      ? await sendTabMessage(
-        tab.id,
-        { type: "PV_APPLICANT_MESSAGE_PROBE", applicant },
-        MESSAGE_PROBE_TIMEOUT_MS
-      )
-      // Exactly one insertion, for the one applicant this request names.
-      // Nothing is pressed after it.
-      : await sendTabMessage(
-        tab.id,
-        { type: "PV_APPLICANT_MESSAGE_INSERT", applicant, text: String(message?.text ?? "") },
-        MESSAGE_INSERT_TIMEOUT_MS
-      );
-    // A listener that returned without answering resolves as `undefined`, and
-    // an empty reply reaches the dashboard as no reply at all.
-    if (!response || typeof response !== "object") {
-      return messagingFailure("no-response", "The applicants page did not answer.");
-    }
-    return response;
-  } catch (error) {
-    return messagingFailure(relayFailureReason(error), error);
-  }
-}
-
 // ------------------------------------------------------------------- lifecycle
 
 /**
@@ -2765,18 +2643,6 @@ chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: 
     stopEverything()
       .then((response) => sendResponse(response))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-    return true;
-  }
-
-  if (message?.type === MESSAGING_MESSAGES.PROBE || message?.type === MESSAGING_MESSAGES.INSERT) {
-    // Matched by exact type rather than by a `PV_MESSAGE_` prefix, deliberately:
-    // a prefix would relay any future member of this family without anyone
-    // deciding to, and the one member that must never exist is a send. No
-    // `_sender` is passed — this relay opens nothing, so it has no window to
-    // anchor to.
-    handleMessagingCommand(message.type, message)
-      .then((response) => sendResponse(response))
-      .catch((error) => sendResponse(messagingFailure("relay-failed", error)));
     return true;
   }
 

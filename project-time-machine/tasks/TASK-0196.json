@@ -1,0 +1,64 @@
+{
+  "schema": 2,
+  "id": "TASK-0196",
+  "name": "Rollback of TASK-0188 (Applicant messaging: Message control, composer insertion, relay and UI)",
+  "request": "Rollback of TASK-0188 (Applicant messaging: Message control, composer insertion, relay and UI)",
+  "type": "rollback",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:33:08.773Z",
+  "completedAt": "2026-08-25T22:33:11.133Z",
+  "startCommit": "ae4335ff57520f9c7110ff0b6a3301bdd99e2d91",
+  "commit": null,
+  "gitRef": "task/TASK-0196",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/styles/applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "deleted",
+      "path": "tests/applicant-messaging.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "backup branch tm-backup/2026-08-25T22-33-08-295Z created and verified"
+  ],
+  "result": "Reversed TASK-0188 — Applicant messaging: Message control, composer insertion, relay and UI",
+  "target": {
+    "taskId": "TASK-0188",
+    "taskName": "Applicant messaging: Message control, composer insertion, relay and UI",
+    "commit": "f3ca5b55f7854d9dfde54ce071d35dea997d3861"
+  },
+  "backup": {
+    "branch": "tm-backup/2026-08-25T22-33-08-295Z",
+    "commit": "ae4335ff57520f9c7110ff0b6a3301bdd99e2d91"
+  }
+}
