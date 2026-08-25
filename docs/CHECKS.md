@@ -1,5 +1,100 @@
 # CHECKS.md
 
+## 3.9.3 — the first live diagnostics report (TASK-0173 … TASK-0176)
+
+Executed in this environment on 2026-08-25. **Real results only.** The trigger
+was a diagnostics JSON from a live recruiter account — the first this repo has
+ever had, and the thing 3.9.2 existed to make retrievable.
+
+### Per task
+
+| Task | `npm run check` | Tests | Note |
+|---|---|---|---|
+| TASK-0173 contact: the opener was never found | passed | 550 → **555** | Plus three defects behind it |
+| TASK-0174 the expander never ran on a list run | passed | 555 → **558** | Budget bounded, not refused |
+| TASK-0175 resume saved with no extension | passed | 558 → **561** | Closed MIME table |
+| TASK-0176 release 3.9.3 | passed | **561** | Build ID and version in all nine places |
+
+Final: typecheck clean · build ok · **561 passed / 0 failed** · docs:check 18
+files · validate 31 build files.
+
+### What the live report settled, and what it overturned
+
+**It overturned the 3.9.1 diagnosis.** Two rounds of reasoning about markup
+concluded the opener was being returned as its own menu; the report said
+`reason: "no-contact-menu"`, `menuClicked: false`, `menuLabel: ""` — nothing was
+ever pressed. The guessed defect was real and is fixed, but it was not the one
+biting. One download settled what reading the source twice could not.
+
+Three things were read directly out of that report rather than inferred:
+
+1. `diagnostics.expansions` **absent** → `expandCollapsedSections` was never
+   called on a list run.
+2. `education: 1` beside captured markup holding **two** entries, the second
+   `<li class="… visually-hidden">`.
+3. `savedAs` ending `RAHUL Mishra (1)` with no extension, on a
+   `linkedin.com/ambry/?x-li-ambry-ep=…` address.
+
+### Checks run beyond the suite
+
+- **The classifier, executed** over seven real menu-label shapes (all
+  `contact-menu`) and eight expander labels (all still `expand-section`), plus
+  `See full profile` (`navigates-away`) and a denylist word inside a menu label
+  (`forbidden`).
+- **The `lastIndex` hazard, executed**: `EMAIL_PATTERN.test(text)` four times with
+  the same input returns `true, false, true, false`.
+- **The MIME table, executed** over all eight mapped types plus
+  `application/octet-stream`, `text/html; charset=utf-8`, `application/zip`,
+  `""` and `null`, and end to end through `resumeFileName` on the observed ambry
+  address.
+
+### Intermediate failures worth recording
+
+1. **The core's DOM check caught the docx media type.** It ends in the bare word
+   the purity tripwire greps for. The literal is split and named
+   `DOCX_MEDIA_TYPE` rather than the assertion loosened — the same trade
+   `RESUME_SCANNING_PATTERN` made in 3.9.1 — with a test proving the split
+   literal still resolves to the real type rather than merely compiling.
+2. **Four source-slice markers pointed at comments**, which `withoutComments`
+   strips, so the slices ran to the end of the file. This is the same defect
+   class as the 3.9.0 and Phase 11 vacuous slices; every new slice in this
+   release asserts its own length.
+3. **A slice marker was patched on the wrong test** — `findIndex` matched the
+   first occurrence in the file rather than the one in the test being edited.
+   Caught by the suite, which is what it is for.
+
+### What is still not verified — the live checklist
+
+Every item is the user's step. Reload the extension **and** the LinkedIn tab.
+
+0. **Download Diagnostics still returns a file.** It did on 3.9.2; it is the
+   instrument the rest of this list is answered with.
+1. **The current UI still works.** First, always.
+2. `More...` is now pressed, and **email and mobile come back filled**. If not,
+   `diagnostics.contact.controlsSeen` now lists every control on the panel with
+   the classifier's verdict for each — that names the cause outright.
+3. Nothing in that menu is ever activated. **Still the one to watch hardest.**
+4. `Show 2 more educations` is pressed, and **both** educations save. Same for
+   experiences. `diagnostics.expansions` should now be present, with
+   `clicked ≥ 1`.
+5. `current_role`, `current_company` and `total_experience` come back filled —
+   empty for four consecutive releases, and the expander is the likeliest reason.
+6. The resume lands **with an extension** and opens by double-click.
+   `diagnostics.resume.contentType` records what the server said.
+7. A whole-job run is not noticeably slower. The expander is bounded at four
+   clicks per applicant; if a run drags, that bound is the first thing to lower.
+8. Stop still ends everything; an interrupted run still restarts; the CSV is
+   unchanged.
+
+### Known and not fixed in this release
+
+`selected.jobTitle` read **"0 notifications total"** on the live report — a
+notification badge, not a job title. It is a wrong value where rule 1 wants a
+blank one. It does not reach the CSV (the nine columns do not include the job
+title) and it was outside the scope of all four tasks here, so it is recorded
+rather than quietly patched.
+
+
 ## 3.9.2 — the diagnostics report was unreachable (TASK-0172)
 
 Executed in this environment on 2026-08-25. **Real results only.**

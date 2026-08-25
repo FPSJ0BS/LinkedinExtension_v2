@@ -1,0 +1,76 @@
+{
+  "schema": 2,
+  "id": "TASK-0176",
+  "name": "Release 3.9.3",
+  "request": "Release 3.9.3",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:17:26.782Z",
+  "completedAt": "2026-08-25T08:19:58.317Z",
+  "startCommit": "204242d4cecc79767562086c30c1622a03d75c5a",
+  "gitRef": "task/TASK-0176",
+  "files": [
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PHASES.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/SETUP.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 561 tests passed / 0 failed, docs:check 18 files, validate 31 build files",
+    "dist/build-meta.json reads 3.9.3 / 2026-08-25-react-v3.9.3 and all five injected dist scripts carry the new build ID",
+    "dist/applicants.js and dist/src/applicants-core.js carry all four fixes: the within-label menu pattern, containsEmailAddress, LIST_RUN_EXPANSIONS and resumeExtensionForMediaType"
+  ],
+  "result": "TASK-0176: release 3.9.3, the first release driven by a live diagnostics report rather than by reasoning about markup. ONE BUMP for the four tasks: build ID 2026-08-25-react-v3.9.3 in content.js, connections.js, applicants.js, background.ts, popup.tsx and build.mjs, version 3.9.3 in manifest.json, package.json and build.mjs, with README step 8 and the four SETUP.md references updated so the checks a new contributor runs still pass. WHAT THIS RELEASE IS ABOUT, and it is worth stating in the record rather than only in the code: 3.9.2 existed to make the diagnostics report retrievable, the first report arrived, and it CONTRADICTED the fix 3.9.1 had just shipped. The 3.9.1 note guessed that the overflow menu was being opened and the wrong element read back; the report said reason 'no-contact-menu', menuClicked false, menuLabel empty - nothing was ever pressed, because the opener was never found at all. The guessed defect was real and is fixed, but it was not the one biting. Two rounds of reading source produced a wrong diagnosis and one download settled it, and that is the single most useful thing to carry forward. Three further facts were read straight out of the same JSON rather than inferred: diagnostics.expansions ABSENT, proving expandCollapsedSections was never called on a list run; education 1 beside captured markup holding two entries with the second visually-hidden behind 'Show 2 more educations'; and savedAs ending 'RAHUL Mishra (1)' with no extension on a linkedin.com/ambry address. DOCS: a CHANGELOG entry that leads with the overturned diagnosis rather than burying it; a CHECKS.md section carrying the real results, the checks run beyond the suite (the classifier over seven menu shapes and eight expander labels, the lastIndex hazard executed, the MIME table over all eight mapped types plus four refusals), three intermediate failures - the core's DOM check catching the docx media type, four slice markers pointing at comments that withoutComments strips, and a marker patched onto the wrong test by a findIndex that matched the first occurrence in the file - and a NINE-item live checklist whose item 0 is 'does the report still come back', because it is the instrument the other eight are answered with; a four-row PHASES table; and PROJECT_STATUS at 3.9.3. RECORDED AND DELIBERATELY NOT FIXED: selected.jobTitle read '0 notifications total' on the live report, a notification badge rather than a job title. It is a wrong value where rule 1 wants a blank one, it does not reach the CSV, and it was outside the scope of all four tasks, so it is written down in CHECKS.md rather than quietly patched. Verified dist/build-meta.json reads 3.9.3 / 2026-08-25-react-v3.9.3, all five injected dist scripts carry the new build ID, and the built applicants.js carries all four fixes including 'expand: true, maxExpansions: LIST_RUN_EXPANSIONS'. RULE 20 STANDS: none of the four fixes in this release has been run against a live LinkedIn page, and loading dist/ in Chrome is the user's step. Files: the six build-ID sites, extension/manifest.json, package.json, README.md, docs/SETUP.md, docs/CHANGELOG.md, docs/CHECKS.md, docs/PHASES.md, docs/PROJECT_STATUS.md."
+}

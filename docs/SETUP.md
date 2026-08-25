@@ -130,8 +130,8 @@ Two things about the build worth knowing before they surprise you:
 
 | Check | Expected |
 |---|---|
-| The card on the extensions page | **Profile Vault React 3.9.2** |
-| The build ID in the popup | `2026-08-25-react-v3.9.2` |
+| The card on the extensions page | **Profile Vault React 3.9.3** |
+| The build ID in the popup | `2026-08-25-react-v3.9.3` |
 | `dist/build-meta.json` | The same version and build ID |
 | The popup's commands | All three surfaces offered by name — profile, connections, applicants |
 | The pages open | Saved Profiles, Connections Collector, Job Applicants |
@@ -186,9 +186,9 @@ npm run package
 It runs `npm run check` first, so an archive can only be cut from a tree that typechecks, builds,
 passes its tests and validates. It writes two files into `releases/`:
 
-- `profile-vault-react-3.9.2.zip` — `INSTALL.md` beside an `extension/` folder that is a
+- `profile-vault-react-3.9.3.zip` — `INSTALL.md` beside an `extension/` folder that is a
   byte-for-byte copy of `dist/`
-- `profile-vault-react-3.9.2.zip.sha256` — in the `<digest>  <name>` shape `sha256sum -c` expects
+- `profile-vault-react-3.9.3.zip.sha256` — in the `<digest>  <name>` shape `sha256sum -c` expects
 
 The packager reads its own archive back and compares every file against `dist/` before writing it,
 so a corrupted entry fails here rather than on someone else's machine.

@@ -1,5 +1,148 @@
 # CHANGELOG.md
 
+## 3.9.3 — the first release driven by a live diagnostics report
+
+TASK-0173 to TASK-0176. 3.9.2 made the diagnostics report retrievable. This is
+what the first one said, and **it contradicted the fix that had just shipped**.
+
+The 3.9.1 note guessed that the overflow menu was being opened and the wrong
+element read back. The report says otherwise, and says it in three fields:
+
+```
+"contact": { "reason": "no-contact-menu", "menuClicked": false, "menuLabel": "" }
+```
+
+Nothing was ever pressed. `findControl(panel, CONTACT_MENU)` found no opener at
+all, so every applicant on that layout saved an empty email and an empty mobile
+while the code written to fix it never ran. **Worth stating plainly: two rounds
+of reasoning about markup produced a wrong diagnosis, and one download of a
+report settled it.**
+
+### The label was the defect (TASK-0173)
+
+The proof is in the same report, in the applicant's own Experience card:
+
+```html
+<span class="a11y-text">Years employed from 2025 to Present</span>
+<span aria-hidden="true">2025 – Present</span>
+```
+
+Every LinkedIn control is built that way, so the accessible text of an overflow
+menu reads `More options More...`, and `APPLICANT_MENU_OPENER_PATTERN` is
+anchored on the **whole** label. It matched none of the shapes a real page ships.
+
+`APPLICANT_MENU_OPENER_WITHIN_PATTERN` matches within the label instead, and
+every alternative requires **either the ellipsis glyph or the words
+actions/options/menu** — written that way so it cannot collide with a section
+expander, which is the one control that must never be mistaken for a menu.
+Verified by running the real classifier: seven menu shapes now return
+`contact-menu`, and `Show 2 more educations`, `Show all 12 skills`, `See more`,
+`Show more`, `Show 5 more experiences`, `Expand` and `View all details` all still
+return `expand-section`. Both branches consult one function, so the menu route
+and the expander refusal can never disagree about what a control is.
+
+### Three defects were waiting behind it
+
+Each could empty the columns on its own once the opener *is* found, so all three
+are fixed in the same task.
+
+**`EMAIL_PATTERN` is `/gi`, and `.test()` on a global regex advances
+`lastIndex`.** Four identical calls answer `true, false, true, false` — executed,
+not reasoned about, and asserted that way. Two contact readers asked it directly,
+so a menu that printed an applicant's details was recognised for one applicant
+and refused for the next, with nothing in the diagnostics to say why. Both now go
+through one helper that builds a fresh non-global copy — the idiom the core's
+capture path already uses, which is evidence the hazard was known in one place
+and missed in these two.
+
+**The opener could be returned as its own menu.** It carries `aria-expanded`,
+flips it to `true` when pressed, so it matches `[aria-expanded='true']` in
+`CONTACT_SURFACE_SELECTOR`; it was not expanded before the press, so it passes
+the freshness test; and it precedes its own dropdown in document order. It and
+its ancestors are refused outright now, the opener's own surroundings are
+searched **first** with the page-wide sweep kept last so nothing that worked can
+stop working, and a candidate must be *useful* rather than merely present.
+
+**"It appeared when we pressed" meant newly created, not newly revealed.**
+`contactSurfaceCandidates()` returns hidden elements too, so a dropdown LinkedIn
+had already mounted and merely hidden was in the pre-click sample from the start
+and refused forever by the binding meant to protect it. The sample is visible-only
+now. The leak that binding exists to stop is the previous applicant's disclosure
+still *on screen*, which is visible by definition and so is still caught.
+
+And `probePanelContactControls` records every control on the panel with what the
+classifier makes of it — `inContainer: false`, exactly as
+`probePanelDownloadControls` uses it, so nothing it finds can ever be pressed. It
+distinguishes *the label never matched* from *the label matched but the control
+is outside the panel*, which is the one question the failing report could not
+answer.
+
+### The expander never ran on a whole-job run (TASK-0174)
+
+The plainest reading in the report: `diagnostics.expansions` was **absent**. That
+object is written on the first line of `expandCollapsedSections`, unconditionally,
+so its absence proves the function was never called — and the cost is two fields
+further down, `education: 1` from a panel whose own captured markup holds two
+entries, the second `<li class="… visually-hidden">` behind `Show 2 more
+educations`.
+
+One frozen literal did it: a list run passed `expand: false`, and because that
+flag reaches both expansion passes through one shared budget, it switched off the
+whole thing. The reasoning was sound — up to eight clicks per applicant on a walk
+that is already the slow part — and the price was simply never measured against
+what it cost. Experience is the sole source of `current_role`, `current_company`
+and `total_experience`, the three columns [CHECKS.md](CHECKS.md) records as empty
+for four consecutive releases.
+
+It is bounded now rather than refused: `LIST_RUN_EXPANSIONS` (4) for a whole-job
+run against `MAX_EXPANSIONS` (8) for a single collection. A recruiter collecting
+one applicant will wait for everything; a run walking six hundred rows pays it six
+hundred times. Still one budget per applicant, shared by both passes.
+
+Two silent failures in the same function went with it. An exhausted budget said
+nothing, so a panel whose expanders were never *reached* looked exactly like a
+panel that had none. And the refusal counter saw only `verdict.forbidden` and
+re-counted the same controls on every pass, so `navigates-away` and
+`overflow-menu-not-a-disclosure` — the two verdicts 3.9.1 added — never appeared
+at all. Skills also joined Experience and Education in the resolved-but-empty
+markup dump.
+
+### The resume would not open (TASK-0175)
+
+`savedAs: "…\profile-vault-resumes\RAHUL Mishra (1)"`, with the warning *"resume
+file type unknown; saved without an extension"*, on a record whose resume
+otherwise downloaded fine. **The download succeeded and the result was unusable.**
+
+The type was never unknown. `resolveResumeDocumentUrl` fetches the content-type,
+tests it for the single word `json`, and throws it away — while the three sources
+that feed `fileType` all require a literal dot-extension in visible text or in the
+URL path, which a LinkedIn media id never has. The report shows the address:
+`linkedin.com/ambry/?x-li-ambry-ep=…`, no extension anywhere in it.
+
+**The trap, and it is why this is more than plumbing.** Passing the raw header
+into `resumeFileExtension` would have written *wrong* extensions to disk: it
+string-sliced `^[a-z]+/` off the type, which is right for `application/pdf` by
+luck and wrong for everything else — `application/msword` became `.msword`,
+`text/plain` became `.plain`, the docx type and `application/pdf; charset=binary`
+both yielded nothing. The single test that ever covered it used the one input
+that happens to work. So it is a **closed table** now, and a type it does not know
+returns nothing: rule 1 applied to a name written on the recruiter's disk, because
+a `.pdf` that is really a `.docx` is worse than no suffix. `application/octet-stream`
+and every `text/html` variant are deliberately absent.
+
+The header speaks **last**, after all three observed sources, because a name the
+page actually painted is stronger evidence than a header.
+
+### What did not change
+
+The click budget is still **eight**, `trusted: true` still at one site, seventeen
+applicant fields, nine CSV columns byte for byte, six resume verdicts, and host
+permissions. Nothing here reads anything new off the page.
+
+**Rule 20 stands.** The build ID changed, so `dist/` must be reloaded and the
+LinkedIn tab reloaded with it.
+
+
 ## 3.9.2 — "Nothing to report yet", after collecting a whole job
 
 TASK-0172. Reported live, on an account that had just collected applicants

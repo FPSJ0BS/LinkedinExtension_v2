@@ -1,8 +1,27 @@
 # Profile Vault React — Project Status
 
 **Status date:** 2026-08-25
-**Version:** 3.9.2
-**Build ID:** `2026-08-25-react-v3.9.2`
+**Version:** 3.9.3
+**Build ID:** `2026-08-25-react-v3.9.3`
+
+## Latest work — the first live diagnostics report (3.9.3)
+
+3.9.2 made the report retrievable. This is what the first one said, and **it contradicted the fix
+that had just shipped**: `reason: "no-contact-menu"`, `menuClicked: false`, `menuLabel: ""`. Nothing
+was ever pressed — the overflow menu was never found at all, because its accessible label carries a
+screen-reader half (`More options More...`) and the pattern was anchored on the whole of it.
+
+Two rounds of reasoning about markup produced a wrong diagnosis; one download settled it. That is
+the single most useful thing to carry out of this release.
+
+Also read straight out of the same report: `diagnostics.expansions` **absent**, so the section
+expander had never run on a whole-job run — `education: 1` from a panel whose markup held two, the
+second `visually-hidden` behind `Show 2 more educations`. And a resume that downloaded fine and
+saved with **no extension**, because the content-type the server states was being fetched and
+discarded.
+
+**Open live questions** are in [CHECKS.md](CHECKS.md), and item 0 is now *does the report still
+come back* — it is the instrument the other eight are answered with.
 
 ## Latest work — the diagnostics report was unreachable (3.9.2)
 

@@ -1,5 +1,17 @@
 # PHASES.md
 
+## Completed in 3.9.3 — the first live diagnostics report
+
+The report 3.9.2 made retrievable, and it overturned the diagnosis 3.9.1 shipped on. Local checks
+only (rule 20); [CHECKS.md](CHECKS.md) carries the nine-item live list.
+
+| Task | Goal | Status |
+|---|---|---|
+| TASK-0173 | The overflow menu was never found: the label, and three defects behind it | Complete |
+| TASK-0174 | The section expander never ran on a whole-job run | Complete |
+| TASK-0175 | The resume saved with no extension though the server states its type | Complete |
+| TASK-0176 | Release 3.9.3 | Complete |
+
 ## Completed in 3.9.2 — the diagnostics report was unreachable
 
 A reporting bug, fixed on its own because the report is the instrument every remaining live
