@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0182",
+  "name": "A proven applicant row is opened whatever its card says: the denylist tests what a control claims to do, and a card's contents are not a claim",
+  "request": "A proven applicant row is opened whatever its card says: the denylist tests what a control claims to do, and a card's contents are not a claim",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T09:49:18.100Z",
+  "completedAt": "2026-08-25T09:59:39.343Z",
+  "startCommit": "34bcb8384391f5f3d9990c5ad845468d426ff996",
+  "gitRef": "task/TASK-0182",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 625 tests, doc links, 31 build files validated"
+  ],
+  "result": "TASK-0182: every applicant is collected whatever their row says - the denylist tests what a control CLAIMS TO DO, and a card's contents are not a claim. THE LIVE REPORT, with a screenshot of the badge: 'from 25 applicants it skipped 11 and only saved their name, and the one thing they have in common is the green Good fit mark', then 'I want to collect every applicant no matter what the row content is.' The observation was exactly right and it named the cause. selectApplicantRow hands classifyApplicantControl the WHOLE row card's rendered text - name, headline, employer, 'Applied 1 year ago', and the rating badge - and the denylist runs first, before any purpose branch, against text plus aria-label combined. 'good\\s+fit' is on that list because the extension must never PRESS the Good fit rating control, so the card matched a rule written about a BUTTON: refused as forbidden-action, never clicked, and because nothing is read when a row does not open - no panel scan, no contact disclosure, no resume - the run saved the floor record and nothing else. Executed rather than reasoned about: Good fit, Maybe and Not a fit all refuse, unrated allows. The blast radius was wider than the rating - 'Interview Coach' as a headline, 'Offer Solutions' or 'Connect Ltd' as an employer, an inline Message or Save in the row, all refused the same way; textContent also carries visually-hidden text and \\s matches a newline, so a card could be refused over words the recruiter could not see. It also explains the exact ratio: past-tense statuses like Shortlisted and Rejected do NOT match because of the trailing \\b, and only the three rating words do. THE CATEGORY ERROR, which is the fix: every control this extension presses is a button or a menu item whose text IS its own claim about what pressing it does - except the applicant row, which is a card of somebody's data. A row's identity is settled by its ADDRESS, so for a PROVEN row the same words are asked the narrower question, is the label itself the action. TWO PROOFS, and neither alone is enough - each closes the other's gap, which my own adversarial run proved rather than assumed. (1) The address: an a[href] carrying an applicationId, inside the applicant list. An ATS action is something the page DOES - it is a button and has no application address to point at. (2) The label reads like a person rather than a command, via isApplicantRowLabel, the SAME discriminator isApplicantRowLink already applies when enumerating rows, so no second rule was invented. Without (2), 'Send InMail' leaked - two tokens, neither the whole label - and so would 'Schedule interview', 'Move to Rejected' and 'Rate this AI-generated content'; NAME_CONTROL_PHRASE_PATTERN catches every one because an action phrase leads with its verb and a person's card never does. Asked of the text and never of the accessible name, for the reason isApplicantRowLink already records - 'View Komal Sharma's application' leads with a verb and judging it would refuse every row on the page - except when there is no text at all, where the accessible name is the only string there is and an empty label satisfies isApplicantRowLabel by design; that hole let an aria-only 'Send InMail' through and is closed. A PRE-EXISTING RULE-5 HOLE FOUND WHILE PROVING THIS SAFE, and fixed rather than filed: the pattern spelled 'add\\s+note' and the control LinkedIn renders reads 'Add a note', so the one ATS action with an article in its name was the one the denylist let through. Confirmed against HEAD before the change - ALLOWED at the row purpose - and reachable there because a row is the only control with no allowlist of its own to refuse it afterwards. NOTHING ELSE MOVES. The two patterns are compiled from ONE list of action words rather than two hand-kept copies. An unproven row, and every other purpose, is tested exactly as before on the whole of combined, aria-label included, so 'Next: Message' is still a Message control. Verified by execution: 12 applicant shapes that were lost now open, 100 action shapes stay refused as a row by text and by aria-label, all 49 stay refused at every other purpose, and losing either proof puts the card straight back under the strict rule. Seven new tests including a PERMANENT one over the whole action list. No new click - still exactly eight - no selector, no schema, no CSV column, no permission. NO live claim: rule 20 stands and loading dist/ in Chrome is the user's step. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

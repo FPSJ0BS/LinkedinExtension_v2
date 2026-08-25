@@ -8157,3 +8157,227 @@ test("3.9.4: a numbered pager may mark its current page on the item wrapping the
   assert.match(adapter, /note\.reason = note\.numbered > 0/, "the search records why it found nothing");
   assert.match(adapter, /walk\.pagerSearch = pagerSearch;/, "and the walk carries it into the report");
 });
+
+// --------------------------------------------------------------------------
+// 3.9.4 — a proven applicant row is opened whatever its card says.
+//
+// THE LIVE REPORT, with a screenshot of the badge: "from 25 applicants it
+// skipped 11 and only saved their name — the one thing they have in common is
+// the green Good fit mark", followed by "I want to collect every applicant no
+// matter what the row content is."
+// --------------------------------------------------------------------------
+
+/** The address a real applicant row carries, from the reported page. */
+const ROW_HREF =
+  "https://www.linkedin.com/hiring/applicants/?applicationId=25550787924&jobId=4277798308";
+
+/** Classify a row the way `selectApplicantRow` does. */
+function classifyRow(text, ariaLabel = "", href = ROW_HREF, inContainer = true) {
+  return Applicants.classifyApplicantControl({
+    text,
+    ariaLabel,
+    href,
+    purpose: Applicants.CONTROL_PURPOSE.APPLICANT_ROW,
+    inContainer
+  });
+}
+
+/**
+ * Every ATS action this extension may never press, in the shapes a hiring page
+ * actually renders them. Shared by the tests below so the safety list is stated
+ * once and both the row rule and every other purpose are held to all of it.
+ */
+const FORBIDDEN_ACTION_LABELS = [
+  "Reject", "Reject applicant", "Shortlist", "Move to", "Move to Rejected", "Archive",
+  "Message", "Message Gaurang", "Save", "Unsave", "Rate", "Rate this AI-generated content",
+  "Good fit", "Not a fit", "Maybe", "Hire", "Offer", "Interview", "Interview with AI",
+  "Schedule", "Schedule interview", "Add note", "Add a note", "Add a new note",
+  "Send InMail", "Send", "InMail", "Withdraw", "Report", "Block", "Share", "Connect",
+  "Follow", "Endorse", "Invite", "Accept", "Ignore", "Delete", "Remove", "Advance",
+  "Book", "Decline", "Template", "Repost", "Subscribe", "Like", "Comment",
+  "Email applicant", "Try Premium", "Upgrade"
+];
+
+test("3.9.4: a rated applicant's row is opened — the badge is not a claim about what pressing it does", () => {
+  // The eleven. Each of these was refused as `forbidden-action`, never clicked,
+  // and therefore saved with nothing but the name its list row painted: when a
+  // row does not open there is no panel scan, no contact disclosure and no
+  // resume, so the floor record is all that person ever got.
+  const lost = [
+    ["the reported Good fit badge",
+      "Sanya Gupta Business Development Executive Brevity Software Applied 1 year ago Good fit", ""],
+    ["a Maybe badge", "Rahul Mishra Software Engineer Applied 2 months ago Maybe", ""],
+    ["a Not a fit badge", "Neha Singh QA Analyst Applied 3 weeks ago Not a fit", ""],
+    // `textContent` carries visually-hidden text and the aria-label is folded
+    // into the same string, so a card could be refused over words the recruiter
+    // could not even see.
+    ["the badge only in the accessible name",
+      "Komal Sharma QA Analyst Applied 3 days ago", "Komal Sharma, Good fit"],
+    ["no visible text at all, badge in the accessible name", "", "Komal Sharma, Good fit"],
+    // \s matches a newline, so a badge on its own line matched just as well.
+    ["the badge on its own line", "Komal Sharma\nGood fit\nBDE at Brevity\nNoida\nApplied 3 days ago", ""],
+    ["a card with nothing but a name and a badge", "Komal Sharma Good fit", ""],
+    // Not only the rated ones: anyone whose headline or employer happened to
+    // contain a denylisted word was lost the same way, silently.
+    ["a headline containing Interview", "Asha Rao Interview Coach Applied 2 days ago", ""],
+    ["an employer containing Offer", "Asha Rao Designer at Offer Solutions Applied 2 days ago", ""],
+    ["an employer containing Connect", "Asha Rao Designer at Connect Ltd Applied 2 days ago", ""],
+    // A row's accessible name may lead with a verb — `isApplicantRowLink` has
+    // recorded that since 3.7.x — so the row proof is never taken from it while
+    // the card itself has text.
+    ["an accessible name that leads with a verb",
+      "Komal Sharma Designer Good fit", "View Komal Sharma's application"],
+    ["an unrated row, which always worked", "Komal Sharma Recruiter Applied 5 days ago", ""]
+  ];
+  for (const [what, text, ariaLabel] of lost) {
+    const verdict = classifyRow(text, ariaLabel);
+    assert.equal(verdict.allowed, true, `${what} must be opened, not saved as a bare name`);
+    assert.equal(verdict.reason, "applicant-row");
+  }
+});
+
+test("3.9.4: PERMANENT — an ATS action is refused even carrying an applicant's own address", () => {
+  // The whole risk of the change above, and the reason it is two proofs rather
+  // than one. A row is exempted from the substring denylist, so the exemption
+  // must not be reachable by anything that acts on the applicant — not even by
+  // a control sitting inside the list with a real applicationId in its href.
+  //
+  // Do not weaken this test. Rule 5 is what it enforces; if the rule genuinely
+  // changes, CLAUDE.md changes first, in its own task, and this changes with it.
+  for (const label of FORBIDDEN_ACTION_LABELS) {
+    const byText = classifyRow(label);
+    assert.equal(byText.allowed, false, `"${label}" must never be clicked as a row`);
+    assert.equal(byText.forbidden, true, `"${label}" must be refused BY THE DENYLIST, not merely unmatched`);
+
+    // "The denylist always beats the allowlist, including when only the
+    // aria-label matches" — so the same holds with no visible text at all.
+    const byAria = classifyRow("", label);
+    assert.equal(byAria.allowed, false, `"${label}" must never be clicked via its accessible name`);
+    assert.equal(byAria.forbidden, true, `"${label}" must be refused by the denylist via aria-label`);
+  }
+
+  // Two shapes that each defeated ONE of the two proofs on their own, and are
+  // the reason both exist:
+  //
+  //  - "Send InMail" is two tokens, so the whole-label rule sees neither as the
+  //    entire label; `isApplicantRowLabel` catches it because an action phrase
+  //    leads with its verb and a person's card never does.
+  //  - "Reject" is one token with no object, so it reads as a plausible label;
+  //    the whole-label rule catches it.
+  assert.equal(classifyRow("Send InMail").forbidden, true, "a two-word action needs the row-label proof");
+  assert.equal(classifyRow("Reject").forbidden, true, "a one-word action needs the whole-label rule");
+});
+
+test("3.9.4: the row exemption needs BOTH proofs, and neither alone", () => {
+  const card = "Asha Rao Designer Good fit";
+
+  // 1. The ADDRESS. A control that does not navigate to an application is not a
+  //    row, whatever it looks like, and falls back to the strict rule unchanged.
+  assert.equal(classifyRow(card, "", "").allowed, false, "no href: no proof");
+  assert.equal(classifyRow(card, "", "https://www.linkedin.com/hiring/jobs/4277798308/").allowed, false,
+    "a hiring route carrying no applicationId is not an applicant's address");
+  assert.equal(classifyRow(card, "", "https://example.com/?applicationId=1").allowed, false,
+    "an off-site address is refused by parseHiringContext, so it proves nothing");
+
+  // 2. The CONTAINER, exactly as before: proven inside the applicant list.
+  assert.equal(classifyRow(card, "", ROW_HREF, false).allowed, false, "outside the list: refused");
+  // A card carrying a denylisted word is refused by the DENYLIST when it is out
+  // of the list, not by the container check — the denylist is consulted first
+  // and losing the proof puts the card straight back under the strict rule.
+  assert.equal(classifyRow(card, "", ROW_HREF, false).reason, "forbidden-action");
+  // A clean card out of the list is refused by the container check, as always.
+  assert.equal(classifyRow("Asha Rao Designer", "", ROW_HREF, false).reason, "outside-applicant-list");
+
+  // 3. The LABEL must read like a person rather than a command.
+  assert.equal(classifyRow("Move to Rejected").allowed, false,
+    "an action phrase is refused however applicant-shaped its address is");
+
+  // And with all of them satisfied, the card opens.
+  assert.equal(classifyRow(card).allowed, true, "address + container + a person's card: opened");
+});
+
+test("3.9.4: every other purpose still tests the whole string, aria-label included", () => {
+  // The exemption is for the row and the row only. Every other control on this
+  // surface is a button whose text IS its claim, so "Next: Message" stays a
+  // Message control and the widest possible string is still what the denylist
+  // sees. This is what stops the fix leaking sideways.
+  for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
+    if (purpose === Applicants.CONTROL_PURPOSE.APPLICANT_ROW) continue;
+    for (const label of FORBIDDEN_ACTION_LABELS) {
+      const verdict = Applicants.classifyApplicantControl({
+        text: label, purpose, inContainer: true, href: ROW_HREF
+      });
+      assert.equal(verdict.allowed, false, `"${label}" leaked at purpose ${purpose}`);
+      assert.equal(verdict.forbidden, true, `"${label}" must be denylisted at purpose ${purpose}`);
+    }
+  }
+
+  // A denylisted word buried mid-string still refuses a real control — the
+  // behaviour the row exemption deliberately does NOT extend to anything else.
+  const compound = Applicants.classifyApplicantControl({
+    text: "Contact info · Message", purpose: Applicants.CONTROL_PURPOSE.CONTACT, inContainer: true
+  });
+  assert.equal(compound.forbidden, true, "a compound control label still loses to the denylist");
+});
+
+test("3.9.4: `Add a note` is on the denylist, which `add note` never matched", () => {
+  // Found while proving the row exemption safe, and it PREDATES this task: the
+  // pattern spelled `add\s+note` and the control LinkedIn renders reads "Add a
+  // note", so the one ATS action with an article in its name was the one the
+  // denylist let through. It was reachable at the row purpose because a row is
+  // the only control with no allowlist of its own to refuse it afterwards.
+  for (const label of ["Add note", "Add a note", "Add a new note", "Add private note"]) {
+    assert.equal(classifyRow(label).forbidden, true, `"${label}" must be refused`);
+    assert.equal(
+      Applicants.classifyApplicantControl({
+        text: label, purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE, inContainer: true
+      }).forbidden,
+      true,
+      `"${label}" must be refused at every purpose, not only the row`
+    );
+  }
+  // Bounded, so it stays a rule about a control and cannot swallow a sentence:
+  // an applicant's card mentioning notes far from the word "add" is not an
+  // "Add note" control, and a row proves itself by address in any case.
+  assert.equal(
+    Applicants.isProvenApplicantRow({
+      purpose: Applicants.CONTROL_PURPOSE.APPLICANT_ROW, inContainer: true, href: ROW_HREF
+    }),
+    true,
+    "the address is what proves a row, and it is readable on its own"
+  );
+});
+
+test("3.9.4: both denylist patterns are compiled from ONE list of actions", () => {
+  // The row rule and the control rule ask the same words two different
+  // questions. Two hand-kept copies of that list is how a denylist rots, so
+  // they are built from one string — and this asserts the two really do agree.
+  const { FORBIDDEN_ACTION_LABELS: _unused } = {};
+  for (const label of ["reject", "shortlist", "archive", "message", "inmail", "good fit", "maybe", "not a fit"]) {
+    // Whole-label: refused as a row.
+    assert.equal(classifyRow(label).forbidden, true, `"${label}" alone is refused as a row`);
+    // Substring: refused everywhere else, mid-sentence.
+    assert.equal(
+      Applicants.classifyApplicantControl({
+        text: `Please ${label} now`, purpose: Applicants.CONTROL_PURPOSE.CONTACT, inContainer: true
+      }).forbidden,
+      true,
+      `"${label}" is refused mid-string for a control label`
+    );
+  }
+});
+
+test("3.9.4: the adapter hands the row's own address to the classifier", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const at = source.indexOf("async function selectApplicantRow");
+  const select = source.slice(at, source.indexOf("control.element.click()", at));
+  assert.match(select, /purpose: Applicants\.CONTROL_PURPOSE\.APPLICANT_ROW/, "the row is still a gated control");
+  assert.match(select, /href: element\.href \|\| element\.getAttribute\("href"\) \|\| ""/,
+    "the proof is read off the node that will actually be clicked");
+  // Read off `element`, not `row.href`: relocateApplicantRow may have just
+  // re-resolved the row, and the proof has to describe the live node.
+  assert.ok(!/href: row\.href/.test(select), "the proof must describe the node being clicked");
+
+  // Rule 9: this adds no control.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+});

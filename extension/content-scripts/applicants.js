@@ -5299,7 +5299,20 @@
       text: cleanText(element.textContent),
       ariaLabel: cleanText(element.getAttribute("aria-label")),
       purpose: Applicants.CONTROL_PURPOSE.APPLICANT_ROW,
-      inContainer: Boolean(list && list.contains(element))
+      inContainer: Boolean(list && list.contains(element)),
+      // THE PROOF, and the whole of the Good-fit fix on this side.
+      //
+      // The text above is the row card as LinkedIn painted it — the name, the
+      // headline, the employer, when they applied, and the rating badge the
+      // recruiter set. None of that says what pressing the row does; the address
+      // does. Handing it over lets the core tell a person's card from a
+      // control's label, so a rated applicant is opened instead of being
+      // refused as though the card were a Good fit button.
+      //
+      // Read off the live element rather than from `row.href`, because this is
+      // the node that will actually be clicked — `relocateApplicantRow` may have
+      // just re-resolved it — and the proof has to describe that node.
+      href: element.href || element.getAttribute("href") || ""
     });
     if (!verdict.allowed) {
       state.lastSelect = { opened: false, reason: verdict.reason || "row-refused", relocated };

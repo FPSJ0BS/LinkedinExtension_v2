@@ -264,8 +264,72 @@
    * the test runs before any allowlist. A control reading "Message · Contact"
    * is a message button that happens to mention contact, and is refused.
    */
-  const FORBIDDEN_APPLICANT_CONTROL_PATTERN =
-    /\b(?:connect|follow|unfollow|message|inmail|send|email\s+applicant|endorse|recommend|reject|decline|archive|shortlist|move\s+to|advance|hire|hired|offer|interview|schedule|book|rate|rating|good\s+fit|maybe|not\s+a\s+fit|withdraw|invite|invitation|accept|ignore|report|block|share|like|comment|repost|subscribe|save|unsave|add\s+note|template|delete|remove|apply|purchase|upgrade|try\s+premium)\b/i;
+  /**
+   * Every action this extension may never perform, as ONE list of words.
+   *
+   * Written once and compiled into the two patterns below, because the same list
+   * has to answer two different questions and answering them with two
+   * hand-maintained copies is how a denylist rots.
+   */
+  const FORBIDDEN_APPLICANT_ACTIONS =
+    "connect|follow|unfollow|message|inmail|send|email\\s+applicant|endorse|recommend|reject|decline|"
+    + "archive|shortlist|move\\s+to|advance|hire|hired|offer|interview|schedule|book|rate|rating|"
+    + "good\\s+fit|maybe|not\\s+a\\s+fit|withdraw|invite|invitation|accept|ignore|report|block|share|"
+    // `add\s+note` never matched the label LinkedIn actually renders, which is
+    // "Add a note" — so the one ATS action with an article in its name was the
+    // one the denylist let through. Found while proving this change safe, and
+    // fixed here rather than filed: it is a live hole in rule 5, it predates
+    // this task, and the row purpose is where it was reachable because a row is
+    // the only control with no allowlist of its own to catch it afterwards.
+    + "like|comment|repost|subscribe|save|unsave|add\\s+(?:\\w+\\s+){0,2}note|template|delete|remove|apply|purchase|"
+    + "upgrade|try\\s+premium";
+
+  /**
+   * Does this string CONTAIN a forbidden action? The rule for a control's label.
+   *
+   * Unchanged in behaviour and unchanged in reach. Every control this extension
+   * presses is a button or a menu item, and a button's rendered text IS its own
+   * claim about what pressing it does — "Next: Message" is a Message control
+   * whatever else it says, so the whole string is tested and the denylist wins.
+   */
+  const FORBIDDEN_APPLICANT_CONTROL_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_APPLICANT_ACTIONS})\\b`, "i");
+
+  /**
+   * Is this string ITSELF a forbidden action? The rule for a proven row.
+   *
+   * **THE DEFECT THIS EXISTS FOR, reported live with a screenshot of the badge:
+   * "from 25 applicants it skipped 11 and only saved their name — the one thing
+   * they have in common is the green Good fit mark."** Exactly right, and the
+   * cause is a category error rather than a bad pattern.
+   *
+   * `good\s+fit` is on the list above because the extension must never PRESS the
+   * Good fit rating control — that would write to the recruiter's own ATS. But
+   * `selectApplicantRow` hands the classifier the whole row card's rendered
+   * text, and a rated applicant's card contains the words "Good fit". So a card
+   * was matched against a rule written about a button: the row was refused as
+   * `forbidden-action`, it was never clicked, and because nothing is read when a
+   * row does not open — no panel scan, no contact disclosure, no resume — the
+   * run saved the floor record and nothing else. `maybe` and `not a fit` cost
+   * every other rated applicant the same way, and `interview`, `offer`, `rate`
+   * and `connect` cost anyone whose employer or headline happened to contain
+   * one. `textContent` also carries visually-hidden text, and the `aria-label`
+   * is folded into the same string, so a card could be refused over words the
+   * recruiter could not even see.
+   *
+   * **A denylist tests what a control CLAIMS TO DO. A card's contents are not a
+   * claim.** A row is a person's data — their name, their title, their employer,
+   * when they applied, how the recruiter rated them — and none of it says what
+   * pressing the row does. What the row does is settled by its address.
+   *
+   * So for a row whose identity is PROVEN (see `isProvenApplicantRow`) the same
+   * words are asked the narrower question: is the label *itself* the action. An
+   * `<a href="?applicationId=1">Reject</a>` is still refused, because its whole
+   * label is `reject`. A person's card can never be exactly `reject`, which is
+   * what makes this safe to state as the user did: **collect every applicant,
+   * whatever the row content is.**
+   */
+  const FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN =
+    new RegExp(`^\\s*(?:${FORBIDDEN_APPLICANT_ACTIONS})\\s*$`, "i");
 
   /** The applicant's own contact-details disclosure. */
   const APPLICANT_CONTACT_CONTROL_PATTERN =
@@ -510,6 +574,37 @@
   }
 
   /**
+   * Is this control PROVABLY one applicant's own row, rather than something else
+   * that happens to sit inside the applicant list?
+   *
+   * Three facts together, and no one of them alone would do:
+   *
+   *   1. the caller asked for a row — `CONTROL_PURPOSE.APPLICANT_ROW`;
+   *   2. it was enumerated from inside the applicant list, which is the same
+   *      container proof every other purpose on this surface must supply;
+   *   3. **its own address carries an `applicationId`** — it NAVIGATES TO an
+   *      application rather than acting on one.
+   *
+   * The third is the load-bearing one, and it is structural rather than textual,
+   * which is the whole reason it can be trusted where a card's words cannot. An
+   * ATS action — Reject, Shortlist, Move to, Rate, Message — is something the
+   * page DOES; it is a button, and it has no application address to point at. A
+   * row is a link to one person's application on this job, and on this surface
+   * that address is the only thing that identifies an applicant. That is why a
+   * card's contents may be disregarded here and nowhere else.
+   *
+   * A row offering no `applicationId` earns no proof and falls back to the
+   * strict whole-string denylist, unchanged — the multi-UI guide's one rule,
+   * which is to add a reader after the working one rather than replace it.
+   */
+  function isProvenApplicantRow({ purpose = "", inContainer = false, href = "", applicationId = "" } = {}) {
+    if (purpose !== CONTROL_PURPOSE.APPLICANT_ROW) return false;
+    if (!inContainer) return false;
+    if (cleanText(applicationId)) return true;
+    return Boolean(cleanText(parseHiringContext(href).applicationId || ""));
+  }
+
+  /**
    * May this element be clicked, and why.
    *
    * `purpose` says what the caller wants it for; `inContainer` is the caller's
@@ -523,14 +618,67 @@
    * controls are named `1`, `2`, `3` and say nothing about what they are, so
    * that number is what makes "the next page" decidable rather than guessed.
    */
-  function classifyApplicantControl({ text = "", ariaLabel = "", purpose = "", inContainer = false, currentPage = null } = {}) {
+  function classifyApplicantControl({
+    text = "",
+    ariaLabel = "",
+    purpose = "",
+    inContainer = false,
+    currentPage = null,
+    // The control's own address, and the id in it. Supplied for an applicant row
+    // so the denylist can tell a person's CARD from a control's LABEL; ignored
+    // for every other purpose. See `isProvenApplicantRow`.
+    href = "",
+    applicationId = ""
+  } = {}) {
     const label = normalizeLabel(text) || normalizeLabel(ariaLabel);
     const combined = `${normalizeLabel(text)} ${normalizeLabel(ariaLabel)}`.trim();
     const refuse = (reason, forbidden = false) => ({ allowed: false, forbidden, label, purpose, reason });
 
     if (!label) return refuse("no-label");
     // The denylist always wins, and it is consulted first.
-    if (FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(combined)) return refuse("forbidden-action", true);
+    //
+    // WHAT IT IS GIVEN, though, depends on what kind of string the caller has.
+    // Every control on this surface is a button or a menu item whose text is its
+    // own claim about what pressing it does — every control except the applicant
+    // row, which is a CARD of somebody's data. Testing a card for action words
+    // refused every rated applicant on the page ("Good fit", "Maybe", "Not a
+    // fit") and anyone whose employer or headline contained one, and saved each
+    // of them as a bare name. A proven row is therefore asked the narrower
+    // question, and the proof is its address rather than its text. Nothing else
+    // moves: an unproven row, and every other purpose, is tested exactly as
+    // before, on the whole of `combined`, aria-label included.
+    //
+    // TWO PROOFS, and each closes the other one's gap. The address says the
+    // control navigates to an application; `isApplicantRowLabel` says the label
+    // reads like a person rather than a command. Without the second, "Send
+    // InMail" slips through — neither `send` nor `inmail` is the WHOLE label, so
+    // the anchored test below does not catch it, and the same is true of
+    // "Schedule interview", "Move to Rejected" and "Rate this AI-generated
+    // content". `NAME_CONTROL_PHRASE_PATTERN` catches all of them, because an
+    // action phrase LEADS WITH ITS VERB and a person's card never does.
+    //
+    // Asked of the TEXT and never of the accessible name, for the reason
+    // `isApplicantRowLink` already records: "View Komal Sharma's application" is
+    // an entirely plausible accessible name for a row and it leads with a verb,
+    // so judging it would refuse every row on the page rather than one control.
+    // The aria-label is still tested by the anchored rule below, so an
+    // `aria-label="Reject"` is refused whatever the visible text says.
+    // With no visible text there is no CARD, and the accessible name is then the
+    // only string there is — so that is what the proof is taken from. Without
+    // this an `aria-label="Send InMail"` on a control with no text of its own
+    // was proven a row (an empty label satisfies `isApplicantRowLabel` by
+    // design, so that a row whose text has not painted yet is not thrown away)
+    // and then slipped past the anchored rule, which sees two tokens rather than
+    // one whole label. Judged this way it reads as the command it is and falls
+    // to the strict rule, while `aria-label="Komal Sharma, Good fit"` on the
+    // same empty-text row still reads as a person and still opens.
+    const provenRow = isProvenApplicantRow({ purpose, inContainer, href, applicationId })
+      && isApplicantRowLabel(cleanText(text) ? text : ariaLabel);
+    const forbidden = provenRow
+      ? FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(text))
+        || FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(ariaLabel))
+      : FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(combined);
+    if (forbidden) return refuse("forbidden-action", true);
 
     if (purpose === CONTROL_PURPOSE.CONTACT) {
       if (!APPLICANT_CONTACT_CONTROL_PATTERN.test(label)) return refuse("not-a-contact-control");
@@ -3910,6 +4058,7 @@
     // the run
     RUN_STATE, createRunState, nextRunStep, isCollectedApplicant, createCollectedIndex,
     isApplicantRowLabel, applicantRowKey, unprocessedApplicantRows, createApplicantRoster,
+    isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop,
     MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
