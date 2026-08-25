@@ -16,6 +16,7 @@ import {
   type ReconciliationReport,
   type SelectionScope
 } from "../messages.js";
+import { NavBar } from "./nav.js";
 import { type StatusKind } from "./types.js";
 
 const React: any = (globalThis as any).React;
@@ -565,6 +566,7 @@ class ImportApp extends React.Component {
 
     return (
       <main className="import-shell">
+        <NavBar current="import" />
         <header className="import-header">
           <h1>My LinkedIn Connections</h1>
         </header>

@@ -29,12 +29,14 @@ for (const [source, destination] of [
   ["pages/dashboard.html", "dashboard.html"],
   ["pages/import.html", "import.html"],
   ["pages/applicants.html", "applicants.html"],
+  ["pages/messages.html", "messages.html"],
   // The shared visual layer is still emitted first for all four pages.
   ["styles/theme.css", "theme.css"],
   ["styles/popup.css", "popup.css"],
   ["styles/dashboard.css", "dashboard.css"],
   ["styles/import.css", "import.css"],
   ["styles/applicants.css", "applicants.css"],
+  ["styles/messages.css", "messages.css"],
   ["content-scripts/content.js", "content.js"],
   ["content-scripts/connections.js", "connections.js"],
   ["content-scripts/applicants.js", "applicants.js"]

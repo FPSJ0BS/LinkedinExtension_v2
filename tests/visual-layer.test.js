@@ -29,7 +29,7 @@ const sourcePath = (file) => file.endsWith(".css")
     : resolve(root, file);
 const read = (file) => readFile(sourcePath(file), "utf8");
 
-const SHEETS = ["theme.css", "popup.css", "dashboard.css", "import.css", "applicants.css"];
+const SHEETS = ["theme.css", "popup.css", "dashboard.css", "import.css", "applicants.css", "messages.css"];
 
 /**
  * The declarations only.
@@ -83,6 +83,27 @@ const PAGES = [
     // emits them any more and their rules went with it — leaving them listed
     // would assert a stylesheet must keep rules for a class no page can produce.
     dynamic: ["error", "success", "selected"]
+  },
+  {
+    // The Messages page (3.13.0). Its own sheet, plus the shared layer.
+    tsx: "src/react/messages-dashboard.tsx",
+    sheets: ["theme.css", "messages.css"],
+    // Only the status-banner kinds, which are interpolated. The page's
+    // ready/blocked states are spelled as whole class names in a ternary
+    // (`msg-var-unavailable` and friends), so the scanner already sees them and
+    // listing them here would demand rules for names nothing emits.
+    dynamic: ["error", "success", "info"]
+  },
+  {
+    // The shared navigation is a component rather than a page, and it is listed
+    // here for the reason the pages are: it emits classes, and a class with no
+    // rule is invisible markup. Its styles live in the shared layer because
+    // every page renders it, so `theme.css` is the only sheet it may rely on —
+    // which this entry is what proves. A rule added to one page's sheet instead
+    // would style the bar on that page alone, and this would catch it.
+    tsx: "src/react/nav.tsx",
+    sheets: ["theme.css"],
+    dynamic: []
   }
 ];
 
@@ -118,12 +139,12 @@ test("every class the UI emits has a rule on the page that loads it", async () =
   }
 });
 
-test("all four surfaces load one shared visual layer, first", async () => {
+test("all five surfaces load one shared visual layer, first", async () => {
   // The state this replaced: four stylesheets each carrying their own copy of
   // the same primitives and disagreeing about every one of them — four page
   // backgrounds, three inks, two font stacks, and two files defining the SAME
   // custom property names with different values.
-  for (const page of ["popup.html", "dashboard.html", "import.html", "applicants.html"]) {
+  for (const page of ["popup.html", "dashboard.html", "import.html", "applicants.html", "messages.html"]) {
     const html = await read(page);
     assert.match(html, /<link rel="stylesheet" href="theme\.css" \/>/, `${page} must load the shared layer`);
     assert.ok(
@@ -137,7 +158,7 @@ test("all four surfaces load one shared visual layer, first", async () => {
   assert.match(theme, /--pv-accent:/);
   assert.match(theme, /--pv-hairline:/);
 
-  for (const sheet of ["popup.css", "dashboard.css", "import.css", "applicants.css"]) {
+  for (const sheet of ["popup.css", "dashboard.css", "import.css", "applicants.css", "messages.css"]) {
     const css = await read(sheet);
     assert.ok(!/^\s*:root\s*\{/m.test(css), `${sheet} must not open a second :root token block`);
     assert.ok(!/font-family:/.test(css), `${sheet} must not name a second font stack`);

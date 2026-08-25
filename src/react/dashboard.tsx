@@ -8,6 +8,7 @@ import {
   normalizeProfile,
   stripSharedContactValues
 } from "../profile-utils.js";
+import { NavBar } from "./nav.js";
 import { ARRAY_FIELDS, EMPTY_PROFILE, type ProfileRecord, type StatusKind } from "./types.js";
 
 const React: any = (globalThis as any).React;
@@ -646,6 +647,7 @@ class DashboardApp extends React.Component {
 
     return (
       <main className="dashboard-shell">
+        <NavBar current="dashboard" />
         <header className="dashboard-header">
           <div>
             <h1>Saved Profiles</h1>

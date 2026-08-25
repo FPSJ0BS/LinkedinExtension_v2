@@ -1,0 +1,542 @@
+/*
+ * Messages.
+ *
+ * The shared layer is [theme.css](theme.css) — tokens, buttons, fields,
+ * notices, panels and the label voice — and this page loads it first, so
+ * everything here either belongs only to this screen or deliberately narrows
+ * something the shared layer already provides.
+ *
+ * What this screen has that no other one does: two columns that have to stay
+ * readable side by side, a palette of insertable variables, and a list of real
+ * people each carrying a rendered message and a verdict on it. The verdict is
+ * the reason the page exists, so it is the loudest thing on it. Ready is quiet
+ * and blocked is not, and a blocked card is tinted along its whole edge rather
+ * than marked with a pill somebody can skim past.
+ *
+ * No :root block, no second font stack and no remote resource: all three are
+ * the shared layer's job, and Manifest V3's CSP forbids the last one outright.
+ */
+
+.dashboard-shell {
+  padding: 28px 28px 48px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 22px;
+}
+.dashboard-header p { margin: 7px 0 0; color: var(--pv-ink-3); font-size: 13px; max-width: 74ch; }
+
+.message { margin-bottom: 14px; }
+
+/* ------------------------------------------------------------------ layout */
+/*
+ * Writing on the left, consequences on the right.
+ *
+ * They are one task, not two screens: every keystroke on the left changes the
+ * verdict on the right, and a person who has to scroll between the two stops
+ * reading the half they cannot see. Below 1080px the columns stack, writing
+ * first, because the message has to exist before it can be checked.
+ */
+.msg-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.msg-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+@media (max-width: 1080px) {
+  .msg-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ------------------------------------------------------------------ panels */
+.msg-panel {
+  padding: 18px 20px 20px;
+  min-width: 0;
+}
+.msg-panel h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 660;
+  color: var(--pv-ink);
+}
+
+.msg-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.msg-empty {
+  margin: 0;
+  padding: 14px 0;
+  color: var(--pv-ink-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.msg-note {
+  margin: 12px 0 0;
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.msg-count {
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An inline token, so a variable named inside a sentence reads as something to
+   type rather than as prose. */
+.msg-code {
+  padding: 1px 5px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- templates */
+.msg-template-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.msg-template-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 10px;
+  border-radius: var(--pv-r-sm);
+}
+.msg-template-item:hover { background: var(--pv-row-hover); }
+
+.msg-template-item-current {
+  background: var(--pv-row-selected);
+  box-shadow: inset 2px 0 0 var(--pv-accent);
+}
+
+.msg-template-name {
+  justify-self: start;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.msg-template-meta {
+  grid-column: 1;
+  color: var(--pv-ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-template-actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ editor */
+.msg-field {
+  display: block;
+  margin-bottom: 12px;
+}
+.msg-field .pv-label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.msg-input,
+.msg-textarea,
+.msg-select,
+.msg-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.msg-textarea {
+  min-height: 190px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.msg-counter {
+  margin: 0 0 12px;
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-dirty {
+  color: var(--pv-warn);
+  font-size: 11px;
+  font-weight: 660;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/*
+ * A refusal shows against the field that caused it.
+ *
+ * The store throws ONE error carrying every problem, precisely so a person
+ * fixing three things is not told about them one save at a time.
+ */
+.msg-problems {
+  list-style: none;
+  margin: -6px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-problem {
+  padding: 7px 10px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-bad-soft);
+  color: var(--pv-bad);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.msg-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* ----------------------------------------------------------------- palette */
+.msg-palette {
+  margin: 4px 0 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pv-hairline);
+}
+
+.msg-palette-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.msg-var {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 9px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  transition: box-shadow var(--pv-fast) var(--pv-ease), background var(--pv-fast) var(--pv-ease);
+}
+.msg-var:hover {
+  background: var(--pv-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--pv-accent-ring);
+}
+
+.msg-var-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--pv-ink-2);
+}
+
+.msg-var-token {
+  font-size: 10.5px;
+  color: var(--pv-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A variable this audience can never fill is still insertable, because the
+ * fallback form makes it perfectly usable, but it says what it is before it is
+ * pressed. That is cheaper than finding out from a blocked list of two hundred
+ * people.
+ */
+.msg-var-unavailable {
+  background: var(--pv-warn-soft);
+  box-shadow: inset 0 0 0 1px rgba(140, 96, 20, 0.22);
+}
+.msg-var-unavailable .msg-var-label,
+.msg-var-unavailable .msg-var-token { color: var(--pv-warn); }
+
+.msg-hint {
+  margin: 10px 0 0;
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ---------------------------------------------------------------- audience */
+.msg-audience {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.msg-audience-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 11px 13px;
+  border-radius: var(--pv-r-sm);
+  background: var(--pv-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  text-align: left;
+}
+.msg-audience-option:hover { box-shadow: inset 0 0 0 1px var(--pv-accent-ring); }
+
+.msg-audience-option-current {
+  background: var(--pv-accent-soft);
+  box-shadow: inset 0 0 0 2px var(--pv-accent);
+}
+
+.msg-audience-label {
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--pv-ink);
+}
+
+.msg-audience-count {
+  font-size: 11px;
+  color: var(--pv-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The block this page exists for.
+ *
+ * A variable that is merely empty for one person is a per-person problem, and
+ * the recipient list reports it there. THIS is the other kind: a variable that
+ * cannot resolve for anybody in the chosen audience, ever, because a connection
+ * has no job application. Getting that wrong costs the whole audience rather
+ * than one card, so it is stated once, at the top, in the loudest tone the
+ * shared layer has.
+ */
+.msg-audience-warning {
+  margin-top: 14px;
+}
+.msg-audience-warning p { margin: 8px 0 0; }
+
+.msg-audience-warning-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-unavailable-note {
+  margin: 14px 0 0;
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ----------------------------------------------------------------- verdict */
+/*
+ * Ready and blocked are the only two states, and they are deliberately not the
+ * same weight: ready is an absence of trouble and blocked is a refusal, so one
+ * is a quiet pill and the other is a filled one.
+ */
+.msg-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--pv-r-pill);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.msg-status-ready {
+  background: var(--pv-good-soft);
+  color: var(--pv-good);
+}
+
+.msg-status-blocked {
+  background: var(--pv-bad-fill);
+  color: var(--pv-surface);
+}
+
+.msg-reasons {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-reason {
+  padding: 6px 9px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-bad-soft);
+  color: var(--pv-bad);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.msg-warnings {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-warning {
+  padding: 6px 9px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-warn-soft);
+  color: var(--pv-warn);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* ----------------------------------------------------------------- preview */
+.msg-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/*
+ * The rendered message, exactly as it renders.
+ *
+ * `pre-wrap` because the newlines the recruiter typed are part of the message,
+ * and because a variable that resolved to nothing must show as the gap it is.
+ * Nothing is ever substituted into that gap: a placeholder that reads like a
+ * real value is the one failure this whole page is built to prevent.
+ */
+.msg-preview-text {
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: var(--pv-r-sm);
+  background: var(--pv-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  color: var(--pv-ink-2);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------------- recipients */
+.msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.msg-toolbar .msg-search { flex: 1; min-width: 180px; }
+
+.msg-recipients {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.msg-recipient {
+  padding: 12px 14px;
+  border-radius: var(--pv-r-sm);
+  background: var(--pv-bg-2);
+  box-shadow: inset 3px 0 0 var(--pv-good), inset 0 0 0 1px var(--pv-hairline);
+}
+
+/* Tinted along the whole edge rather than marked with something skimmable. */
+.msg-recipient-blocked {
+  box-shadow: inset 3px 0 0 var(--pv-bad), inset 0 0 0 1px var(--pv-hairline);
+}
+
+.msg-recipient-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.msg-recipient-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.msg-recipient-name {
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--pv-ink);
+}
+
+.msg-recipient-sub {
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.msg-recipient-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.msg-recipient-body {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: var(--pv-r-xs);
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline);
+  color: var(--pv-ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-more {
+  margin-top: 12px;
+  align-self: flex-start;
+}

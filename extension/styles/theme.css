@@ -595,6 +595,118 @@ label.inline {
 .tally.preferred { background: var(--pv-accent-soft); color: var(--pv-accent-deep); }
 
 /* ========================================================================= */
+/* The shared page navigation                                                */
+/* ========================================================================= */
+
+/*
+ * One bar, on every page, and it lives HERE rather than in a per-page sheet.
+ *
+ * The four surfaces each used to grow their own way of getting to the others —
+ * Saved Profiles carried two "Open ..." buttons in its header, the importer
+ * carried none — so which pages existed depended on which page you happened to
+ * be standing on. `src/react/nav.tsx` holds the one list; this holds the one
+ * look. A per-page copy of these rules would be the same drift in the styling
+ * that the list itself was written to end, and theme.css is the sheet all four
+ * pages load first, so this is the only place the bar can be styled once.
+ *
+ * Nothing new is invented below: the surface, the hairline, the radius and the
+ * shadow are the same ones `.toolbar` uses, the brand is the label voice from
+ * the typography section, and the current page is marked in the accent — which
+ * is precisely what the token comment at the top of this file reserves the
+ * accent for ("focus, links, progress, the current page").
+ *
+ * There is no `prefers-color-scheme` block anywhere in this file and `:root`
+ * declares `color-scheme: light`, so the bar follows suit and is light only.
+ * When a dark palette lands it will land as a token swap and this section will
+ * inherit it, because every colour here is a token.
+ */
+
+.pv-nav {
+  display: flex;
+  align-items: center;
+  /* Both halves wrap. A nav that scrolls sideways on a narrow window is the
+     same defect the table's card breakpoint exists to remove, and the list is
+     short enough to simply fold onto a second line instead. */
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--pv-r);
+  background: var(--pv-surface);
+  box-shadow: inset 0 0 0 1px var(--pv-hairline), var(--pv-shadow-1);
+}
+
+/* The product's name, in the label voice — quieter than any destination, so it
+   reads as a title rather than as a fifth link. */
+.pv-nav-brand {
+  font-size: 10.5px;
+  font-weight: 680;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--pv-ink-3);
+  white-space: nowrap;
+  padding-right: 14px;
+  box-shadow: inset -1px 0 0 var(--pv-hairline);
+}
+
+.pv-nav-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  /* A flex item will not shrink below its content by default, which is how a
+     row of links pushes a window wider than itself. */
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pv-nav-item { display: block; min-width: 0; }
+
+.pv-nav-link {
+  display: block;
+  padding: 6px 12px;
+  border-radius: var(--pv-r-pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  /* The global `a` rule paints every link in the accent. Here the accent is
+     spent on the ONE link that is the current page, so the rest are ink. */
+  color: var(--pv-ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    color var(--pv-fast) var(--pv-ease),
+    background-color var(--pv-fast) var(--pv-ease),
+    box-shadow var(--pv-fast) var(--pv-ease);
+}
+
+/* Neutral on hover, deliberately: a tinted hover and a tinted current page look
+   alike at a glance, and the mark has to survive being pointed at. */
+.pv-nav-link:hover {
+  background: rgba(27, 26, 32, 0.055);
+  color: var(--pv-ink);
+}
+
+/*
+ * Where you are.
+ *
+ * Three signals, not one: the accent fill, the ring around it, and a heavier
+ * weight — so the mark is still there for a reader who cannot see the colour.
+ * `nav.tsx` also sets `aria-current="page"`, which is the signal that does not
+ * depend on this stylesheet at all.
+ */
+.pv-nav-link-current,
+.pv-nav-link-current:hover {
+  background: var(--pv-accent-soft);
+  color: var(--pv-accent-deep);
+  box-shadow: inset 0 0 0 1px var(--pv-accent-ring);
+  font-weight: 700;
+  cursor: default;
+}
+
+/* ========================================================================= */
 /* Tables                                                                    */
 /* ========================================================================= */
 

@@ -552,6 +552,8 @@ class PopupApp extends React.Component {
 
   openApplicants = () => chrome.tabs.create({ url: chrome.runtime.getURL("applicants.html") });
 
+  openMessages = () => chrome.tabs.create({ url: chrome.runtime.getURL("messages.html") });
+
   renderQuality(profile: ProfileRecord) {
     const missing = profile.missingFields?.length ? ` Missing: ${profile.missingFields.join(", ")}.` : "";
     const partial = profile.partialSections?.length ? ` Partial: ${profile.partialSections.join(", ")}.` : "";
@@ -574,6 +576,7 @@ class PopupApp extends React.Component {
             <button className="secondary" type="button" onClick={this.openImport}>Connections Collector</button>
             <button className="secondary" type="button" onClick={this.openApplicants}>Job Applicants</button>
             <button className="secondary" type="button" onClick={this.openDashboard}>Saved Profiles</button>
+            <button className="secondary" type="button" onClick={this.openMessages}>Messages</button>
           </div>
         </header>
 

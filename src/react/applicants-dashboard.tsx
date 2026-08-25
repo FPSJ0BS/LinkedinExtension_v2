@@ -2,6 +2,7 @@ import { clearApplicants, deleteApplicant, getAllApplicants } from "../applicant
 import { APPLICANT_TABLE_COLUMNS, downloadApplicantCsv, formatEducation, formatExperience, formatQualification, formatScreening, resumeFile, resumeLink, resumeSummary } from "../applicant-csv.js";
 import { downloadJson } from "../csv.js";
 import { APPLICANT_MESSAGES, STOP_ALL, type ApplicantRecord } from "../messages.js";
+import { NavBar } from "./nav.js";
 import { type StatusKind } from "./types.js";
 
 // React 16.0.0 is a global, not an import, and it has no hooks, no Fragments
@@ -648,6 +649,7 @@ class ApplicantsApp extends React.Component {
 
     return (
       <main className="dashboard-shell">
+        <NavBar current="applicants" />
         <header className="dashboard-header">
           <div>
             <h1>Job Applicants</h1>

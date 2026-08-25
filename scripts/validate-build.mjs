@@ -11,17 +11,20 @@ const required = new Set([
   "dashboard.html",
   "import.html",
   "applicants.html",
+  "messages.html",
   "theme.css",
   "popup.css",
   "dashboard.css",
   "import.css",
   "applicants.css",
+  "messages.css",
   "vendor/react.production.min.js",
   "vendor/react-dom.production.min.js",
   "src/react/popup.js",
   "src/react/dashboard.js",
   "src/react/import-dashboard.js",
   "src/react/applicants-dashboard.js",
+  "src/react/messages-dashboard.js",
   "src/applicant-csv.js",
   "src/extraction-core.js",
   "src/connections-core.js",
@@ -42,7 +45,7 @@ const required = new Set([
 for (const script of manifest.content_scripts || []) for (const file of script.js || []) required.add(file);
 for (const file of required) await access(path.join(dist, file));
 
-for (const htmlFile of ["popup.html", "dashboard.html", "import.html", "applicants.html"]) {
+for (const htmlFile of ["popup.html", "dashboard.html", "import.html", "applicants.html", "messages.html"]) {
   const html = await readFile(path.join(dist, htmlFile), "utf8");
   if (!html.includes("vendor/react.production.min.js") || !html.includes("vendor/react-dom.production.min.js")) {
     throw new Error(`${htmlFile} does not load the local React runtime.`);
@@ -53,7 +56,8 @@ const REACT_ENTRIES = [
   "src/react/popup.js",
   "src/react/dashboard.js",
   "src/react/import-dashboard.js",
-  "src/react/applicants-dashboard.js"
+  "src/react/applicants-dashboard.js",
+  "src/react/messages-dashboard.js"
 ];
 for (const entry of REACT_ENTRIES) {
   const source = await readFile(path.join(dist, entry), "utf8");
@@ -68,7 +72,7 @@ for (const dependency of ["./queue-db.js", "./import-queue-core.js", "./db.js", 
 }
 
 // No extension page or module may pull React from a remote origin.
-for (const file of ["popup.html", "dashboard.html", "import.html", "applicants.html"]) {
+for (const file of ["popup.html", "dashboard.html", "import.html", "applicants.html", "messages.html"]) {
   const html = await readFile(path.join(dist, file), "utf8");
   if (/src=["']https?:\/\//i.test(html)) throw new Error(`${file} loads a remote script, which Manifest V3 CSP forbids.`);
 }

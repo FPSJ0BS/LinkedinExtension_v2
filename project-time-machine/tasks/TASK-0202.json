@@ -1,0 +1,106 @@
+{
+  "schema": 2,
+  "id": "TASK-0202",
+  "name": "Messaging phase 1-4: navbar, Messages page, template cores, recipient sources",
+  "request": "Messaging phase 1-4: navbar, Messages page, template cores, recipient sources",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:58:30.443Z",
+  "completedAt": "2026-08-25T23:19:24.688Z",
+  "startCommit": "eb69aef861690f2c52f52855aa877808567dc53c",
+  "gitRef": "task/TASK-0202",
+  "files": [
+    {
+      "change": "added",
+      "path": "extension/pages/messages.html",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "extension/styles/messages.css",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "extension/styles/theme.css"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/validate-build.mjs"
+    },
+    {
+      "change": "added",
+      "path": "src/message-queue-core.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/message-recipients.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/message-templates-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/import-dashboard.tsx"
+    },
+    {
+      "change": "added",
+      "path": "src/react/messages-dashboard.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "src/react/nav.tsx",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "added",
+      "path": "src/template-store.js"
+    },
+    {
+      "change": "added",
+      "path": "tests/message-queue-core.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/message-recipients.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "added",
+      "path": "tests/message-templates-core.test.js"
+    },
+    {
+      "change": "added",
+      "path": "tests/template-store.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 700 tests (0 fail), doc links, build validation (34 files, 5 React entry points); built dist/applicants.js re-verified at eight clicks, unchanged"
+  ],
+  "result": "TASK-0202: a Messages page, a navigation bar on every page, and the queue engine that will drive the walk - none of which touches LinkedIn yet. THE NAVIGATION, asked for directly: one list of pages in src/react/nav.tsx, rendered by all four dashboards, so a page cannot be present in one menu and missing from another - which is exactly what happens when four pages each hand-write their own links. The current page is marked with aria-current as well as a class, the same standard rule 7 holds LinkedIn's markup to, and the popup gained a Messages button beside its three existing ones. THE MESSAGES PAGE is new and self-contained: template CRUD over chrome.storage.local, a custom message and a saved template sharing one editor, the variable palette, a live preview against a real chosen person, an audience picker for applicants or connections, and a per-recipient READY/BLOCKED list with copy and export. It composes and previews and NOTHING ELSE - no send, no insert, no queue, no LinkedIn tab - which was a scope limit given to the agent that built it and verified afterwards by grep: the built dist/applicants.js still carries EIGHT clicks, unchanged. THE PIECE THAT MATTERS MOST is the one nobody asked for. {{job_title}}, {{job_company}} and {{applied_at}} come from a job APPLICATION, and a connection has never applied to anything - so pointed at connections those variables are empty for every person alive, and a template using them would silently drop a clause from every message. validateTemplateForAudience refuses that template BEFORE a single card renders, and names the repair, which is a fallback: {{job_title|the role}}. It is rule 1 one level up - not a missing value for this person, but a value that cannot exist for this audience. The agent that built it drew a distinction I had not specified and was right to: current_role and current_company are NOT on that list, because 3.6.0 retired them from the stored profile, which makes them a per-person blank a later reader could fill rather than a structural impossibility. THE QUEUE ENGINE is pure - no DOM, no chrome, no clock, no timers - because the questions worth being certain about are can it message somebody twice, can it skip somebody silently, and does it always stop, and all three are answerable in Node and none of them is answerable by watching a live account. Seventeen tests, and the load-bearing one asserts there is NO transition out of awaiting-send that the queue can take by itself: not a timeout, not a retry, not the planner. markSent and markSkipped are both reports of something a human did. If a future change adds an automatic escape from that state, that change has made the extension send messages and that test is where it fails. Also driven rather than argued: forty recipients walked end to end terminate with every one in exactly one terminal state; only one person is ever open, so a message cannot land in the previous person's composer; a duplicate id across two concatenated lists is one recipient; Stop is immediate, final, and records the person left mid-flight rather than abandoning them; the gap is measured from the user's last send and cannot be configured to zero. THE TEST FILE LIST WAS THE REAL WORK OF INTEGRATION: tests/visual-layer.test.js enumerates pages, sheets and dynamic class names by hand, so a new page it does not know about ships completely unvalidated. The Messages page and nav.tsx are now entries in it, messages.css joined the CSP and stray-tag guards, and 'all four surfaces' became five. My first attempt at its dynamic list invented two class names the page does not emit, which the test caught by demanding rules for them - the check working exactly as intended, against me. VERIFIED: npm run check passed - typecheck, build, 700 tests 0 fail (48 restored template-core tests, 26 recipient tests, 17 queue tests), doc links, and validate-build now covering 34 build files and 5 React entry points. NOT DONE, DELIBERATELY: nothing here opens a composer or messages anyone. The queue engine has no adapter yet and rule 5 is untouched - the click budget is still eight and Message is still forbidden everywhere. That work is the next phase and it needs its own rule amendment. NO LIVE CLAIM: rule 20 stands. Files: src/react/nav.tsx, src/react/messages-dashboard.tsx, src/message-queue-core.js, src/message-recipients.js, src/message-templates-core.js, src/template-store.js, extension/pages/messages.html, extension/styles/messages.css, extension/styles/theme.css, the four dashboards, popup.tsx, scripts/build.mjs, scripts/validate-build.mjs, and five test files."
+}
