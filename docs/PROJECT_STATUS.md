@@ -1,8 +1,32 @@
 # Profile Vault React — Project Status
 
-**Status date:** 2026-08-08
-**Version:** 3.9.0
-**Build ID:** `2026-08-08-react-v3.9.0`
+**Status date:** 2026-08-25
+**Version:** 3.9.1
+**Build ID:** `2026-08-25-react-v3.9.1`
+
+## Latest work — the first live capture (3.9.1)
+
+Screenshots of a real recruiter account arrived after 3.9.0 shipped and contradicted three
+assumptions at once — all three in one screenshot, and none of them in a reader:
+
+- **`Show 5 more experiences` was being refused.** The expander pattern required more/all/details/full
+  to follow the verb immediately, so every counted expander LinkedIn renders was rejected. The
+  Experience section is the sole source of `current_role`, `current_company` and `total_experience`,
+  which have been empty for four consecutive releases. This is the fix most likely to show at once.
+- **`See full profile` was being pressed**, which leaves the applicants page — and the panel, the
+  resume card and the list pager only exist there.
+- **`More...` was being pressed as a section expander**, opening the ATS action menu and leaving it
+  open. That same menu is where the contact details live on this layout, so it is now opened
+  deliberately and for that one purpose: the **eighth click**, with CLAUDE.md rule 5 amended in the
+  same task.
+
+Separately, LinkedIn's virus-scan state now has a name. It was being recorded as `UNAVAILABLE` — a
+wrong value for somebody who does have a CV — and is now `NOT_ATTEMPTED` with a warning on the
+record, which the merge preserves. And the descriptor check no longer downloads the whole document
+to read its content-type.
+
+**Open live questions** are in [CHECKS.md](CHECKS.md). The one to watch hardest: this is the first
+release that opens an ATS menu, and nothing inside it may ever be activated.
 
 ## Latest work — the same person, whichever way the page is drawn (3.9.0)
 

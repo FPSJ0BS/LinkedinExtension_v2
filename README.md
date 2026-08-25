@@ -175,7 +175,7 @@ profiles across, and what each thing that can go wrong means.
 5. Click **Load unpacked**.
 6. Select the project's `dist` folder.
 7. Reload any LinkedIn tab that was already open.
-8. Open the extension and confirm the build ID contains `react-v3.9.0`.
+8. Open the extension and confirm the build ID contains `react-v3.9.1`.
 
 [SETUP.md](docs/SETUP.md) is the long form of both routes: prerequisites, what each check stage
 proves, how to confirm the load is real, where your data lives, and what to do when a step fails.

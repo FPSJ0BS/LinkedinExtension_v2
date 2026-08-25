@@ -1,0 +1,74 @@
+{
+  "schema": 2,
+  "id": "TASK-0171",
+  "name": "Release 3.9.1: build ID, version and the docs for the three live fixes",
+  "request": "Release 3.9.1: build ID, version and the docs for the three live fixes",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T07:16:42.063Z",
+  "completedAt": "2026-08-25T07:21:02.033Z",
+  "startCommit": "b1b7e4d8fdc4e24f7bf53148a3e56272c5b4adc6",
+  "gitRef": "task/TASK-0171",
+  "files": [
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PHASES.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/SETUP.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 546 tests passed, docs:check 18 files, validate 31 build files; dist/build-meta.json reads 3.9.1 / 2026-08-25-react-v3.9.1 and all five injected scripts carry the new build ID"
+  ],
+  "result": "Release 3.9.1 and document what the first live capture actually changed. Build ID 2026-08-08-react-v3.9.0 to 2026-08-25-react-v3.9.1 in all six files (content.js, connections.js, applicants.js, background.ts, popup.tsx, build.mjs) and version 3.9.0 to 3.9.1 in manifest.json, build.mjs and package.json - the three that the Phase 12 consistency test holds to one value. THE BUMP IS NOT OPTIONAL HERE and the reason is worth restating: the build ID exists for the worker/popup/content-script handshake, so a mismatch does not fail in npm run check - it fails at RUNTIME on the user's machine by refusing to inject, with a symptom that looks exactly like a LinkedIn change. The previous three tasks changed all three content scripts. Docs: a CHANGELOG entry that states plainly that this is the first release driven by screenshots of a real recruiter account rather than by reasoning about markup, and what that revealed - 3.9.0 spent twelve phases making the READERS survive an unseen layout, and when the layout arrived what it broke was the CLICK POLICY, three controls in a single screenshot. A CHECKS.md section with the per-task numbers (531 to 536 to 541 to 546), the five intermediate failures - four of which were tripwires from earlier phases doing their job, including the core DOM check catching the bare token 'document' and the click-ownership tripwire catching the eighth click, which is exactly what it exists for - and an eight-item live checklist whose first entry is that the CURRENT UI still works and whose hardest entry is that nothing inside the newly-opened ATS menu may ever be activated. A four-row PHASES table, and PROJECT_STATUS at 3.9.1 with the three contradicted assumptions named. FIXED FOUR STALE LIVE-FACING REFERENCES rather than leaving them to fail for a user: README step 8 told a contributor to confirm build ID react-v3.9.0, which would now fail for everyone who ran it - the same line was fixed for the same reason one release ago - and SETUP.md carried the old card version, the old build ID and the old zip filenames in the table a user checks their install against. Historical references in the CHANGELOG, the CHECKS history and the earlier PHASES and PROJECT_STATUS sections were deliberately left alone: those are records of what was true. Verified dist/ carries 2026-08-25-react-v3.9.1 in all five injected scripts and build-meta.json reads 3.9.1. RULE 20 STANDS: none of TASK-0168 through TASK-0171 has been run against a live LinkedIn page from this side, and loading dist/ in Chrome is the user's step, always."
+}

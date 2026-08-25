@@ -1,5 +1,79 @@
 # CHECKS.md
 
+## 3.9.1 — the first live capture (TASK-0168 … TASK-0171)
+
+Executed in this environment on 2026-08-25. **Real results only.** The trigger for this release was
+user-supplied screenshots of a live recruiter account; every fix below was verified against local
+checks, and **not one of them has been verified against a live LinkedIn page** (rule 20).
+
+### Per task
+
+| Task | `npm run check` | Tests | Note |
+|---|---|---|---|
+| TASK-0168 expander policy | passed | 531 → **536** | Policy only; no click site moved |
+| TASK-0169 contact via the More menu | passed | 536 → **541** | Click budget 7 → **8**, deliberately |
+| TASK-0170 scan state + HEAD probe | passed | 541 → **546** | No click added, no new resume status |
+| TASK-0171 release 3.9.1 | passed | **546** | Build ID and version in all nine places |
+
+Final: typecheck clean · build ok · **546 passed / 0 failed** · docs:check 18 files · validate 31
+build files. `dist/build-meta.json` reads `3.9.1` / `2026-08-25-react-v3.9.1`.
+
+### Intermediate failures worth recording
+
+Five, and four of them were tripwires from earlier phases doing exactly their job:
+
+1. **The core's DOM check caught the new scan pattern.** `RESUME_SCANNING_PATTERN` contained the bare
+   token `document`, which the core's own "nothing here may touch the DOM" assertion greps for after
+   stripping comments. Fixed the way that file's own note prescribes — `documents?`, whose trailing
+   `s` denies the `\b`. The check cannot tell a word in an allowlist from a reference to the global,
+   and that is the correct trade.
+2. **The resume step's exit count went 4 → 5.** The scan checkpoint is a fifth way out of
+   `collectResume`, and the tripwire asserts every exit closes the viewer. Raised deliberately, with
+   the new exit closing the viewer like the other four.
+3. **The click-ownership tripwire caught the eighth click** — which is what it is for. Raised to
+   eight *with a named owner* (`openContactMenu`) rather than by bumping a number, because the whole
+   point of that test is that a redistributed click must not pass.
+4. **Two assertions in my own new tests were wrong**, not the code: a refusal reason fell through to
+   the generic `not-a-disclosure-control` because the specific checks ran after the allowlist (fixed
+   by reordering, which also improved what `diagnostics.expansions` reports), and a test referenced
+   `APPLICANT_TABLE_COLUMNS` without importing it.
+5. **A pre-existing test was passing vacuously**, found by accident. See below.
+
+### The vacuous assertion, found by a line-ending change
+
+Normalising `applicants.js` to the repo's canonical LF made
+`"a scroll box inside the panel is offered as well as every ancestor"` fail. It had been **passing
+for the wrong reason on every CRLF checkout**: its slice ended on
+`source.indexOf("/**\n   * The container that actually moves")`, a marker with a bare `\n` that never
+matches a CRLF file, so `indexOf` returned `-1` and `slice(start, -1)` ran to the end of the file.
+Every assertion in it was matching some other part of the source.
+
+It was hiding a real staleness: the constant it asserts on was renamed `COLUMN_TEXT_SHARE` →
+`COLUMN_TEXT_FLOOR` in 3.9.0 and the test was never updated. The marker is now newline-agnostic, the
+slice asserts its own length, and the assertion names the constant that exists. **This is the same
+defect class the Phase 11 slices were fixed for; this one was missed then.**
+
+### What is still not verified — the live checklist
+
+Every item is the user's step. Load `dist/` at `chrome://extensions`, reload the extension **and**
+the LinkedIn tab (the build ID changed, so an injected script is replaced).
+
+1. **The current UI still works.** First, always — local checks passed while `current_role` was empty
+   for four consecutive releases.
+2. `Show 5 more experiences` is now pressed, and `current_role` / `current_company` /
+   `total_experience` come back **filled**. This is the fix most likely to show immediately.
+3. `See full profile` is **never** pressed — the tab stays on the applicants page for a whole run.
+4. Contact details are collected on the captured layout, via `More...`, and the menu is **closed
+   afterwards**. Check `diagnostics.contact.viaMenu` and `menuClosed`.
+5. Nothing in that menu is ever activated — no applicant is rated, rejected, archived or messaged.
+   **This is the one to watch hardest**, because it is the first release that opens an ATS menu.
+6. Resumes download past the second applicant. If the scan notice still appears, the record now says
+   so: a warning on the applicant and `diagnostics.resume.reason === "still-scanning"`.
+7. A re-run of a scanned applicant does not erase a resume an earlier run saved.
+8. Stop still ends everything; an interrupted run still restarts; the CSV is unchanged.
+
+If a column still reads wrong on any layout, press **Capture Current Applicant UI**. It names nobody.
+
 ## Documentation - the setup guide (TASK-0166)
 
 Executed in this environment on 2026-08-25. Doc-only: no production code, no test and no version

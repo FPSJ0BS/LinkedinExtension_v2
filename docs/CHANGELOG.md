@@ -1,5 +1,107 @@
 # CHANGELOG.md
 
+## 3.9.1 — the first live capture, and the three things it contradicted
+
+TASK-0168 to TASK-0171. **This is the first release driven by screenshots of a real recruiter
+account rather than by reasoning about markup**, and it is worth saying plainly what that changed:
+3.9.0 spent twelve phases making the applicant readers survive a layout nobody had seen. The layout
+arrived, and what it broke was not a reader. It was the **click policy** — three controls the
+classifier had an opinion about and got wrong, all three visible in a single screenshot.
+
+### The expander was wrong about three controls at once (TASK-0168)
+
+`DISCLOSURE_CONTROL_PATTERN` decides what `expandCollapsedSections` may press, and that function
+walks **every** button and anchor in the applicant panel and presses whatever the classifier allows.
+
+| Control in the capture | Old verdict | Why that was wrong |
+|---|---|---|
+| `Show 5 more experiences` | **refused** | The pattern required more/all/details/full to follow the verb *immediately*, so a count in between refused it. LinkedIn writes the count whenever it has one. |
+| `See full profile` | **allowed** | It matched `see\s+full`. Pressing it **leaves the applicants page** — and the panel, the resume card and the list pager only exist there. |
+| `More...` | **allowed** | It matched the bare `more` alternative, so the walk opened the **ATS action menu** — Reject, Move to, Archive, Rate — and left it open over the panel it was about to read. |
+
+The first is not a cosmetic miss. `current_role`, `current_company` and `total_experience` are
+derived from the Experience section and from nothing else, and [CHECKS.md](CHECKS.md) records all
+three as empty for four consecutive releases. Every counted expander on the page was being refused.
+
+An optional count is now allowed between the verb and the noun. Navigation is refused by
+`APPLICANT_NAVIGATION_CONTROL_PATTERN` — as a *navigation* control, not a forbidden one, because it
+sends nothing and changes nothing and calling it forbidden would be a false statement on the record.
+Overflow menus are refused by `APPLICANT_MENU_OPENER_PATTERN`, anchored on the whole label. Both
+refusals run **before** the allowlist so each reports its own reason into `diagnostics.expansions`
+instead of falling through to a generic "not a disclosure".
+
+### The contact details were behind that same menu (TASK-0169)
+
+The captured panel offers **no Contact control at all**. Its buttons are `Rate as`, `Message` and
+`More...`, and the address and the number are behind the last of them — so `findControl(panel,
+CONTACT)` returned nothing and every applicant on that layout saved an empty email and an empty
+mobile. Silently: `no-contact-control` is a diagnostics field, not a warning.
+
+**This is the eighth click, and CLAUDE.md rule 5 was amended in the same task** — the order the rule
+itself requires. The fallback is *ordered*, which is the same safety argument every phase of 3.9.0
+rested on: the panel's own Contact control is still looked for first, and the menu is opened only
+where that found nothing, so a layout that already works cannot change.
+
+Why opening it is safe is a different question from why it is needed. Opening a menu renders controls
+LinkedIn is already offering this recruiter: it sends nothing, changes nothing, and Escape undoes it.
+**What makes it safe is what may be pressed next** — only an item this same classifier allows for
+`CONTACT`, so the denylist still refuses every ATS action sitting in that menu. Two shapes are
+handled and the first costs no further click: a menu that *prints* the details is read where it
+stands. `carriesContactDetails` is deliberately stricter than `findContactDisclosure`'s own test,
+which accepts the word "contact" appearing anywhere — every action menu contains that word. The menu
+is closed on all five exits, including the success path, where the disclosure's own Escape does not
+reliably take its parent with it. `trusted: true` is still at exactly one site (rule 2).
+
+### "Scanning resume for viruses", and a document fetched four times (TASK-0170)
+
+Reported live: the first two applicants of a run downloaded their resumes and every one after them
+did not, with LinkedIn's own notice — *"Scanning resume for viruses. Please refresh the page now."* —
+where the resume card had been. By hand on the same account, the file opened normally.
+
+**Nothing here establishes the cause, and this entry does not claim to** (rule 20). Two things were
+provably wrong regardless.
+
+**The state had no name.** Nothing in the tree contained that string. Worse, LinkedIn takes the whole
+resume card away while scanning, control included, so `collectResume` reached its
+`no-resume-control` branch and wrote `UNAVAILABLE` — a *wrong* value for somebody who does have a CV,
+and rule 1 says a blank beats a wrong one. It is now recognised, waited out once for a bounded five
+seconds at two checkpoints, and if it has not cleared, recorded as `NOT_ATTEMPTED` with a warning on
+the record. `NOT_ATTEMPTED` rather than a new status because `mergeApplicantRecord` already reads it
+as "I did not look" and keeps what was stored — asserted end to end through the merge, so a re-run
+that hits the scan cannot destroy a file an earlier run saved. The wait presses nothing and reloads
+nothing: every way of hurrying the scan is either a forbidden control or a page reload that would
+tear down the list, the pager and the panel the walk is standing on.
+
+**The document was going down the wire four times per applicant.**
+`resolveResumeDocumentUrl` needed only the content-type and was doing a full credentialed `GET` of
+the CV to learn it — reading the body on one branch and discarding it on every other. That is once
+there, again through `chrome.downloads`, on top of the viewer's own fetch and the copy its Download
+control pulls. A recruiter doing this by hand transfers it once or twice. It is a `HEAD` now, with
+the old `GET` kept as the fallback for a CDN that refuses `HEAD` or answers without a type, and the
+descriptor branch going back for the bytes it genuinely needs. **Removing a redundant credentialed
+GET of somebody's CV is worth doing whether or not it turns out to be the cause.**
+
+### Found while working, and fixed rather than left
+
+Normalising `applicants.js` to the repo's canonical LF exposed a test that had been passing
+**vacuously on every CRLF checkout**: a source slice ended on a marker containing a bare `\n`, which
+never matched, so `indexOf` returned `-1`, `slice(start, -1)` ran to the end of the file, and its
+assertions were matching some other part of the source entirely. It had been hiding a constant
+renamed in 3.9.0. The marker is now newline-agnostic and the slice asserts its own length.
+
+Also restored `docs/SETUP.md`, deleted from the working tree between releases.
+
+### What did not change
+
+Seventeen applicant fields, nine CSV columns byte for byte, six resume verdicts, the three throwing
+identity checks in `extractApplicant`, `trusted: true` at one site, and host permissions.
+The click budget went **seven to eight**, deliberately and visibly: all sixteen budget assertions
+were raised, and the Phase 1 ownership tripwire — which exists precisely to catch a click that moves
+house — gained `openContactMenu` as a **named eighth owner** rather than absorbing it.
+
+**Rule 20 stands.** None of this has been run against a live LinkedIn page from this side. The build
+ID changed, so `dist/` must be reloaded and the LinkedIn tab reloaded with it.
+
 ## 3.9.0 — the same person, whichever way the page is drawn
 
 Twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),

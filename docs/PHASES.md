@@ -1,5 +1,18 @@
 # PHASES.md
 
+## Completed in 3.9.1 — the first live capture
+
+Driven by screenshots of a real recruiter account rather than by reasoning about markup. What the
+capture broke was not a reader but the **click policy**. Local checks only — the live half is a user
+step (rule 20), and [CHECKS.md](CHECKS.md) carries the eight-item list.
+
+| Task | Goal | Status |
+|---|---|---|
+| TASK-0168 | The expander: accept counted expanders, refuse navigation and overflow menus | Complete |
+| TASK-0169 | Contact details from behind `More...`; the eighth click, with rule 5 amended | Complete |
+| TASK-0170 | Name the virus-scan state; stop fetching each document four times | Complete |
+| TASK-0171 | Release 3.9.1 | Complete |
+
 ## Completed in 3.9.0 — multiple LinkedIn applicant UI support
 
 The twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),
