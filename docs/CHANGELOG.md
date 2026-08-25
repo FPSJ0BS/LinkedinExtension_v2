@@ -1,5 +1,103 @@
 # CHANGELOG.md
 
+## 3.12.0 — opening an applicant is what starts the scan
+
+**The observation that rewrote the mechanism, and it came from watching a run rather than from
+reading a DOM.** The recruiter: *"when i go to profiles with the error once and then reload the page
+all the applicant i have been to load the resume but the profiles i have not opend even once in a
+page does not load the resume"*.
+
+That sentence names the cause, and it is not the one 3.10.0 wrote down. **Opening an applicant is
+what STARTS LinkedIn's virus scan.** The notice is not "this page has gone stale" — it is "your
+visit has just kicked a scan off, come back for the result", which is exactly what LinkedIn's own
+words ask for. A reload therefore rescues precisely the applicants already *visited*, and can do
+nothing whatever for the ones ahead, whose files have never been scanned because nobody has asked
+for them yet.
+
+**Which is why every reload strategy so far under-performed, and why the more responsive they were
+made the worse they got.** 3.11.0 answered the notice where it appeared: reload at applicant 40,
+rescue the 40 behind, then walk into 41 onward stone cold and begin again — paying a reload each
+time, and re-walking from page one each time, because the lease carries no pager position. The
+symptom that ended it was reported live: *"for at least first 100 in my case after it whenever the
+warning came the pages were not reloading"*. That was `MAX_RESUME_RELOADS`, a job-wide lifetime
+ceiling of twelve, reached somewhere around applicant 100 and never reset for the rest of the run.
+
+### What the run does now
+
+**Prime the whole list, reload once, harvest — and repeat while it is working.**
+
+1. The walk **never reloads mid-list**. It runs to the end, and every applicant it opens is a scan
+   it starts. `planResumeRecovery` answers `continue` for any phase that is not `finished`, swept
+   over every other input.
+2. After **three consecutive notices** the page — not the file — is what is answering, so the walk
+   **stops waiting**. `waitForResumeScan` gives each notice five seconds to clear on its own, which
+   is right for one unlucky file and is over half an hour across four hundred of them, spent waiting
+   on a scan the waiting visit has only just started. From there it simply primes.
+3. At the end of the list, if anyone is still owed a file, **one reload**. By then the earliest
+   scans have had the entire rest of the walk to finish.
+4. The successor run goes back for exactly the applicants still owed — they were never marked
+   collected, which is unchanged and is what makes the whole thing work — and the cycle repeats
+   **while it keeps recovering files**.
+
+### The bound is productivity, and there is no count anywhere
+
+The instruction: *"the reload or any other fix u make should not stop at any number of applicants i
+want it to work for every profile"*.
+
+Every bound this replaces was a count, and every one of them eventually became the reason a long run
+went quiet — twelve reloads for the whole job, two per applicant, three fruitless in a row measured
+against a counter that a reload destroyed. A count cannot know how long the list is, so on a long
+enough list it always stops early. `MAX_RESUME_RELOADS`, `MAX_APPLICANT_RESUME_RELOADS` and
+`MAX_FRUITLESS_RESUME_RELOADS` are **gone**, not raised.
+
+What replaces them is `MAX_UNPRODUCTIVE_RESUME_CYCLES = 2`. A cycle is one walk plus one reload; it
+is productive when it leaves **strictly fewer** applicants owing a resume than the cycle before it.
+A productive cycle resets the counter, so the job carries on for as long as it keeps recovering
+files — fifty applicants or five thousand, it makes no difference.
+
+**It still terminates, and the argument is short enough to check.** A productive cycle strictly
+decreases a non-negative integer, so there can only be finitely many of them; unproductive cycles
+are capped at two consecutive. Total reloads can never exceed the number ever owed, plus two. The
+bound scales with the work instead of pretending to know its size in advance, which is the one
+property every fixed ceiling here was missing. Driven end to end in a test rather than argued:
+**5000 applicants recovering one per cycle clears completely**, and a hopeless page costs **two**
+reloads and stops.
+
+**Two rather than one**, because a single unproductive cycle is a real possibility on a slow scan —
+and that exact over-sharpness, at one, is what made 3.10.0 abandon a whole job after one unlucky
+reload. That was the recruiter's *"at last it was not even reloading, it kept going through 6
+profiles"*.
+
+### The measurement had to move onto the lease
+
+`resumeOwedAtLastReload` is the only number the comparison needs and the only one that cannot live
+in a document, because the reload destroys it. `readResumeReloadState` is where the comparison is
+written — once — and `noteResumeReload` is handed the verdict rather than recomputing it, so the
+number the policy decided on is the number that gets persisted. Recomputing at the write would let
+the two drift, silently and only on a live page.
+
+**A missing lease reports a full run of unproductive cycles.** There is no ceiling left to report as
+spent, so the refusal has to be expressed as the thing that actually stops recovery — and it must be
+expressed, or a page with no lease reloads for ever on an answer nothing can ever write down. It
+costs nothing real: `claimAutoRun` refuses a job it has no record of, so that reload was never going
+to resume anything.
+
+**The payment proof is kept and re-pointed.** The reload happens only when the cycle count is proven
+to have risen by exactly one, read back from what was persisted rather than echoed from the request.
+A reload nothing counted is a reload that can repeat for ever.
+
+### Unchanged, and deliberately
+
+A run that still owes resumes reports **INTERRUPTED**, never COMPLETED — `claimAutoRun` will not
+re-arm a completed job, so the reloaded page would come back to an instruction that had already been
+cancelled. `canReload: false` — a hidden tab (rule 9), a Stop (rule 12), a challenge, or a worker
+that did not answer — yields `continue`, never `give-up`, because a page that was never allowed to
+try has settled nothing. **No new click**: the built artifact still carries nine, one
+`location.reload()` inside the recovery branch, and zero navigations. No selector, schema, CSV column
+or permission was touched.
+
+**Rule 20 stands.** None of this has run against a live LinkedIn page.
+
 ## 3.11.0 — the reload arrives on the applicant that asked for it
 
 TASK-0192. **"Scanning resume for viruses. Please refresh the page now."** for

@@ -1,0 +1,68 @@
+{
+  "schema": 2,
+  "id": "TASK-0194",
+  "name": "Prime the whole list, reload once, harvest until a cycle recovers nothing",
+  "request": "Prime the whole list, reload once, harvest until a cycle recovers nothing",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T22:04:39.327Z",
+  "completedAt": "2026-08-25T22:22:33.183Z",
+  "startCommit": "31864053be22d33784f49c4e52a7ef13c4da5312",
+  "gitRef": "task/TASK-0194",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build 3.12.0, 678 tests 0 fail, doc links across 19 files, validate 31 build files",
+    "built dist verified: 9 clicks unchanged, 1 location.reload, 0 navigations, retired constants absent, manifest 3.12.0",
+    "persisted cycle driven end to end: 5000 applicants recovering one per cycle clears to 0 owed; hopeless page stops after 2 reloads"
+  ],
+  "result": "3.12.0/TASK-0194: opening an applicant is what STARTS LinkedIn's virus scan, so the run primes the whole list, reloads once, and harvests while it keeps working. THE OBSERVATION THAT REWROTE THIS came from the recruiter watching a run rather than from reading a DOM: 'when i go to profiles with the error once and then reload the page all the applicant i have been to load the resume but the profiles i have not opend even once in a page does not load the resume'. The notice is not 'this page has gone stale', it is 'your visit just kicked a scan off, come back for the result' - so a reload rescues exactly the applicants already VISITED and can do nothing for the ones ahead, whose files have never been scanned because nobody has asked for them. That is why every reload strategy so far under-performed and why the more responsive they were made the worse they got: 3.11.0 reloaded at applicant 40, rescued the 40 behind, walked into 41 stone cold and began again - paying a reload each time and re-walking from page one each time, because the lease carries no pager position. WHAT THE RUN DOES NOW: the walk NEVER reloads mid-list (planResumeRecovery answers continue for any phase that is not finished, swept over every other input); after three consecutive notices the page rather than the file is what is answering, so waitForResumeScan stops waiting - five seconds per notice is over half an hour across four hundred applicants, spent waiting on a scan the waiting visit has only just started; at the end of the list, if anyone is owed, ONE reload, by which time the earliest scans have had the whole walk to finish; the successor goes back for exactly the applicants still owed and the cycle repeats while it keeps recovering. THE BOUND IS PRODUCTIVITY AND THERE IS NO COUNT ANYWHERE, which is the instruction: 'should not stop at any number of applicants i want it to work for every profile'. MAX_RESUME_RELOADS (12, job-wide, the thing that went quiet around applicant 100 in the live report), MAX_APPLICANT_RESUME_RELOADS and MAX_FRUITLESS_RESUME_RELOADS are GONE, not raised - a count cannot know how long the list is, so on a long enough list it always stops early. MAX_UNPRODUCTIVE_RESUME_CYCLES=2 replaces all three: a cycle is productive when it leaves STRICTLY fewer owing than the one before, a productive cycle resets the counter, and two unproductive in a row end it. IT STILL TERMINATES and the argument is checkable: a productive cycle strictly decreases a non-negative integer so there are finitely many; unproductive are capped at two; total reloads never exceed the number ever owed plus two. DRIVEN, NOT ARGUED: 5000 applicants recovering one per cycle clears completely, a hopeless page costs TWO reloads and stops, a page that stalls after two good cycles keeps everything they won. Two rather than one because one is what made 3.10.0 abandon a whole job after a single unlucky reload - the 'it kept going through 6 profiles' report. THE MEASUREMENT MOVED ONTO THE LEASE: resumeOwedAtLastReload is the only number the comparison needs and the only one a reload destroys; readResumeReloadState is where the comparison is written ONCE and noteResumeReload is handed the verdict rather than recomputing it, because two copies drift silently and only on a live page. A missing lease reports a full run of unproductive cycles - there is no ceiling left to report as spent, so the refusal has to be expressed as the thing that actually stops recovery. The payment proof is kept and re-pointed at the cycle count, read back from what was PERSISTED rather than echoed from the request. THREE THINGS THE TESTS CAUGHT THAT READING HAD NOT: a new guard that sliced the source between two markers where the end marker occurs EARLIER in the file, so the slice ran backwards and every must-not-contain assertion passed against an empty string; Infinity failing closed (correct - the test was wrong, not the code); and undefined being absence rather than junk, so it takes the default parameter. UNCHANGED: a run still owing resumes reports INTERRUPTED never COMPLETED; canReload:false yields continue never give-up, because a page never allowed to try has settled nothing; NO NEW CLICK - the built artifact carries 9 clicks, 1 location.reload in the recovery branch, 0 navigations; no selector, schema, CSV column or permission touched. NO LIVE CLAIM: rule 20 stands. Files: src/applicants-core.js, src/background.ts, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, docs/CHECKS.md, + version bump in eight places."
+}
