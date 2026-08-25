@@ -1,0 +1,32 @@
+{
+  "schema": 2,
+  "id": "TASK-0173",
+  "name": "Contact details behind More are never read: the opener is returned as the menu",
+  "request": "Contact details behind More are never read: the opener is returned as the menu",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:00:46.237Z",
+  "completedAt": "2026-08-25T08:08:31.548Z",
+  "startCommit": "edb1febdfaa60dab5eacf2287d2e34be60328db6",
+  "gitRef": "task/TASK-0173",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 555 tests passed / 0 failed (550 before), docs:check 18 files, validate 31 build files",
+    "ran the real classifier over the observed menu shapes and the eight expander labels: every menu shape returns contact-menu, every expander still returns expand-section",
+    "executed the EMAIL_PATTERN lastIndex hazard directly: four identical .test() calls return true, false, true, false"
+  ],
+  "result": "TASK-0173: contact details behind More... were never collected, and the first live diagnostics report said why. THE GUESS WAS WRONG. I had hypothesised that the opener was being returned as its own menu; the report says reason='no-contact-menu', menuClicked=false, menuLabel='' - nothing was ever pressed, because findControl(panel, CONTACT_MENU) found no opener at all. THE LABEL WAS THE DEFECT, and the same report carries the proof in LinkedIn's own markup, captured from that applicant's Experience card: <span class='a11y-text'>Years employed from 2025 to Present</span> beside <span aria-hidden='true'>2025 - Present</span>. Every control is built that way, so an overflow menu's accessible text reads 'More options More...' and the anchored ^more\\.\\.\\.$ matches none of it. APPLICANT_MENU_OPENER_WITHIN_PATTERN now matches within the label, and every alternative requires either the ellipsis glyph or the words actions/options/menu precisely so it CANNOT collide with a section expander - verified by running the real classifier over 'Show 2 more educations', 'Show all 12 skills', 'See more', 'Show more', 'Show 5 more experiences', 'Expand' and 'View all details', all still expand-section, while 'More...', 'More options More...' and 'More actions' are still refused as overflow-menu-not-a-disclosure and 'See full profile' is still navigates-away. Both branches consult one function so the menu route and the expander refusal can never disagree. THREE FURTHER DEFECTS behind that one, each able on its own to empty the columns once the opener IS found, all confirmed and fixed here because finding the opener is what makes them reachable. (a) Core.EMAIL_PATTERN is /gi and .test() on a GLOBAL regex advances lastIndex, so it answers true, false, true, false to four identical questions - EXECUTED, not reasoned about, and asserted that way in the test. Two readers asked it directly, so a menu that printed an applicant's details was recognised for one applicant and refused for the next with nothing in the diagnostics to say why. Both now go through containsEmailAddress, which builds a fresh non-global copy per call - the idiom the core's capture path already uses, evidence the hazard was known in one place and missed in these two. (b) The opener can no longer be returned as its own menu: it carries aria-expanded, flips it to true when pressed, so it matches [aria-expanded='true'] in CONTACT_SURFACE_SELECTOR, was not expanded before the press so it passes the freshness test, and precedes its own dropdown in document order. It and its ancestors are refused outright, candidates are now searched in the opener's own surroundings FIRST (aria-controls target, next sibling, menu surfaces in the wrapper and the wrapper above) with the page-wide sweep kept last so nothing that worked can stop working, and a candidate must be USEFUL rather than merely present - a menu that prints the details wins immediately, otherwise one that offers a contact item, and a bare menu only when it has actually rendered items so an empty shell mid-render is never mistaken for an empty menu. (c) 'It appeared when we pressed' now means newly VISIBLE, not newly created: contactSurfaceCandidates returns hidden elements too, so a dropdown LinkedIn had already mounted and merely hidden was in the pre-click sample from the start and refused forever by the binding meant to protect it. The leak that binding exists to stop is the previous applicant's disclosure still ON SCREEN, which is visible by definition and so is still caught. The aria-controls binding also gained target.contains(element), matching findContactDisclosure's in both directions. AND A PROBE so the next report cannot be ambiguous: probePanelContactControls records every control on the panel with what the classifier makes of it as both a contact control and a menu opener, bounded at 40, with inContainer:false exactly as probePanelDownloadControls uses it - no verdict it produces can ever come back allowed, so no path can be tempted to press what it finds. It is recorded on the one path that could not explain itself, and it distinguishes 'the label never matched' from 'the label matched but the control is outside the panel', which are different problems with different fixes. diagnostics.contact.closed and controlsSeen are now declared in the initialiser so an early return reports false rather than omitting the key. NO NEW CLICK: still exactly eight, the menu still opened once, trusted:true still at one site, seventeen fields and nine CSV columns unchanged. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

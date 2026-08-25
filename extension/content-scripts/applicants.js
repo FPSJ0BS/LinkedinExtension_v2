@@ -2641,6 +2641,27 @@
     "[class*='dropdown__content'],[class*='contact']," +
     "[role='tooltip'],[role='region'][aria-label],details[open],[aria-expanded='true']";
 
+  /**
+   * Does this text contain an address?
+   *
+   * **`Core.EMAIL_PATTERN` is a `/gi` regex, and `.test()` on a GLOBAL regex
+   * advances its own `lastIndex` and answers `false` on the very next call.**
+   * Two places asked it directly - the disclosure finder and
+   * `carriesContactDetails` - so the answer alternated true, false, true,
+   * false down a run: the menu that printed an applicant's details was
+   * recognised for one applicant and refused for the next, with nothing in the
+   * diagnostics to say why. Executed, not reasoned about: four calls with the
+   * same input return true, false, true, false.
+   *
+   * A fresh non-global copy per call, which is the idiom the capture path in
+   * `applicants-core.js` already uses for the same reason - evidence the hazard
+   * was known in one place and missed in these two.
+   */
+  function containsEmailAddress(text) {
+    if (!text || !Core?.EMAIL_PATTERN) return false;
+    return new RegExp(Core.EMAIL_PATTERN.source, "i").test(text);
+  }
+
   /** Every candidate surface on the page right now, visible or not. */
   function contactSurfaceCandidates() {
     return [...document.querySelectorAll(CONTACT_SURFACE_SELECTOR)];
@@ -2688,7 +2709,7 @@
       const text = cleanText(element.innerText || "");
       if (!text) continue;
       const carries =
-        Core.EMAIL_PATTERN?.test(text) ||
+        containsEmailAddress(text) ||
         Boolean(element.querySelector("a[href^='mailto:'],a[href^='tel:']")) ||
         (/contact info|email|phone|mobile/i.test(text) && element !== panel);
       if (!carries) continue;
@@ -2720,7 +2741,107 @@
     if (element.querySelector("a[href^='mailto:'],a[href^='tel:']")) return true;
     const text = cleanText(element.innerText || "");
     if (!text) return false;
-    return Boolean(Core.EMAIL_PATTERN?.test(text)) || /\b(?:phone|mobile|email)\b\s*[:·]/i.test(text);
+    return containsEmailAddress(text) || /\b(?:phone|mobile|email)\b\s*[:·]/i.test(text);
+  }
+
+  /** A surface that is a menu or a dialog in its own right, by role or shape. */
+  const CONTACT_MENU_SURFACE_SELECTOR =
+    "[role='menu'],[role='dialog'],[aria-modal='true'],dialog[open],.artdeco-modal," +
+    "[class*='dropdown__content']";
+
+  function isContactMenuSurface(element) {
+    return Boolean(element?.matches?.(CONTACT_MENU_SURFACE_SELECTOR));
+  }
+
+  /** Has it actually painted anything yet, or is it an empty shell mid-render? */
+  function hasRenderedItems(element) {
+    return Boolean(element?.querySelector?.("[role='menuitem'],button,a,li"));
+  }
+
+  /**
+   * Where an opener's own menu can be, in the order it is worth looking.
+   *
+   * The generic page-wide sweep is still here and still last, so nothing that
+   * worked before can stop working; what is new is that the opener's own
+   * surroundings are asked FIRST. A dropdown is mounted beside the control that
+   * opens it far more often than it is portalled to the end of the body, and
+   * asking the page first is how a button ended up beating its own menu on
+   * document order.
+   */
+  function contactMenuCandidates(opener) {
+    const found = [];
+    const push = (element) => {
+      if (element instanceof Element && !found.includes(element)) found.push(element);
+    };
+
+    // 1. What it says it controls. The strongest statement available.
+    for (const id of (opener.getAttribute("aria-controls") || "").split(/\s+/)) {
+      if (id) push(document.getElementById(id));
+    }
+    // 2. Its own next sibling, and the menu surfaces inside its wrapper and the
+    //    wrapper above that - structure, not a generated class name (rule 7).
+    push(opener.nextElementSibling);
+    for (const scope of [opener.parentElement, opener.parentElement?.parentElement]) {
+      if (!scope) continue;
+      for (const element of scope.querySelectorAll(CONTACT_MENU_SURFACE_SELECTOR)) push(element);
+    }
+    // 3. And finally the page, exactly as before.
+    for (const element of contactSurfaceCandidates()) push(element);
+    return found;
+  }
+
+  /**
+   * Is this surface THIS opener's, rather than one left over from the applicant
+   * before? The binding rule 9j rests on, unchanged in intent and widened only
+   * where it was refusing the right answer.
+   */
+  function boundToContactOpener(element, opener, before) {
+    const named = (opener.getAttribute("aria-controls") || "").split(/\s+/).filter(Boolean)[0];
+    const target = named ? document.getElementById(named) : null;
+    if (target && (element === target || element.contains(target) || target.contains(element))) return true;
+    // Inside the opener's own card: this applicant's by construction, which is
+    // rule 2's exception verbatim and a stronger tie than freshness.
+    if (opener.parentElement?.contains(element)) return true;
+    // Or it appeared when we pressed. `before` is sampled VISIBLE-only, so a
+    // dropdown that existed in the DOM all along but was hidden still counts as
+    // having appeared - which is the shape LinkedIn actually ships, and the
+    // reason a correct dropdown could be refused outright.
+    if (Array.isArray(before) && !before.includes(element)) return true;
+    return false;
+  }
+
+  /**
+   * Every control the panel offers, with what the classifier makes of each.
+   * Observation only - `inContainer: false`, so no verdict here can ever come
+   * back `allowed` and no path can be tempted to press what this finds. The
+   * same device as `probePanelDownloadControls`, for the same reason.
+   *
+   * This exists because the live report said `no-contact-menu` with an empty
+   * `menuLabel`, and "the button was never recognised" and "the button is not
+   * in the panel" are different problems with different fixes. A control whose
+   * label matched but whose container proof refused it reports
+   * `outside-applicant-panel`, which is precisely that distinction.
+   */
+  function probePanelContactControls(root, { limit = 40 } = {}) {
+    if (!root) return [];
+    const seen = [];
+    for (const element of root.querySelectorAll("button,a,[role='button'],[role='menuitem']")) {
+      if (seen.length >= limit) break;
+      if (!isVisible(element)) continue;
+      const text = cleanText(element.textContent);
+      const ariaLabel = cleanText(element.getAttribute("aria-label"));
+      if (!text && !ariaLabel) continue;
+      const reasonFor = (purpose) => Applicants.classifyApplicantControl({
+        text, ariaLabel, purpose, inContainer: false
+      }).reason;
+      seen.push({
+        label: (text || ariaLabel).slice(0, 80),
+        aria: ariaLabel.slice(0, 80),
+        contact: reasonFor(Applicants.CONTROL_PURPOSE.CONTACT),
+        menu: reasonFor(Applicants.CONTROL_PURPOSE.CONTACT_MENU)
+      });
+    }
+    return seen;
   }
 
   /**
@@ -2767,19 +2888,35 @@
 
     const list = applicantList();
     const menu = await waitFor(() => {
-      for (const element of contactSurfaceCandidates()) {
+      let fallback = null;
+      for (const element of contactMenuCandidates(opener.element)) {
         if (!isVisible(element)) continue;
         // Never the recruiter's own list, whatever it contains.
         if (list && (element.contains(list) || element === list)) continue;
-        // It has to be new. That is the whole binding.
-        if (Array.isArray(before) && before.includes(element)) continue;
-        // ...and it has to be the thing this opener controls, or contain it.
-        const named = opener.element.getAttribute("aria-controls") || "";
-        const target = named ? document.getElementById(named.split(/\s+/)[0]) : null;
-        if (target && !(element === target || element.contains(target))) continue;
-        return element;
+        // **Never the opener itself, and never anything that contains it.**
+        // This is the defect that made the whole route silent. The opener
+        // carries `aria-expanded` and flips it to "true" when pressed, so after
+        // the click the BUTTON matches `[aria-expanded='true']` in
+        // CONTACT_SURFACE_SELECTOR; it was not expanded before the press, so it
+        // passes the freshness test; and it precedes its own dropdown in
+        // document order, so it was returned as the "menu". Nothing then found
+        // an address inside a button reading "More...", and the route gave up
+        // with "menu-has-no-contact-item" while the real dropdown sat unread.
+        if (element === opener.element || element.contains(opener.element)) continue;
+        if (!boundToContactOpener(element, opener.element, before)) continue;
+
+        // **Useful, not merely present.** Returning the first surface that
+        // cleared the bindings is what let a button win over a dropdown. A
+        // menu that prints the details outright is taken at once; otherwise the
+        // best surface that actually offers a contact item is kept, and a bare
+        // menu that has rendered its items is the last resort - so an empty
+        // shell mid-render is never mistaken for a menu with nothing in it.
+        if (carriesContactDetails(element)) return element;
+        if (fallback) continue;
+        if (findControl(element, Applicants.CONTROL_PURPOSE.CONTACT)) fallback = element;
+        else if (isContactMenuSurface(element) && hasRenderedItems(element)) fallback = element;
       }
-      return null;
+      return fallback;
     }, { timeoutMs: OVERLAY.OPEN_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "contact-menu" });
 
     if (!menu) return { menu: null, reason: "menu-did-not-open" };
@@ -2801,7 +2938,10 @@
       waitedToOpenMs: 0, waitedToLoadMs: 0, reads: 0, loadedFully: false,
       // The 3.9.1 menu route. `viaMenu` is what tells a layout that hides the
       // details behind "More..." from one that never had them.
-      viaMenu: false, menuLabel: "", menuClicked: false, menuOpened: false, menuClosed: true
+      viaMenu: false, menuLabel: "", menuClicked: false, menuOpened: false, menuClosed: true,
+      // Declared, so an early return reports `false` rather than omitting the
+      // key entirely and leaving a reader to guess which it meant.
+      closed: false, controlsSeen: []
     };
 
     // Opened on every applicant, unconditionally. The recruiter screen puts the
@@ -2815,7 +2955,14 @@
     // known to be the one this press opened rather than one already on screen
     // from the applicant before. The same reasoning as watchResumeRequests'
     // buffered:false. Re-sampled below if the menu route adds a second press.
-    let surfacesBefore = contactSurfaceCandidates();
+    // VISIBLE-only, and that word is the fix. `contactSurfaceCandidates()`
+    // returns hidden elements too, so a dropdown container that LinkedIn had
+    // already mounted and merely hidden was in `before` from the start and was
+    // then refused forever by the "it has to be new" binding. "New" has to mean
+    // newly REVEALED. The leak this binding exists to stop is the previous
+    // applicant's disclosure still ON SCREEN, which is visible by definition and
+    // so is still caught.
+    let surfacesBefore = contactSurfaceCandidates().filter(isVisible);
 
     let control = findControl(panel, Applicants.CONTROL_PURPOSE.CONTACT);
     let menu = null;
@@ -2832,6 +2979,9 @@
       menu = menuStep.menu;
       if (!menu) {
         diagnostics.contact.reason = menuStep.reason || "no-contact-control";
+        // The one question a failed contact step could never answer: what was
+        // actually there. Read-only, and nothing it finds can be pressed.
+        diagnostics.contact.controlsSeen = probePanelContactControls(panel);
         return 0;
       }
       diagnostics.contact.viaMenu = true;
@@ -2854,7 +3004,7 @@
         }
         // Re-sampled now that the menu is on screen, so "it appeared when we
         // pressed" still means the disclosure and not the menu itself.
-        surfacesBefore = contactSurfaceCandidates();
+        surfacesBefore = contactSurfaceCandidates().filter(isVisible);
       }
     }
 

@@ -350,6 +350,45 @@
    */
   const APPLICANT_MENU_OPENER_PATTERN =
     /^(?:more|more\s*(?:\.{2,}|…)|more\s+(?:actions?|options?)|other\s+actions?|options)$/i;
+  /**
+   * The same control, named the way a real page names it.
+   *
+   * **Reported live, and this is the whole of the failure:** the applicant
+   * panel's overflow menu was never found at all - `diagnostics.contact` came
+   * back `reason: "no-contact-menu"`, `menuClicked: false`, `menuLabel: ""`,
+   * so nothing was ever pressed and every applicant saved an empty email and
+   * an empty mobile. The pattern above is anchored on the WHOLE label, and a
+   * LinkedIn control's whole label is not what it paints.
+   *
+   * The captured markup shows the idiom, in the applicant's own Experience
+   * card: `<span class="a11y-text">Years employed from 2025 to Present</span>`
+   * beside `<span aria-hidden="true">2025 - Present</span>`. Every control is
+   * built the same way, so an overflow menu reads `More options More...` or
+   * `More actions for <name> More...` once the screen-reader half is included -
+   * and `^more\.\.\.$` matches none of them.
+   *
+   * So this one matches WITHIN the label - and every alternative is written so
+   * that it cannot collide with a section expander, which is the one thing that
+   * must never be mistaken for a menu. Each alternative requires either the
+   * ellipsis glyph or the words actions/options/menu, so `Show 2 more
+   * educations` and `See more` stay expanders on every branch that consults
+   * this. That is asserted rather than asserted-in-prose: the six pinned
+   * expander negatives are run against this pattern directly.
+   */
+  const APPLICANT_MENU_OPENER_WITHIN_PATTERN =
+    /(?:^|\s)more\s*(?:\.{2,}|…)(?:\s|$)|\bmore\s+(?:actions?|options?)\b|\bother\s+actions?\b|\boverflow\s+menu\b|\bopen\s+menu\b/i;
+
+  /**
+   * Is this label an overflow-menu opener, by either reading?
+   *
+   * Both branches that care ask this rather than either pattern, so the menu
+   * route and the expander refusal can never disagree about what a control is.
+   */
+  function isApplicantMenuOpenerLabel(value) {
+    const label = normalizeLabel(value);
+    if (!label) return false;
+    return APPLICANT_MENU_OPENER_PATTERN.test(label) || APPLICANT_MENU_OPENER_WITHIN_PATTERN.test(label);
+  }
 
   /** What a caller may ask permission for. Anything else is refused. */
   const CONTROL_PURPOSE = Object.freeze({
@@ -488,7 +527,9 @@
       // rather than falling through to a generic "not a disclosure". That
       // reason is what `diagnostics.expansions` reports (3.9.1).
       if (APPLICANT_NAVIGATION_CONTROL_PATTERN.test(combined)) return refuse("navigates-away");
-      if (APPLICANT_MENU_OPENER_PATTERN.test(label)) return refuse("overflow-menu-not-a-disclosure");
+      if (isApplicantMenuOpenerLabel(label) || isApplicantMenuOpenerLabel(combined)) {
+      return refuse("overflow-menu-not-a-disclosure");
+    }
       if (!DISCLOSURE_CONTROL_PATTERN.test(label)) return refuse("not-a-disclosure-control");
       if (!inContainer) return refuse("outside-applicant-panel");
       return { allowed: true, forbidden: false, label, purpose, reason: "expand-section" };
@@ -500,7 +541,9 @@
       // `openContactAndCollect` looks inside the opened menu for a CONTACT
       // control and nothing else, and this classifier's denylist still runs
       // first on that item, so every ATS action in the menu stays refused.
-      if (!APPLICANT_MENU_OPENER_PATTERN.test(label)) return refuse("not-a-menu-opener");
+      if (!isApplicantMenuOpenerLabel(label) && !isApplicantMenuOpenerLabel(combined)) {
+      return refuse("not-a-menu-opener");
+    }
       if (!inContainer) return refuse("outside-applicant-panel");
       return { allowed: true, forbidden: false, label, purpose, reason: "contact-menu" };
     }
@@ -3511,6 +3554,8 @@
     // click policy
     CONTROL_PURPOSE, FORBIDDEN_APPLICANT_CONTROL_PATTERN, APPLICANT_CONTACT_CONTROL_PATTERN,
     APPLICANT_NAVIGATION_CONTROL_PATTERN, APPLICANT_MENU_OPENER_PATTERN,
+    APPLICANT_MENU_OPENER_WITHIN_PATTERN,
+    isApplicantMenuOpenerLabel,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
     APPLICANT_PAGINATION_PATTERN, classifyApplicantControl,
     // qualifications and screening

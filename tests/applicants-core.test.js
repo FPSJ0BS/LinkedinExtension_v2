@@ -6930,16 +6930,16 @@ test("3.9.1: a menu only counts as the disclosure when it really shows the detai
   );
   const carries = source.slice(
     source.indexOf("function carriesContactDetails"),
-    source.indexOf("async function openContactMenu")
+    source.indexOf("const CONTACT_MENU_SURFACE_SELECTOR")
   );
-  assert.ok(carries.length > 200, "the test must be found, not an empty slice");
+  assert.ok(carries.length > 200 && carries.length < 800, "the test must be found, and only it");
 
   // Stricter than `findContactDisclosure`'s own `carries`, deliberately: that one
   // accepts the WORD "contact" appearing in an element, which every action menu
   // does. Only a real address, a real tel: link, or a labelled field counts here,
   // because getting this wrong means reading an ATS menu as somebody's details.
   assert.match(carries, /mailto:|tel:/, "a real link counts");
-  assert.match(carries, /EMAIL_PATTERN/, "a real address counts");
+  assert.match(carries, /containsEmailAddress/, "a real address counts");
   assert.ok(!/contact info\|email\|phone\|mobile/.test(carries),
     "the loose word test from findContactDisclosure must NOT be reused here");
 
@@ -7311,4 +7311,196 @@ test("3.9.2: none of this added a click, a column, a status or a permission", as
     "https://static.licdn.com/*"
   ], "host permissions are unchanged");
   assert.ok(manifest.permissions.includes("storage"), "storage was already held");
+});
+
+// ---------------------------------------------------------------------------
+// 3.9.3 — the overflow menu was never found, and three things behind it
+//
+// The first live diagnostics report this repo has ever had (the 3.9.2 fix is
+// what made it retrievable) said, for a real applicant on a real run:
+//
+//   "contact": { "reason": "no-contact-menu", "menuClicked": false,
+//                "menuLabel": "", "added": 0 }
+//
+// So the earlier guess was wrong. Nothing was returned as the wrong menu,
+// because nothing was ever clicked: `findControl(panel, CONTACT_MENU)` found no
+// opener at all. The label was the defect, and the same report carries the
+// proof — LinkedIn's own markup, captured from that applicant's Experience card:
+//
+//   <span class="a11y-text">Years employed from 2025 to Present</span>
+//   <span aria-hidden="true">2025 – Present</span>
+//
+// Every control is built that way, so the accessible text of an overflow menu
+// reads "More options More..." and an anchored ^more\.\.\.$ matches none of it.
+//
+// Three further defects sat behind that one, each confirmed and each able on its
+// own to empty the columns once the opener IS found. They are fixed in the same
+// task because finding the opener is what makes them reachable.
+// ---------------------------------------------------------------------------
+
+test("3.9.3: an overflow menu is recognised by a real page's label, and an expander still is not", () => {
+  const { CONTROL_PURPOSE } = Applicants;
+  const verdict = (text, ariaLabel, purpose) =>
+    Applicants.classifyApplicantControl({ text, ariaLabel, purpose, inContainer: true });
+
+  // THE OBSERVED SHAPE and its neighbours. The screen-reader half of the label
+  // is part of the accessible text, so the whole-label anchor never matched.
+  for (const [text, aria] of [
+    ["More...", ""],
+    ["More options More...", ""],
+    ["More actions for RAHUL Mishra More…", ""],
+    ["More…", "More actions"],
+    ["", "More actions"],
+    ["More", ""],
+    ["Options", ""]
+  ]) {
+    assert.equal(
+      verdict(text, aria, CONTROL_PURPOSE.CONTACT_MENU).reason,
+      "contact-menu",
+      `must open the menu: ${JSON.stringify(text)} / ${JSON.stringify(aria)}`
+    );
+  }
+
+  // THE COLLISION THAT MUST NOT HAPPEN. Every widened alternative requires
+  // either the ellipsis glyph or the words actions/options/menu, precisely so a
+  // section expander can never be mistaken for an overflow menu — which would
+  // stop `Show 2 more educations` being pressed and empty three more columns.
+  for (const label of [
+    "Show 2 more educations", "Show 3 more educations", "Show all 12 skills",
+    "See more", "Show more", "Show 5 more experiences", "Expand", "View all details"
+  ]) {
+    assert.equal(verdict(label, "", CONTROL_PURPOSE.DISCLOSURE).reason, "expand-section", label);
+    assert.equal(verdict(label, "", CONTROL_PURPOSE.DISCLOSURE).allowed, true, label);
+  }
+
+  // And a real menu is still refused as an expander, by name, on both readings.
+  for (const label of ["More...", "More options More...", "More actions"]) {
+    assert.equal(verdict(label, "", CONTROL_PURPOSE.DISCLOSURE).reason, "overflow-menu-not-a-disclosure", label);
+  }
+
+  // Navigation is still refused ahead of everything, so the menu widening cannot
+  // reopen the "See full profile" hole 3.9.1 closed.
+  assert.equal(verdict("See full profile", "", CONTROL_PURPOSE.DISCLOSURE).reason, "navigates-away");
+  // And the denylist still beats all of it.
+  assert.equal(verdict("More options Reject", "", CONTROL_PURPOSE.CONTACT_MENU).forbidden, true);
+});
+
+test("3.9.3: EMAIL_PATTERN is global, so it is never asked twice", async () => {
+  // EXECUTED, not reasoned about. `.test()` on a /g regex advances lastIndex and
+  // answers false on the very next call with the same input.
+  const pattern = globalThis.ProfileVaultCore.EMAIL_PATTERN;
+  assert.equal(pattern.global, true, "it is a global regex, which is what makes this a trap");
+  const text = "someone@example.com and more text";
+  const answers = [pattern.test(text), pattern.test(text), pattern.test(text), pattern.test(text)];
+  assert.deepEqual(answers, [true, false, true, false],
+    "four identical questions, two different answers — this is the defect");
+  pattern.lastIndex = 0;
+
+  // So neither contact reader may ask it directly. Both go through one helper
+  // that builds a fresh non-global copy — the idiom the capture path in the core
+  // already uses, which is evidence the hazard was known in one place and missed
+  // in these two.
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const helper = source.slice(
+    source.indexOf("function containsEmailAddress"),
+    source.indexOf("function contactSurfaceCandidates")
+  );
+  assert.ok(helper.length > 80 && helper.length < 600, "the helper must be found, and only it");
+  assert.match(helper, /new RegExp\(Core\.EMAIL_PATTERN\.source, "i"\)/, "a fresh, non-global copy per call");
+
+  assert.ok(!/EMAIL_PATTERN\?\.test\(/.test(source),
+    "nothing may call .test() on the shared global pattern");
+  assert.equal((source.match(/containsEmailAddress\(/g) || []).length, 3,
+    "one definition and the two readers that had the defect");
+});
+
+test("3.9.3: the opener can never be returned as its own menu", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const open = source.slice(
+    source.indexOf("async function openContactMenu"),
+    source.indexOf("async function openContactAndCollect")
+  );
+  assert.ok(open.length > 400 && open.length < 3000, "the opener must be found, and only it");
+
+  // The trap: the opener carries aria-expanded, flips it to "true" when pressed,
+  // and so matches [aria-expanded='true'] in CONTACT_SURFACE_SELECTOR. It was not
+  // expanded before the press, so it passes the freshness test, and it precedes
+  // its own dropdown in document order.
+  assert.match(open, /element === opener\.element \|\| element\.contains\(opener\.element\)/,
+    "the opener and its ancestors are refused outright");
+
+  // Present is not the same as useful. Returning the first surface that cleared
+  // the bindings is what let a button win over a dropdown.
+  assert.match(open, /if \(carriesContactDetails\(element\)\) return element;/,
+    "a menu that prints the details wins immediately");
+  assert.match(open, /findControl\(element, Applicants\.CONTROL_PURPOSE\.CONTACT\)/,
+    "otherwise one that offers a contact item is preferred");
+  assert.match(open, /hasRenderedItems\(element\)/,
+    "and an empty shell mid-render is never mistaken for an empty menu");
+
+  // Still exactly one press. The whole route is one click and the budget is eight.
+  assert.equal((open.match(/\.click\(\)/g) || []).length, 1, "the menu is opened once");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the file's budget is unchanged");
+});
+
+test("3.9.3: 'it appeared when we pressed' means newly VISIBLE, not newly created", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  // contactSurfaceCandidates deliberately returns hidden elements too, so a
+  // dropdown LinkedIn had already mounted and merely hidden was in `before` from
+  // the start — and then refused forever by the binding meant to protect it.
+  assert.match(source, /contactSurfaceCandidates\(\)\.filter\(isVisible\)/,
+    "the pre-click sample is visible-only");
+  assert.equal((source.match(/contactSurfaceCandidates\(\)\.filter\(isVisible\)/g) || []).length, 2,
+    "both samples — the first press and the menu's second — or the two disagree");
+
+  // The leak this binding exists to stop is the PREVIOUS applicant's disclosure
+  // still on screen, which is visible by definition, so it is still caught.
+  const bound = source.slice(
+    source.indexOf("function boundToContactOpener"),
+    source.indexOf("function probePanelContactControls")
+  );
+  assert.ok(bound.length > 200 && bound.length < 1400, "the binding must be found, and only it");
+  assert.match(bound, /target\.contains\(element\)/,
+    "the aria-controls binding matches findContactDisclosure's, both directions");
+  assert.match(bound, /return false;/, "and an unbound surface is still refused");
+});
+
+test("3.9.3: a failed contact step now says what was on the panel, and presses none of it", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  const probe = source.slice(
+    source.indexOf("function probePanelContactControls"),
+    source.indexOf("async function openContactMenu")
+  );
+  assert.ok(probe.length > 300 && probe.length < 2000, "the probe must be found, and only it");
+
+  // `inContainer: false` is what makes this safe, exactly as it does for
+  // probePanelDownloadControls: no verdict here can come back allowed, so no
+  // path can be tempted to press what it finds.
+  assert.match(probe, /inContainer: false/, "nothing this finds can ever be allowed");
+  assert.ok(!/\.click\(\)/.test(probe), "and it presses nothing");
+
+  // It reports BOTH readings, which is the distinction the live report could not
+  // make: a label that matched but sat outside the panel reports
+  // "outside-applicant-panel", and one that never matched reports its own reason.
+  assert.match(probe, /CONTROL_PURPOSE\.CONTACT\b/, "what the classifier makes of it as a contact control");
+  assert.match(probe, /CONTROL_PURPOSE\.CONTACT_MENU/, "and as a menu opener");
+  assert.match(probe, /limit = 40/, "bounded, so a busy panel cannot bloat the report");
+
+  // Wired to the one path that could not explain itself.
+  const contact = source.slice(
+    source.indexOf("async function openContactAndCollect"),
+    source.indexOf("const MAX_EXPANSIONS")
+  );
+  assert.match(contact, /diagnostics\.contact\.controlsSeen = probePanelContactControls\(panel\)/,
+    "recorded exactly where the live report said no-contact-menu");
+  assert.match(contact, /closed: false, controlsSeen: \[\]/,
+    "and both keys are declared, so an early return reports false rather than nothing");
 });
