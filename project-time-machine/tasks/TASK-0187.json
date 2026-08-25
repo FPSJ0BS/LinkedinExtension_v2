@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "id": "TASK-0187",
+  "name": "A numbered page is never a named next-page control",
+  "request": "A numbered page is never a named next-page control",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T11:39:51.120Z",
+  "completedAt": "2026-08-25T11:43:13.482Z",
+  "startCommit": "9bc8744ec1fa649f34da40ae51e68eedf858aed2",
+  "gitRef": "task/TASK-0187",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build 3.9.8, 644 tests, doc links, validate)"
+  ],
+  "result": "3.9.8 — THE RUN PRESSED THE PAGE IT WAS ALREADY ON, and had done for five releases. Found by a parallel trace of the whole click path and confirmed by EXECUTION before a line changed: classifyApplicantControl({text:'1', ariaLabel:'Page 1', purpose:PAGINATION}) returned {allowed:true, reason:'pagination', page:null}. APPLICANT_PAGINATION_PATTERN carried 'page \\d+' as an alternative, and that is the NAMED branch — it runs FIRST, it is handed no currentPage, and it therefore cannot tell the page being shown from the page after it. findApplicantPaginationControl enumerates list.parentElement in DOCUMENT ORDER and returns the first control the classifier allows, so on a pager whose buttons carry aria-label 'Page 1' and 'Page 2' the first allowed control is the page already being shown. The run clicked 1 while sitting on page 1; nothing happened because nothing was supposed to; the named branch reports page:null so notePageReached bailed on !Number.isInteger(page) and could not even score the press; fruitless climbed on every attempt; three attempts retired the pager as pagination-retired, which is CONCLUSIVE; the job was marked COMPLETED at the bottom of page one and claimAutoRun refuses to re-arm it. THE NUMBERED PATH WAS NEVER REACHED ON THAT LAYOUT — every fix from 3.9.3 to 3.9.7 (aria-current on the control, then on its two ancestors, the accessible name, the ordinal walk, the group-depth bound, the plain-text page markers, the anchoring of pageNumberFrom) lives beyond a branch that had already returned the wrong button, which is why five releases of correct work on the numbered reader changed nothing the recruiter could see. The fix is one alternative removed: a numbered page is exactly what the numbered branch exists for, where the caller supplies currentPage and a number is accepted only when it is exactly current+1. Nothing is lost — Page 2 is still pressed from page one — but it now goes through the proof that keeps Page 1 and Page 25 from being pressed from page one, both re-asserted. ALSO FIXED from the same trace: a next-page control momentarily disabled no longer finishes the job. LinkedIn disables its pager while a fetch is in flight and the search fires immediately after the list goes quiet; the group was skipped with no note, which pagerSearchReason read as no-next-number (CONCLUSIVE). It is now next-page-not-pressable, which leaves the run restartable, because there IS a next page and it simply could not be pressed that instant. No new click, still exactly eight; no selector, schema, CSV column or permission touched; nothing depends on a page size — the walk compares WHO is on the list by row key, never how many. Two existing tests updated where they pinned the defect: one listed Page 2 among the named controls, one asserted the accessible name alone was permission to press. Version 3.9.8 in all six asserted places. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, six version locations."
+}

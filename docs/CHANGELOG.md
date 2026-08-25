@@ -1,5 +1,66 @@
 # CHANGELOG.md
 
+## 3.9.8 — the run pressed the page it was already on, for five releases
+
+TASK-0187. Found by a parallel trace of the whole click path, and confirmed by
+execution before a line was changed.
+
+`APPLICANT_PAGINATION_PATTERN` carried `page \d+` as one of its alternatives:
+
+```js
+/^(?:next(?: page| \d+| \d+ applicants?)?|show more|load more|…|page \d+)$/i
+```
+
+That is the **named** branch. It runs first, it is handed **no `currentPage`**,
+and it therefore cannot tell the page being shown from the page after it.
+`findApplicantPaginationControl` enumerates `list.parentElement` in **document
+order** and returns the first control the classifier allows — so on a pager whose
+buttons carry `aria-label="Page 1"` and `aria-label="Page 2"`, the first allowed
+control is **the page already being shown**.
+
+```
+classifyApplicantControl({ text: "1", ariaLabel: "Page 1", purpose: PAGINATION })
+  -> { allowed: true, reason: "pagination", page: null }
+```
+
+So the run clicked `1` while sitting on page 1. Nothing happened, because nothing
+was supposed to happen. The named branch reports `page: null`, so
+`notePageReached` bailed on `!Number.isInteger(page)` and could not even score the
+press; `fruitless` climbed on every attempt; three attempts retired the pager as
+`pagination-retired`, which is CONCLUSIVE; the job was marked COMPLETED at the
+bottom of page one and `claimAutoRun` refuses to re-arm it.
+
+**The numbered path was never reached on that layout.** Every fix from 3.9.3 to
+3.9.7 — `aria-current` on the control, then on its two ancestors, the accessible
+name, the ordinal walk, the group-depth bound, the plain-text page markers, the
+anchoring of `pageNumberFrom` — lives *beyond* a branch that had already returned
+the wrong button. That is why five releases of correct work on the numbered
+reader changed nothing the recruiter could see, and it is a lesson worth keeping:
+**when a fix that is provably right changes nothing, the thing to check is
+whether the code it fixed is reached at all.**
+
+The fix is one alternative removed. A numbered page is exactly what the numbered
+branch exists for, where the caller supplies `currentPage` and a number is
+accepted only when it is exactly `current + 1`. Nothing is lost — `Page 2` is
+still pressed from page one — but it now goes through the proof that keeps
+`Page 1` from being pressed from page one, and `Page 25` from being pressed from
+page one along with it.
+
+Also fixed, from the same trace: **a next-page control that is momentarily
+disabled no longer finishes the job.** LinkedIn disables its pager while a fetch
+is in flight, and the search fires immediately after the list goes quiet; the
+group was skipped with no note, which `pagerSearchReason` read as
+`no-next-number` — CONCLUSIVE. It is now `next-page-not-pressable`, which leaves
+the run restartable, because there *is* a next page and it simply could not be
+pressed that instant.
+
+No new click — still exactly eight. Two existing tests updated where they pinned
+the defect: one listed `Page 2` among the named controls, and one asserted the
+accessible name alone was permission to press. Both now assert the opposite, and
+a new test names the failure.
+
+**No live claim: rule 20 stands.** `npm run check` passed — 644 tests.
+
 ## 3.9.7 — the readers contradicted each other, so none of them ran
 
 TASK-0186. **"It is still not working. I want the extension to click 2, 3, or the

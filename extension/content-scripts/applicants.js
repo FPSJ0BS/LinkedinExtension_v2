@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.9.7";
+  const BUILD_ID = "2026-08-25-react-v3.9.8";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -5865,7 +5865,16 @@
         continue;
       }
       const element = next.element;
-      if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+      if (element.disabled || element.getAttribute("aria-disabled") === "true") {
+        // LinkedIn disables its pager while a fetch is in flight, and this
+        // search fires immediately after the list goes quiet. Skipping the group
+        // silently left `numbered >= 2` with no other note, which
+        // `pagerSearchReason` reads as `no-next-number` — CONCLUSIVE — so a
+        // control that was disabled for half a second finished the job. There IS
+        // a next page; it cannot be pressed this instant.
+        note.unpressable = true;
+        continue;
+      }
       const verdict = Applicants.classifyApplicantControl({
         text: cleanText(element.textContent),
         ariaLabel: cleanText(element.getAttribute("aria-label")),

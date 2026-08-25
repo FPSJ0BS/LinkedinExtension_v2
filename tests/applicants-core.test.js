@@ -4328,9 +4328,14 @@ test("a Next pager is still the pager when its label carries a chevron", () => {
   // The allowlist is anchored on the whole label, so `next ›` was refused and the
   // run never left page one — and because no pager was found the walk reported
   // `settled`, a CONCLUSIVE stop, so the job was marked COMPLETED at 25 of 665.
-  for (const label of ["Next", "Next ›", "Next >", "Next →", "next  ❯", "Next page", "Show more", "Load more", "Page 2"]) {
+  for (const label of ["Next", "Next ›", "Next >", "Next →", "next  ❯", "Next page", "Show more", "Load more"]) {
     assert.equal(verdict(label).allowed, true, `${label} is the pager`);
   }
+
+  // 3.9.8: `Page 2` is NOT on this list, and its removal is the whole of
+  // TASK-0187. This branch is handed no `currentPage`, so it cannot tell the
+  // page being shown from the page after it — see the test named for that.
+  assert.equal(verdict("Page 2").allowed, false, "a numbered page is not a NAMED next-page control");
 
   // A control whose whole name IS the glyph is accepted too — but only because
   // every caller has proven it is inside the list, which is asserted next.
@@ -4421,7 +4426,13 @@ test("a numbered pager is the pager too, but only against the page it says it is
 
   // THE ACCESSIBLE NAME, which is where such a pager says what it is. `label`
   // prefers the text whenever there is one, so `Page 2` was never read.
-  assert.equal(verdict({ text: "2", ariaLabel: "Page 2" }).allowed, true, "the aria-label names the page");
+  // 3.9.8: the accessible name is still READ — that half was right and is what
+  // this test was written for — but naming a page is not on its own permission
+  // to press it. The proof comes with it.
+  assert.equal(verdict({ text: "2", ariaLabel: "Page 2", currentPage: 1 }).allowed, true,
+    "the aria-label names the page");
+  assert.equal(verdict({ text: "2", ariaLabel: "Page 2" }).allowed, false,
+    "but a page names itself whether or not it is the one to press");
   assert.equal(verdict({ text: "", ariaLabel: "Next page" }).allowed, true, "and a named pager is unaffected");
 
   // THE NUMBER, which is only ever a page against the page the pager marks as
@@ -8749,6 +8760,60 @@ test("3.9.7: a page number is read where the label says it, not only when it is 
   ]) {
     assert.equal(page(not), null, `"${not}" is not a page number`);
   }
+});
+
+// --------------------------------------------------------------------------
+// 3.9.8 — the run pressed the page it was already on, for five releases.
+//
+// `APPLICANT_PAGINATION_PATTERN` carried `page \d+` as an alternative. That is
+// the NAMED branch: it runs FIRST, it is handed no `currentPage`, and
+// `findApplicantPaginationControl` enumerates in DOCUMENT ORDER and returns the
+// first control it allows. On a pager labelled `Page 1` / `Page 2` the first one
+// is the page already being shown.
+//
+// So the run clicked `1` while sitting on page 1. Nothing happened, because
+// nothing was supposed to. The named branch reports `page: null`, so
+// `notePageReached` could not even score the press, `fruitless` climbed on every
+// attempt, and three attempts retired the pager as `pagination-retired` — which
+// is CONCLUSIVE.
+//
+// THE NUMBERED PATH WAS NEVER REACHED. Every fix from 3.9.3 to 3.9.7 — the three
+// current-page readers, the grouping fix, the anchoring fix — lives beyond a
+// branch that had already returned the wrong button.
+// --------------------------------------------------------------------------
+
+test("3.9.8: a numbered page is never a NAMED next-page control", () => {
+  const press = (extra) => Applicants.classifyApplicantControl({
+    purpose: Applicants.CONTROL_PURPOSE.PAGINATION,
+    inContainer: true,
+    ...extra
+  });
+
+  // THE DEFECT. With no `currentPage`, nothing here can tell page one from page
+  // two — so neither may be pressed, and the caller must fall through to the
+  // numbered search that supplies the proof.
+  for (const [text, aria] of [["1", "Page 1"], ["2", "Page 2"], ["25", "Page 25"]]) {
+    const verdict = press({ text, ariaLabel: aria });
+    assert.equal(verdict.allowed, false, `"${aria}" may not be pressed without a current page`);
+    assert.equal(verdict.reason, "not-a-pagination-control");
+  }
+
+  // A control that says it goes to the NEXT page needs no such proof: its own
+  // name is the claim, which is the whole difference between the two branches.
+  for (const label of ["Next", "Next page", "Show more", "Load more", "Go to next page"]) {
+    assert.equal(press({ text: label }).allowed, true, `"${label}" says where it goes`);
+  }
+
+  // WITH the proof, the numbered branch answers exactly as it always did, and
+  // the two refusals that matter are unchanged: no forward progress, and no jump.
+  assert.equal(press({ text: "2", ariaLabel: "Page 2", currentPage: 1 }).allowed, true);
+  assert.equal(press({ text: "2", ariaLabel: "Page 2", currentPage: 1 }).page, 2);
+  assert.equal(press({ text: "3", ariaLabel: "Page 3", currentPage: 2 }).allowed, true,
+    "and it keeps stepping, one page at a time");
+  assert.equal(press({ text: "1", ariaLabel: "Page 1", currentPage: 1 }).allowed, false,
+    "the page being shown is never forward progress — pressing it is what retired the pager");
+  assert.equal(press({ text: "25", ariaLabel: "Page 25", currentPage: 1 }).allowed, false,
+    "and an elided pager can never be used to jump twenty-four pages");
 });
 
 test("3.9.7: a Next control named in a sentence is still a Next control", () => {

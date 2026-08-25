@@ -503,8 +503,37 @@
    * "Next 25 applicants"). Still an allowlist, still beaten by the denylist,
    * and still required to be proven inside the list.
    */
+  /**
+   * A control that says it goes to the NEXT page — and nothing that merely names
+   * a page.
+   *
+   * **`page \d+` used to be an alternative here, and it is the defect that made
+   * every pager fix from 3.9.3 to 3.9.7 unreachable.** This is the NAMED branch:
+   * it is consulted first, it is handed no `currentPage`, and it therefore
+   * cannot tell page one from page two. `findApplicantPaginationControl`
+   * enumerates in DOCUMENT ORDER and returns the first control this allows, and
+   * on a pager labelled `Page 1` / `Page 2` the first one is **the page already
+   * being shown**.
+   *
+   * So the run pressed `1` while sitting on page 1. Nothing happened, because
+   * nothing was supposed to happen. `notePageReached` could not even score the
+   * press — the named branch reports `page: null`, so it is not an integer and
+   * the walk records no step — `fruitless` climbed on every attempt, and three
+   * attempts retired the pager as `pagination-retired`, which is CONCLUSIVE. The
+   * job was marked COMPLETED at the bottom of page one.
+   *
+   * **The numbered path was never reached on that layout**, which is why four
+   * builds of work on it — the three current-page readers, the group fix, the
+   * anchoring fix — changed nothing the recruiter could see.
+   *
+   * A numbered page is exactly what the numbered branch below exists for, where
+   * `currentPage` is supplied by the caller and a number is accepted only when
+   * it is exactly `current + 1`. Removing it here does not lose the ability to
+   * press `Page 2`; it routes it through the proof that stops `Page 1` being
+   * pressed from page one, and `Page 25` from page one along with it.
+   */
   const APPLICANT_PAGINATION_PATTERN =
-    /^(?:next(?: page| \d+| \d+ applicants?)?|show more|load more|see more applicants?|more applicants?|page \d+)$/i;
+    /^(?:next(?: page| \d+| \d+ applicants?)?|show more|load more|see more applicants?|more applicants?)$/i;
 
   /**
    * Chevrons and arrows a pager welds onto its own name.
