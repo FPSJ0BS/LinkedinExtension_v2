@@ -1,0 +1,55 @@
+{
+  "schema": 2,
+  "id": "TASK-0188",
+  "name": "Applicant messaging: Message control, composer insertion, relay and UI",
+  "request": "Applicant messaging: Message control, composer insertion, relay and UI",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T12:01:57.910Z",
+  "completedAt": "2026-08-25T12:21:11.993Z",
+  "startCommit": "227cba670242f29e85ec31dd64f57ca40f54bd2c",
+  "gitRef": "task/TASK-0188",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/styles/applicants.css"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/applicants-dashboard.tsx"
+    },
+    {
+      "change": "added",
+      "path": "tests/applicant-messaging.test.js",
+      "wasUntracked": true
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 668 tests (0 fail), doc links, build validation; built dist/applicants.js re-verified at nine clicks with no Enter/submit/Send"
+  ],
+  "result": "TASK-0188: message ONE applicant from a template, by typing into LinkedIn's own composer and stopping there. THE SHAPE OF IT, and the shape is the safety argument: the recruiter's screenshot shows the composer footer reading 'Press Enter to Send', so the feature was built to INSERT and the human presses Enter. That single decision means no Send control is ever resolved, found or pressed - and 'send' and 'inmail' therefore stay on the applicant denylist for every purpose including this one, so no Send control CAN be classified as clickable by any caller. There is no SEND message type either. The absence of a string that could name it is the mechanism; the comment is only the description. THE NINTH CLICK is the applicant panel's own Message control, exempted from the denylist for exactly one purpose (MESSAGE_COMPOSE) and only for a control whose WHOLE label is Message, optionally followed by the person's name the way an accessible name renders it. The exemption is written INSIDE the existing refusal rather than as an earlier branch, so the denylist keeps its place as the first thing that happens to any control and TASK-0182's row rule keeps deciding what forbidden means; a proven row can never reach it, because a row is asked for as APPLICANT_ROW. Message all / everyone / selected / candidates are refused BY NAME before the container is consulted, because bulk is the one thing this must never become. A HOLE FOUND BY A TEST, NOT BY REASONING, and worth recording as the most useful thing in the task: an agent writing the policy tests found that text 'Message' with aria-label 'Send message' was ALLOWED - label prefers the visible text, so the anchored allowlist never saw the verb, and the exemption's own comment claiming 'a Send control cannot match an allowlist anchored on message' was false for exactly the shape that matters. 'send', 'sends', 'sending', 'submit' and 'deliver' were added to the tail pattern, which is asked of the label AND the accessible name together. It now fails closed: a wrongly refused Message button costs a diagnostics line the user can report, a wrongly allowed one costs a message sent by a machine. THE COMPOSER MUST AGREE WHO IT IS ADDRESSED TO. The messaging overlay persists across applicants, so the PREVIOUS conversation is routinely what is on screen when the next applicant is opened - the same lesson as the panel, where being wrong costs a field, except here it costs a message to the wrong person. The recipient is read from the composer's own recipient pill, falling back to its profile links; silence is refused as unknown-recipient and never taken as consent, and two distinct recipients is refused as a group message. The panel must independently prove it is showing the intended applicant first, by application id or canonical profile URL. A composer already holding text is refused as composer-not-empty - that text is a human's draft, never appended to and never cleared - and the composer is never closed on any path, unlike the overflow menu, because it is the thing the recruiter is about to press Enter in. Insertion goes through execCommand insertText because the box is a React-controlled contenteditable and assigning textContent updates the pixels while React keeps sending its own empty string; the text is then READ BACK and compared, so a half-landed insertion reports read-back-mismatch rather than handing over a composer that looks ready and holds the wrong words. TEMPLATES: twelve variables read from the applicant's already-collected record, {{name}} and {{name|fallback}}, and an UNRESOLVED variable BLOCKS the message rather than warning about it - 'Hi ,' is a wrong value and rule 1 says a wrong value is worse than a blank one. The dashboard's Insert button is disabled while blocked and names which variables are missing. RULE 5 AMENDED in the same task, which is the whole reason this work was reverted and re-landed rather than left dormant: Message left 'permanently forbidden everywhere', Send and InMail explicitly did not, and the reasoning including the aria-label hole is written into CLAUDE.md rather than only into a commit. VERIFIED: 668 tests pass (24 new messaging-policy tests, plus the 48 core tests from TASK-0181), typecheck, build, doc links and build validation all clean; twenty existing assertions that pinned the eight-click budget were moved to nine, the owner list gained insertApplicantMessage, and the Phase 9 capture slice was re-bounded because the composer section landed between its two markers. The BUILT artifact was checked too: nine clicks, and the only synthesised keystroke in the file is Escape for dismissing overlays - no Enter, no submit, no Send. NO LIVE CLAIM: rule 20 stands, none of this has run against a live LinkedIn page, and loading dist/ in Chrome is the user's step. Files: src/applicants-core.js, extension/content-scripts/applicants.js, src/messages.ts, src/background.ts, src/react/applicants-dashboard.tsx, extension/styles/applicants.css, tests/applicants-core.test.js, tests/applicant-messaging.test.js, CLAUDE.md."
+}

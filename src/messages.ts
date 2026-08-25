@@ -115,6 +115,29 @@ export const APPLICANT_MESSAGES = {
 } as const;
 
 /**
+ * Messaging one applicant (3.10.0).
+ *
+ * `PROBE` and `INSERT` are sent to the worker, which relays them to the
+ * applicants content script as `PV_APPLICANT_MESSAGE_PROBE` and
+ * `PV_APPLICANT_MESSAGE_INSERT`.
+ *
+ * **There is no SEND, and there is deliberately no room for one.** LinkedIn's
+ * composer says "Press Enter to Send" and the human presses it; this extension
+ * types the recruiter's own reviewed text into the box and stops. `send` is on
+ * the applicant denylist for every purpose, so no Send control can be
+ * classified as clickable by any caller — the absence of a message type here is
+ * the *second* line of that defence, not the first.
+ *
+ * There is also no BULK: one request names one applicant, and the worker relays
+ * exactly one insertion per request with no loop, queue or retry.
+ */
+export const MESSAGING_MESSAGES = {
+  /** Observation only: what a compose request would find. Presses nothing. */
+  PROBE: "PV_MESSAGE_PROBE",
+  INSERT: "PV_MESSAGE_INSERT"
+} as const;
+
+/**
  * The universal Stop.
  *
  * One message that ends every kind of work this extension can be doing: the

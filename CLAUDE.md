@@ -112,7 +112,33 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    half of one member's list under another's name.
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
    control · a row of the applicant list · the resume viewer's own Download · **the applicant panel's
-   overflow menu, opened only to reach the contact disclosure inside it.**
+   overflow menu, opened only to reach the contact disclosure inside it** · **the applicant panel's own
+   `Message` control, opened only so the recruiter's own reviewed text can be typed into LinkedIn's
+   composer.**
+
+   That last one is the ninth click and the newest (3.10.0), and it is the first that opens something
+   the recruiter would use to *contact* a person, so it is worth being exact about its limits.
+
+   **It does not send, and it cannot.** LinkedIn's composer says "Press Enter to Send" and the human
+   presses it. Nothing in this extension resolves, finds or presses a Send control — `send` and
+   `inmail` stay on the denylist for *every* purpose including this one, and the allowlist is anchored
+   on the whole label `Message`, so no Send control can match it. There is no `SEND` message type
+   either. The extension types; the person decides.
+   **It is not bulk.** One applicant, one composer, one insertion, driven by the user from the
+   dashboard. There is no queue, no loop over the list, and a control offering to message a *set* —
+   "Message all", "Message selected" — is refused by name before the container is even checked.
+   **The text is the recruiter's own.** It is composed and previewed in this extension's UI against
+   that applicant's already-collected record. Nothing is generated. A message still carrying an
+   unresolved variable is blocked before it reaches the page, because "Hi ," is a wrong value and
+   rule 1 says a wrong value is worse than a blank one.
+   **The composer must agree who it is addressed to.** The messaging overlay persists across
+   applicants, so the *previous* conversation is routinely what is on screen — the recipient is read
+   from the composer's own markup and must match, silence is never taken as consent, and a composer
+   naming two people is refused outright. This is the panel identity rule, applied where being wrong
+   costs a message to the wrong person rather than a wrong field.
+   **A composer holding text is never touched.** That text is a human's draft; it is refused, never
+   appended to and never cleared. And unlike the overflow menu, the composer is never closed on the
+   way out — it is the thing the recruiter is about to press Enter in.
 
    That last one is the eighth click and the newest (3.9.1). On the captured layout the panel offers
    no Contact control at all — the address and the number are behind `More…` — so every applicant was
@@ -129,11 +155,21 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    only exist there. The profile-page exception above does not transfer — it works only because that
    flow captures the profile URL first and comes back, and this surface has no such return path.
 
-   **Permanently forbidden everywhere:** Connect, Follow, Message, InMail, Endorse, Remove
+   **Permanently forbidden everywhere:** Connect, Follow, InMail, Endorse, Remove
    connection, Withdraw, Invite, Report, Block, Send, Share, Accept, Ignore, Save — and on hiring
    pages also **Shortlist, Move to, Reject, Archive, Hire, Offer, Interview, Schedule, Rate,
    Good fit / Maybe / Not a fit, Add note**, because those change the recruiter's own ATS.
    **The denylist always beats the allowlist**, including when only the `aria-label` matches.
+
+   **`Message` left that list in 3.10.0 and only just.** It is still a denylisted token on profile and
+   connections pages, and still denylisted on hiring pages for every purpose except the one whose
+   whole job is opening the composer, where it is exempted only for a control whose *whole* label is
+   the panel's own `Message`. **`Send` and `InMail` did not move and must not**: they are what keeps
+   the composer's own Send unclickable by any caller, which is the mechanism behind "the extension
+   never sends" — not a promise, but the absence of any string that could classify a Send control as
+   allowed. A control reading `Message` whose `aria-label` says `Send message` is refused, because
+   the exemption is tested against the visible text *and* the accessible name together; that exact
+   shape was a real hole, found by a test rather than by reasoning, and closed the same day.
 
 6. Scope to the main content. Reject `aside`, `footer`, `nav`, `[role='complementary']`, messaging
    overlays and modals — except an overlay this extension opened itself. Lazy scrolling always

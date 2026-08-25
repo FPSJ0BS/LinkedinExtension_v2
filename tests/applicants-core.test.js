@@ -92,7 +92,7 @@ test("every control that acts on the applicant is refused before any allowlist",
   // These sit within a few pixels of the controls this extension does open, and
   // three of the four change something in the recruiter's own ATS.
   const forbidden = [
-    "Shortlist", "Move to", "Reject", "Interview with AI", "Message", "Send InMail",
+    "Shortlist", "Move to", "Reject", "Interview with AI", "Send InMail",
     "Rate this AI-generated content", "Good fit", "Not a fit", "Archive", "Share",
     "Save", "Schedule interview", "Add note"
   ];
@@ -102,6 +102,49 @@ test("every control that acts on the applicant is refused before any allowlist",
       assert.equal(verdict.allowed, false, `"${label}" must never be clicked (purpose ${purpose})`);
       assert.equal(verdict.forbidden, true, `"${label}" must be refused by the denylist, not merely unmatched`);
     }
+  }
+
+  // `Message` WAS in that list until 3.10.0, and its removal is the single
+  // narrowest thing this release does — so it is re-asserted here rather than
+  // simply deleted, in the same test that used to forbid it outright.
+  //
+  // The rule now: `message` is still a denylisted token for every purpose but
+  // ONE, the purpose whose whole job is to open the composer so the recruiter's
+  // own reviewed text can be typed into it (CLAUDE.md rule 5, rule 9k).
+  for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
+    const verdict = Applicants.classifyApplicantControl({ text: "Message", purpose, inContainer: true });
+    if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_COMPOSE) {
+      assert.equal(verdict.allowed, true, "the panel's own Message control opens the composer");
+      assert.equal(verdict.reason, "message-compose");
+      continue;
+    }
+    assert.equal(verdict.allowed, false, `"Message" must still be refused for purpose ${purpose}`);
+    assert.equal(verdict.forbidden, true, `"Message" must still be refused BY THE DENYLIST for ${purpose}`);
+  }
+
+  // And the exemption buys exactly one label. Everything a Send control could
+  // be called is still refused AT the composing purpose — which is what makes
+  // "this extension never sends" a property of the classifier rather than a
+  // promise about the caller. `Send message` as an ACCESSIBLE NAME on a control
+  // whose visible text is `Message` is included because it was a real hole:
+  // `label` prefers the text, so the anchored allowlist never saw the verb.
+  const neverSendable = [
+    { text: "Send", ariaLabel: "" },
+    { text: "Send message", ariaLabel: "" },
+    { text: "InMail", ariaLabel: "" },
+    { text: "Message", ariaLabel: "Send message" },
+    { text: "Message", ariaLabel: "Send InMail to Gaurang Agarwal" },
+    { text: "Message all", ariaLabel: "" },
+    { text: "Message", ariaLabel: "Message all 665 applicants" }
+  ];
+  for (const control of neverSendable) {
+    const verdict = Applicants.classifyApplicantControl({
+      ...control,
+      purpose: Applicants.CONTROL_PURPOSE.MESSAGE_COMPOSE,
+      inContainer: true
+    });
+    assert.equal(verdict.allowed, false,
+      `${JSON.stringify(control)} must never be allowed, even at the composing purpose`);
   }
 
   // The denylist beats the allowlist, so a compound label loses.
@@ -1162,10 +1205,10 @@ test("the applicants adapter clicks only its gated controls", async () => {
   // one call site: a second site for a control rule 9 already names would raise
   // this number without adding a control, and the number is only worth asserting
   // while it counts controls.
-  assert.equal(clicks.length, 8, `only seven gated controls and one dismiss may be clicked, found ${clicks.length}`);
+  assert.equal(clicks.length, 9, `only eight gated controls and one dismiss may be clicked, found ${clicks.length}`);
   assert.equal(
     (source.match(/control\.element\.click\(\)/g) || []).length,
-    5,
+    6,
     "every open must go through a classified verdict"
   );
   assert.match(source, /pager\.element\.click\(\);/, "and so must the pager");
@@ -2430,7 +2473,7 @@ test("the run walks the list by identity, so a position can never address the wr
   assert.ok(!/rowId !== openId/.test(withoutComments(source)),
     "the address bar can no longer decide on its own that an applicant is already open");
   // Still exactly eight click call sites: this adds no control (rule 9).
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("a control in the list header can never retire the open applicant's row", async () => {
@@ -3353,7 +3396,7 @@ test("coming back to an unfinished job run resumes it, but a completed run stays
 
   // And it costs no new click: the restart replays the run, it does not invent
   // a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("the worker lifecycle admits one newest execution and never reopens a completed run", async () => {
@@ -3636,7 +3679,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     "every list scan feeds the roster");
 
   // Rule 9: this adds no control, on any path.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("a roster seeded before the page is settled walks it from the middle, not the top", () => {
@@ -3799,7 +3842,7 @@ test("an applicant is opened, read and saved exactly once, and 'already open' is
     "and a collected row joins that ledger before the walk moves on");
 
   // Rule 9: none of this adds a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
@@ -3893,7 +3936,7 @@ test("an arrival survives a lost race, a back button and a bfcache restore", asy
   assert.match(source, /if \(previous\?\.pageShowHandler\) window\.removeEventListener\("pageshow", previous\.pageShowHandler\)/);
 
   // And none of it costs a click: the restart replays the run, it invents no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("coming back to the tab restarts the run, and the page says so", async () => {
@@ -3972,7 +4015,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
   assert.match(source, /previous\.noticeElement\.remove\(\)/);
 
   // Still no new control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 });
 
 test("the run collects every page of the applicant list, not only the first", async () => {
@@ -4411,7 +4454,7 @@ test("a row that would not open is opened again, because nothing was read when i
 
   // No new click: re-resolving a row is finding it again, not pressing anything.
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "still one click per applicant");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and still exactly eight in the file");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and still exactly nine in the file");
 });
 
 test("a numbered pager is the pager too, but only against the page it says it is on", () => {
@@ -4510,7 +4553,7 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
     "and the numbered reader runs only when it found nothing");
 
   // No new click site: the pager press is the one that already existed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
   assert.match(source, /walk\.pagerReason = pager\.verdict\.reason/, "and which pager was used is on the record");
 });
 
@@ -4528,7 +4571,7 @@ test("the panel Download probe observes and never presses", async () => {
   assert.ok(!/return \{ element/.test(probe), "and must not hand an element back to be pressed");
 
   // The click budget is untouched: rule 9 governs controls that are pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
 
   // And what it found reaches the recruiter's console, which is the point.
   assert.match(source, /panelDownloadLabels: resume\.panelDownloadLabels \|\| \[\]/,
@@ -4781,8 +4824,8 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
   // The click budget is a count of CONTROLS (rule 9), and no control was
   // removed here — only a caller. Eight: seven gated opens plus one shared
   // dismiss.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8,
-    "applicants.js must still click exactly eight times");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9,
+    "applicants.js must still click exactly nine times");
 });
 
 // ------------------------------------------------- pacing the walk to the page
@@ -5164,11 +5207,20 @@ test("Phase 1 tripwire: eight clicks, and each one is owned by a named function"
   // path, say, paid for by dropping the dismiss — passes every count in this
   // file while pressing something the allowlist never sanctioned.
   //
-  // So the owners are named. Seven gated opens plus one shared dismiss, one each.
+  // So the owners are named. Eight gated opens plus one shared dismiss, one each.
   // The eighth arrived in 3.9.1: `openContactMenu`, which opens the overflow menu
   // that hides the contact disclosure on the captured layout. It is a NEW OWNER
   // rather than a redistribution, which is exactly what this test exists to make
   // visible — and CLAUDE.md rule 5 was amended in the same task.
+  //
+  // The NINTH arrived in 3.10.0: `insertApplicantMessage`, which presses the
+  // applicant panel's own `Message` control so the recruiter's reviewed text can
+  // be typed into LinkedIn's composer. Rule 5 was amended in that task too, and
+  // the amendment is narrow in a way this list makes checkable: it adds one
+  // owner that OPENS a composer, and no owner that sends one. There is no
+  // `sendMessage`, no `pressEnter`, no `submitComposer` here and there must
+  // never be — `send` is on the denylist for every purpose, so such an owner
+  // could not classify its control as clickable even if somebody wrote it.
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
   const owners = [
     "closeOpenedOverlay",      // the dismiss, shared by every overlay we opened
@@ -5178,11 +5230,12 @@ test("Phase 1 tripwire: eight clicks, and each one is owned by a named function"
     "clickResumeDownload",     // the resume viewer's own Download
     "collectResume",           // the resume control
     "selectApplicantRow",      // a row of the applicant list
-    "clickApplicantPager"      // the list's next-page control
+    "clickApplicantPager",     // the list's next-page control
+    "insertApplicantMessage"   // the panel's own Message control (3.10.0, rule 9k)
   ];
 
   assert.equal((source.match(/\.click\(\)/g) || []).length, owners.length,
-    "the click budget is eight: seven gated opens and one shared dismiss");
+    "the click budget is nine: eight gated opens and one shared dismiss");
 
   const declarations = adapterFunctions(source);
   const found = [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(declarations, match.index));
@@ -5976,7 +6029,7 @@ test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and 
   assert.match(signals, /held\.panel\?\.isConnected/, "a remount re-measures rather than answering from a detached node");
 
   // The click budget is untouched by any of this.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 // ------ Phase 5 of the multiple-LinkedIn-UI support guide: the fallbacks
@@ -6177,7 +6230,7 @@ test("Phase 5: a document card names the file when there is no viewer to ask", a
   assert.match(card, /DOCUMENT_EXTENSION_PATTERN\.test\(line\)/, "a file name is a line carrying a document extension");
   assert.match(card, /VIEWER_NOISE_PATTERN\.test\(line\)/, "and not one of the viewer's own chrome lines");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 test("Phase 5: the labelled reader refuses the posting's own title and company", async () => {
@@ -6370,7 +6423,7 @@ test("Phase 6: the header window ends at the first section on SCREEN, not the fi
   assert.match(own, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
   assert.ok(!/const cut = rest\.findIndex/.test(source), "and no longer carries its own copy");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 
@@ -6549,7 +6602,7 @@ test("Phase 7: whether the left list moved is measured on the page, because it c
   // The panel's own position is still restored on every path, failure included.
   const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
   assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the click budget is still nine");
 });
 
 
@@ -6784,7 +6837,12 @@ test("Phase 9: a whole capture names nobody, and still says what the layout is",
 
 test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and reads no credential", async () => {
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
-  const capture = source.slice(source.indexOf("function captureApplicantUi"), source.indexOf("state.handler = (message"));
+  // Bounded by what FOLLOWS the capture rather than by the handler (3.10.0):
+  // the composer section was added between the two, so slicing to the handler
+  // silently swallowed it and this test started reporting the composer's click
+  // as the capture's. The end marker is the composer's first declaration, which
+  // survives `withoutComments` — a comment marker would not.
+  const capture = source.slice(source.indexOf("function captureApplicantUi"), source.indexOf("const COMPOSER_BOX_SELECTOR"));
   assert.ok(capture.length > 600 && capture.length < 5000, "the capture must be found, and only it");
 
   assert.ok(!/\.click\(\)/.test(capture), "it presses nothing");
@@ -6801,7 +6859,7 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
     "and the header window is the one the extraction already read, not a second reading");
 
   // Still eight clicks in the whole file.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // Stop is still matched before every other branch that does work.
   const handler = source.slice(source.indexOf("state.handler = (message"), source.length);
@@ -6831,7 +6889,7 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
 // current file naming and download behaviour, and never reuse a previous
 // applicant's resume link."
 //
-// Every widening here is READ-ONLY. The click budget is still eight.
+// Every widening here is READ-ONLY. The click budget is still nine.
 
 test("Phase 11: the contact disclosure gained four surfaces and got stricter, not looser", async () => {
   const source = withoutComments(await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8"));
@@ -6904,7 +6962,7 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
 
   // And none of it costs a click.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
   const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
     .map((match) => ({ name: match[1], at: match.index }));
   const ownerOf = (offset) => {
@@ -6917,7 +6975,7 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   };
   assert.deepEqual(
     [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(match.index)).sort(),
-    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "selectApplicantRow"],
+    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "insertApplicantMessage", "openContactAndCollect", "openContactMenu", "selectApplicantRow"],
     // `openContactMenu` is the eighth, added in 3.9.1 to reach the contact
     // disclosure — NOT the resume. Every resume variant above still costs nothing.
     "and each one is still owned by its own gated function — none moved house"
@@ -7045,7 +7103,7 @@ test("Phase 12: twelve phases changed no schema, no CSV and no click", async () 
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "eight clicks in, eight clicks out");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "nine clicks in, nine clicks out");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7183,7 +7241,7 @@ test("3.9.1: correcting the expander added no click and moved no schema", async 
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
   // This task changed policy only. Not one call site moved.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7313,9 +7371,9 @@ test("3.9.1: the eighth click is a new control, and it is the only new one", asy
   const source = withoutComments(
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "seven gated opens and one shared dismiss");
-  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 5,
-    "the five verdict-gated opens are unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "eight gated opens and one shared dismiss");
+  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 6,
+    "the six verdict-gated opens");
   assert.equal((source.match(/opener\.element\.click\(\)/g) || []).length, 1,
     "and the new one is the menu opener, once");
 
@@ -7490,7 +7548,7 @@ test("3.9.1: handling the scan cost no click and no new status", async () => {
   );
   // The eighth click is the contact menu and remains the only new one. Nothing
   // about the scan is pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // Reusing NOT_ATTEMPTED rather than inventing a status is deliberate: a new one
   // would have to be taught to the merge, the CSV and the dashboard, and this
@@ -7646,7 +7704,7 @@ test("3.9.2: none of this added a click, a column, a status or a permission", as
   );
   // The whole fix is reporting. It reads nothing new off the page and presses
   // nothing at all.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
   assert.equal((source.match(/trusted: true/g) || []).length, 1, "and trusted:true is still at one site");
 
   const { APPLICANT_TABLE_COLUMNS } = await import("../src/applicant-csv.js");
@@ -7798,9 +7856,9 @@ test("3.9.3: the opener can never be returned as its own menu", async () => {
   assert.match(open, /hasRenderedItems\(element\)/,
     "and an empty shell mid-render is never mistaken for an empty menu");
 
-  // Still exactly one press. The whole route is one click and the budget is eight.
+  // Still exactly one press. The whole route is one click and the budget is nine.
   assert.equal((open.match(/\.click\(\)/g) || []).length, 1, "the menu is opened once");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "and the file's budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the file's budget is unchanged");
 });
 
 test("3.9.3: 'it appeared when we pressed' means newly VISIBLE, not newly created", async () => {
@@ -7905,7 +7963,7 @@ test("3.9.3: a whole-job run expands collapsed sections, on a smaller budget tha
     "the same one budget still reaches the scan's second pass");
 
   // No new click site. The budget moved; the places that press did not.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight sites");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine sites");
 });
 
 test("3.9.3: an expander budget that runs out says so, and a refusal says why", async () => {
@@ -8173,7 +8231,7 @@ test("3.9.4: the completion gate stands between the last row and the pager", asy
   assert.match(run, /pageSweeps = 0;\s*\n\s*unfinished\.clear\(\);/, "a pager press resets the page's allowance");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 test("3.9.4: a numbered pager may mark its current page on the item wrapping the number", async () => {
@@ -8359,6 +8417,14 @@ test("3.9.4: every other purpose still tests the whole string, aria-label includ
   for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
     if (purpose === Applicants.CONTROL_PURPOSE.APPLICANT_ROW) continue;
     for (const label of FORBIDDEN_ACTION_LABELS) {
+      // 3.10.0: the panel's own Message control is exempted for the composing
+      // purpose and for nothing else. The skip asks the CORE's own predicate
+      // rather than re-spelling the rule here, so this loop can never disagree
+      // with the classifier about which labels are exempt — and every label the
+      // predicate refuses is still asserted to be denylisted at the new purpose,
+      // which is the leak this test exists to catch.
+      if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_COMPOSE
+        && Applicants.isApplicantMessageControlLabel(label, label)) continue;
       const verdict = Applicants.classifyApplicantControl({
         text: label, purpose, inContainer: true, href: ROW_HREF
       });
@@ -8434,7 +8500,7 @@ test("3.9.4: the adapter hands the row's own address to the classifier", async (
   assert.ok(!/href: row\.href/.test(select), "the proof must describe the node being clicked");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 });
 
 
@@ -9040,7 +9106,7 @@ test("3.9.5: the adapter asks three readers in order and presses no new control"
 
   // Rule 5, first: this task adds no click. The pager press is the one that
   // already existed; all that changed is which control it is handed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "the click budget is still eight");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
 
   // READER 1 — unchanged, and still ARIA only (rule 7).
   assert.match(adapter, /function marksCurrentPage\(node\) \{[\s\S]{0,320}?aria-current[\s\S]{0,200}?aria-selected/);
