@@ -3973,9 +3973,16 @@ test("the run collects every page of the applicant list, not only the first", as
   // stripped first, because the live pager renders `Next ›` and the anchor is on
   // the whole label. Stripping rather than widening the pattern keeps the anchor
   // meaningful — `Next: Message` still fails it.
-  assert.match(policy, /if \(!APPLICANT_PAGINATION_PATTERN\.test\(paginationLabel\(label\)\)\) return refuse\("not-a-pagination-control"\)/,
+  // 3.9.4: the same allowlist, now asked of the text AND the accessible name,
+  // because a numbered pager says `Page 2` only in its `aria-label`. The
+  // de-glyphing is unchanged and so is the anchor.
+  assert.match(policy, /APPLICANT_PAGINATION_PATTERN\.test\(paginationLabel\(normalizeLabel\(text\)\)\)/,
     "an allowlist, by name, on the de-glyphed label");
-  assert.match(policy, /purpose === CONTROL_PURPOSE\.PAGINATION[\s\S]{0,400}?if \(!inContainer\) return refuse\("outside-applicant-list"\)/,
+  assert.match(policy, /APPLICANT_PAGINATION_PATTERN\.test\(paginationLabel\(normalizeLabel\(ariaLabel\)\)\)/,
+    "and on the de-glyphed accessible name, which is where a numbered pager says it");
+  assert.match(policy, /if \(!named && !numbered\) return refuse\("not-a-pagination-control"\)/,
+    "and a control that is neither is still refused");
+  assert.match(policy, /purpose === CONTROL_PURPOSE\.PAGINATION[\s\S]{0,2400}?if \(!inContainer\) return refuse\("outside-applicant-list"\)/,
     "and the container proof is mandatory");
   // The denylist still wins: it is tested before any purpose branch.
   assert.ok(
@@ -4306,6 +4313,85 @@ test("a Next pager is still the pager when its label carries a chevron", () => {
     assert.equal(result.allowed, false, `${forbidden} must never be pressed`);
   }
   assert.equal(verdict("Next: Message").forbidden, true, "the denylist is still consulted first");
+});
+
+test("a numbered pager is the pager too, but only against the page it says it is on", () => {
+  const P = Applicants.CONTROL_PURPOSE.PAGINATION;
+  const verdict = (options) => Applicants.classifyApplicantControl({ purpose: P, inContainer: true, ...options });
+
+  // THE DEFECT (3.9.4), from the user's screenshot of the live pager: there is
+  // no Next control on it at all — a filled `1` and a plain `2`. The run
+  // therefore settled at the bottom of page one, found no pager and recorded
+  // `settled`, which `isConclusiveListStop` treats as the end of the list, so
+  // the job was marked COMPLETED with every page after the first never opened.
+
+  // THE ACCESSIBLE NAME, which is where such a pager says what it is. `label`
+  // prefers the text whenever there is one, so `Page 2` was never read.
+  assert.equal(verdict({ text: "2", ariaLabel: "Page 2" }).allowed, true, "the aria-label names the page");
+  assert.equal(verdict({ text: "", ariaLabel: "Next page" }).allowed, true, "and a named pager is unaffected");
+
+  // THE NUMBER, which is only ever a page against the page the pager marks as
+  // current — the caller's proof, read off `aria-current`, exactly as
+  // `inContainer` is the caller's proof of where the control came from.
+  assert.equal(verdict({ text: "2", currentPage: 1 }).allowed, true, "2 is the next page from 1");
+  assert.equal(verdict({ text: "2", currentPage: 1 }).reason, "pagination-numbered");
+  assert.equal(verdict({ text: "2", currentPage: 1 }).page, 2, "and the verdict says which page it goes to");
+  assert.equal(verdict({ text: "4", currentPage: 3 }).allowed, true);
+
+  // Every other number stays refused, and each refusal is a defect it prevents.
+  assert.equal(verdict({ text: "2" }).allowed, false, "a bare 2 with no current page is not a pager (unchanged)");
+  assert.equal(verdict({ text: "1", currentPage: 1 }).allowed, false, "the page being shown is not forward progress");
+  assert.equal(verdict({ text: "5", currentPage: 1 }).allowed, false, "and pressing 5 from page one skips three pages of applicants");
+  assert.equal(verdict({ text: "2", currentPage: 5 }).allowed, false, "backwards is not forwards either");
+  assert.equal(verdict({ text: "2", currentPage: 0 }).allowed, false, "a current page of nought is not a page");
+
+  // The two proofs are independent, and both are still required.
+  assert.equal(
+    Applicants.classifyApplicantControl({ text: "2", purpose: P, inContainer: false, currentPage: 1 }).reason,
+    "outside-applicant-list"
+  );
+  // And nothing about a number lets a forbidden control through: the denylist
+  // runs before any of this.
+  assert.equal(verdict({ text: "2", ariaLabel: "Reject page 2", currentPage: 1 }).forbidden, true);
+
+  // The number reader answers for a bare digit and for LinkedIn's own wordings.
+  assert.equal(Applicants.pageNumberFrom("2"), 2);
+  assert.equal(Applicants.pageNumberFrom("Page 12"), 12);
+  assert.equal(Applicants.pageNumberFrom("Page 2 of 27"), 2);
+  for (const not of ["", "Next", "2 applicants", "Page", "25 of 665", "1st"]) {
+    assert.equal(Applicants.pageNumberFrom(not), null, `${not} names no page`);
+  }
+});
+
+test("the numbered pager is identified as a group, and never pressed on a guess", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const finder = source.slice(source.indexOf("function findNumberedPagerControl"), source.indexOf("function clickApplicantPager"));
+
+  // A numbered pager NAMES nothing, so the group is what is identified and the
+  // number is only trusted inside it. All three conditions, each of which alone
+  // would let something that is not a pager through.
+  assert.match(finder, /members\.length < 2/, "one numeric button is a button; a row of them is a pager");
+  assert.match(finder, /marked\.length !== 1/, "exactly one control marked as the page being shown");
+  assert.match(finder, /member\.page === current \+ 1/, "and only the one numbered next may be pressed");
+  assert.match(finder, /currentPage: current/, "the page it is on is read off the pager, never counted by the run");
+
+  // Rule 7: the current page is decided by ARIA, never by a class name.
+  const markerAt = source.indexOf("function isCurrentPageControl");
+  const marker = source.slice(markerAt, source.indexOf("\n  }", markerAt));
+  assert.ok(marker.length > 40 && marker.length < 500, "the slice is the function, not the file after it");
+  assert.match(marker, /aria-current/);
+  assert.match(marker, /aria-selected/);
+  assert.ok(!/class/i.test(marker), "a generated class name is never the proof (rule 7)");
+
+  // The named pager is still tried FIRST and in its own narrow scope — this is
+  // a reader added after the working one, not a replacement for it.
+  const named = source.slice(source.indexOf("function findApplicantPaginationControl"), source.indexOf("const PAGER_SCOPE_LEVELS"));
+  assert.match(named, /const scope = list\.parentElement \|\| list;/, "the named pager's scope is unchanged");
+  assert.match(named, /return findNumberedPagerControl\(list\);/, "and the numbered reader runs only when it found nothing");
+
+  // No new click site: the pager press is the one that already existed.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 8, "still exactly eight clicks");
+  assert.match(source, /walk\.pagerReason = pager\.verdict\.reason/, "and which pager was used is on the record");
 });
 
 test("the panel Download probe observes and never presses", async () => {

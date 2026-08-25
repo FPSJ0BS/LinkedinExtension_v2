@@ -478,6 +478,31 @@
     return PAGINATION_GLYPH_PATTERN.test(raw) ? "next" : "";
   }
 
+  /**
+   * The page a numbered pager control offers, or null.
+   *
+   * THE DEFECT (3.9.4), from the user's screenshot of the live pager: it renders
+   * no Next control at all — it renders `1` filled and `2` beside it. A bare
+   * number was refused on purpose ("any numeric control in the list would
+   * otherwise qualify"), which was right while nothing could prove a number was
+   * a PAGE. So the run reached the bottom of page one, found no pager, recorded
+   * the CONCLUSIVE stop `settled`, and marked the job completed with every page
+   * after the first never opened.
+   *
+   * Accepts `2` and `page 2`, so the same reader answers for the text and for
+   * the accessible name.
+   */
+  function pageNumberFrom(value) {
+    const text = normalizeLabel(value);
+    // A bare number, or a number the label calls a page. `25 of 665` is NOT a
+    // page — it is the range a list is showing, it is rendered right beside the
+    // pager, and reading it as page 25 would jump the run past 24 pages of
+    // applicants. The word `page` is what licenses the `of` form.
+    if (/^\d{1,4}$/.test(text)) return Number(text);
+    const named = /^page\s+(\d{1,4})(?:\s+of\s+\d{1,4})?$/.exec(text);
+    return named ? Number(named[1]) : null;
+  }
+
   function normalizeLabel(value) {
     const core = CORE();
     if (core?.cleanText) return core.cleanText(value).toLowerCase();
@@ -492,8 +517,13 @@
    * found by label anywhere on the page. "Show details" labels half a dozen
    * unrelated controls on this surface, so the proof is mandatory for every
    * purpose except the resume link, which is unambiguous by name.
+   *
+   * `currentPage` is a second proof of the same kind, for pagination only: the
+   * page the pager itself marks as the one being shown. A numbered pager's
+   * controls are named `1`, `2`, `3` and say nothing about what they are, so
+   * that number is what makes "the next page" decidable rather than guessed.
    */
-  function classifyApplicantControl({ text = "", ariaLabel = "", purpose = "", inContainer = false } = {}) {
+  function classifyApplicantControl({ text = "", ariaLabel = "", purpose = "", inContainer = false, currentPage = null } = {}) {
     const label = normalizeLabel(text) || normalizeLabel(ariaLabel);
     const combined = `${normalizeLabel(text)} ${normalizeLabel(ariaLabel)}`.trim();
     const refuse = (reason, forbidden = false) => ({ allowed: false, forbidden, label, purpose, reason });
@@ -552,12 +582,35 @@
       return { allowed: true, forbidden: false, label, purpose, reason: "applicant-row" };
     }
     if (purpose === CONTROL_PURPOSE.PAGINATION) {
-      if (!APPLICANT_PAGINATION_PATTERN.test(paginationLabel(label))) return refuse("not-a-pagination-control");
+      // THE NAME FIRST, and now the ACCESSIBLE name as well as the text. A
+      // numbered pager renders `2` as its text and says `Page 2` only in its
+      // `aria-label`, and `label` above prefers the text whenever there is one —
+      // so the string that actually says what the control is was never read.
+      const named = APPLICANT_PAGINATION_PATTERN.test(paginationLabel(normalizeLabel(text)))
+        || APPLICANT_PAGINATION_PATTERN.test(paginationLabel(normalizeLabel(ariaLabel)));
+
+      // THE NUMBER SECOND, and only ever with the caller's proof. A bare `2` is
+      // still refused on its own — nothing about the string says it is a page.
+      // `currentPage` is that proof: the caller read it off the pager itself,
+      // from the control the page marks `aria-current`, and a number is accepted
+      // only when it is the very NEXT one. So `1` can never be pressed from page
+      // one (no forward progress, and an endless run), `5` can never be pressed
+      // from page one (skipping three pages of applicants), and a numeric
+      // control that is not part of a pager has no current page to be next to.
+      const offered = pageNumberFrom(text) ?? pageNumberFrom(ariaLabel);
+      const current = Number.isInteger(currentPage) && currentPage > 0 ? currentPage : null;
+      const numbered = offered !== null && current !== null && offered === current + 1;
+
+      if (!named && !numbered) return refuse("not-a-pagination-control");
       // Proven inside the list, exactly as connections pagination is: a "Next"
       // anywhere else on a hiring page belongs to something that is not the
       // applicant list, and pressing it would leave the run somewhere else.
       if (!inContainer) return refuse("outside-applicant-list");
-      return { allowed: true, forbidden: false, label, purpose, reason: "pagination" };
+      return {
+        allowed: true, forbidden: false, label, purpose,
+        reason: named ? "pagination" : "pagination-numbered",
+        page: numbered ? offered : null
+      };
     }
     return refuse("unknown-purpose");
   }
@@ -3731,7 +3784,7 @@
     APPLICANT_MENU_OPENER_WITHIN_PATTERN,
     isApplicantMenuOpenerLabel,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
-    APPLICANT_PAGINATION_PATTERN, classifyApplicantControl,
+    APPLICANT_PAGINATION_PATTERN, classifyApplicantControl, pageNumberFrom, paginationLabel,
     // qualifications and screening
     QUALIFICATION_CATEGORY, QUALIFICATION_RESULT, QUALIFICATION_SOURCE,
     qualificationCategoryOf, classifyQualificationResult, classifyQualificationSource,

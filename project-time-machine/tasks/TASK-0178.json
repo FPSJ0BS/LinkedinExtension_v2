@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0178",
+  "name": "Page forward on a numbered pager, which names itself only in its aria-label",
+  "request": "Page forward on a numbered pager, which names itself only in its aria-label",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T08:47:53.689Z",
+  "completedAt": "2026-08-25T08:52:40.059Z",
+  "startCommit": "6312a43dc931824e35fb2e84d4602227fcde27bb",
+  "gitRef": "task/TASK-0178",
+  "files": [
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 566 tests passed / 0 failed (564 before, 2 added), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "TASK-0178: page forward on a NUMBERED pager, which names itself only in its aria-label. THE DEFECT, from the user's screenshot of the live pager: there is no Next control on that layout at all - it renders a filled '1' and a plain '2'. classifyApplicantControl took the label as text||ariaLabel, so a numbered button's label was the bare string '2', and a bare number was refused DELIBERATELY ('any numeric control in the list would otherwise qualify') and asserted that way since 3.7.9. That refusal was right while nothing could prove a number was a PAGE, and its cost is the whole report: the walk settled at the bottom of page one, findApplicantPaginationControl returned null, and stoppedBy was recorded as 'settled' - which isConclusiveListStop treats as the end of the list, so the job was marked COMPLETED with every page after the first never opened, and claimAutoRun will not re-arm a job whose execution reported COMPLETED. TWO CHANGES, and the second is the one that needed a new kind of proof. (1) THE ACCESSIBLE NAME IS NOW READ. label prefers the text whenever there is one, so a control whose text is '2' and whose aria-label is 'Page 2' never had the string that says what it is consulted at all - and 'page \\d+' had been in the allowlist since 3.7.8, unreachable. The allowlist is now asked of the de-glyphed text AND the de-glyphed accessible name; the anchor and the glyph-stripping are unchanged, so 'Next: Message' still fails and the denylist still runs before any of it. (2) A NUMBER IS A PAGE ONLY AGAINST THE PAGE THE PAGER SAYS IT IS ON. currentPage is a second caller-supplied proof of exactly the same kind as inContainer, and a number is accepted only when it is current+1. Each refusal that keeps is a defect it prevents: '1' from page one is not forward progress and would run forever, '5' from page one skips three pages of applicants, and a numeric control that is not part of a pager has no current page to be next to - so a bare '2' with no proof stays refused exactly as the existing test asserts. A NUMBERED PAGER NAMES NOTHING, so the ADAPTER identifies the GROUP and trusts the number only inside it: two or more sibling controls that each offer a page number, exactly one of them marked by aria-current or aria-selected, and one numbered exactly one higher. Rule 7 throughout - the current page is decided by ARIA, never by a class name, asserted on the function's own source. If the pager marks no current page it returns null rather than guessing, because a guess here does not cost a field, it costs a page of applicants. The search climbs at most four ancestors because a pager renders BELOW the list and is routinely outside list.parentElement; that wider scope is safe for a group with those three properties and would not be for a control identified by the word 'Next', so THE NAMED PAGER IS TRIED FIRST IN ITS OWN UNCHANGED NARROW SCOPE and the numbered reader runs only where it found nothing - a reader added after the working one, not a replacement. pageNumberFrom refuses '25 of 665' - the range rendered beside the pager - because reading that as page 25 would jump the run past 24 pages; the word 'page' is what licenses the 'of' form, and the negative is asserted. Which pager was used and which page it reached are now on the walk record, so a live report can distinguish 'no pager found' from 'pager found and pressed'. NO NEW CLICK: still exactly eight, the pager press is the one that already existed. Two new tests, four assertions widened where they pinned the old shape. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js."
+}

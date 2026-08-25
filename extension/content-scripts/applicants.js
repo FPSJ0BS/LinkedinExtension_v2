@@ -5341,6 +5341,114 @@
       if (!isVisible(element)) continue;
       return { element, verdict };
     }
+    return findNumberedPagerControl(list);
+  }
+
+  /** How far above the list a pager may sit and still be this list's pager. */
+  const PAGER_SCOPE_LEVELS = 4;
+
+  /**
+   * Which page a pager control says it is, if it says anything at all.
+   *
+   * The text and the accessible name are BOTH read, and one reader answers for
+   * both: the live pager renders `2` as its text and `Page 2` only in its
+   * `aria-label`, and a screen-reader-only span means either can be the one
+   * carrying the number.
+   */
+  function pagerPageNumber(element) {
+    return Applicants.pageNumberFrom(cleanText(element.textContent))
+      ?? Applicants.pageNumberFrom(accessibleName(element))
+      ?? Applicants.pageNumberFrom(cleanText(element.getAttribute("aria-label")));
+  }
+
+  /** Is this the page the pager says is being shown? */
+  function isCurrentPageControl(element) {
+    const current = cleanText(element.getAttribute("aria-current")).toLowerCase();
+    if (current && current !== "false") return true;
+    return cleanText(element.getAttribute("aria-selected")).toLowerCase() === "true";
+  }
+
+  /**
+   * The next-page control of a NUMBERED pager, or null.
+   *
+   * THE DEFECT, from the user's screenshot of the live pager: there is no Next
+   * control on it. There is a filled `1` and a plain `2`, and a bare number was
+   * refused — correctly, while nothing could prove a number was a page. So the
+   * run settled at the bottom of page one, found no pager, and recorded
+   * `settled`, which is CONCLUSIVE: the job was marked completed with every page
+   * after the first never opened.
+   *
+   * A numbered pager names nothing, so THE GROUP is what is identified and the
+   * number is only trusted inside it. Three things have to be true together, and
+   * no single one of them would be enough:
+   *
+   *   1. two or more sibling controls that each offer a page number — one
+   *      numeric button is a numeric button; a row of them is a pager;
+   *   2. exactly one of them marked as the page being shown, by `aria-current`
+   *      or `aria-selected` — the ARIA the pattern is defined by, never a class
+   *      name (rule 7);
+   *   3. one of the others numbered exactly one higher, which is the only one
+   *      that may be pressed.
+   *
+   * If the pager marks no current page this returns null rather than guessing.
+   * A guess here does not cost a field, it costs a page of applicants — pressing
+   * `5` from page one skips three pages, and pressing `1` runs forever.
+   *
+   * The search climbs a bounded number of ancestors because a pager is rendered
+   * BELOW the list and is routinely outside `list.parentElement` — but the
+   * classifier still gets `inContainer` proven against the scope actually
+   * searched, and (1)–(3) are what make a wider scope safe here when it would
+   * not be for a control identified by the word "Next".
+   */
+  function findNumberedPagerControl(list) {
+    let scope = list;
+    for (let level = 0; level <= PAGER_SCOPE_LEVELS && scope; level += 1) {
+      const found = numberedPagerWithin(scope);
+      if (found) return found;
+      if (scope === document.body || scope.tagName?.toLowerCase() === "main") break;
+      scope = scope.parentElement;
+    }
+    return null;
+  }
+
+  function numberedPagerWithin(scope) {
+    // Grouped by the parent the numeric controls share, so a pager is told from
+    // numbers scattered through the list — a rating, a count, a year in a card.
+    const groups = new Map();
+    for (const element of scope.querySelectorAll("button,a,[role='button']")) {
+      if (!isVisible(element)) continue;
+      const page = pagerPageNumber(element);
+      if (page === null) continue;
+      const parent = element.parentElement?.parentElement || element.parentElement;
+      if (!parent) continue;
+      if (!groups.has(parent)) groups.set(parent, []);
+      groups.get(parent).push({ element, page });
+    }
+
+    for (const members of groups.values()) {
+      if (members.length < 2) continue;
+      const marked = members.filter((member) => isCurrentPageControl(member.element));
+      // Exactly one current page. None means this is not a pager, or is one that
+      // will not say where it is — either way there is nothing to be next to.
+      if (marked.length !== 1) continue;
+      const current = marked[0].page;
+      const next = members.find((member) => member.page === current + 1);
+      if (!next) continue;
+      const element = next.element;
+      if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
+      const verdict = Applicants.classifyApplicantControl({
+        text: cleanText(element.textContent),
+        ariaLabel: cleanText(element.getAttribute("aria-label")),
+        purpose: Applicants.CONTROL_PURPOSE.PAGINATION,
+        inContainer: scope.contains(element),
+        // The proof, read off the pager itself rather than assumed from how many
+        // times this run has paged — the recruiter may have left the list on
+        // page three, and a run must page forward from where it actually is.
+        currentPage: current
+      });
+      if (!verdict.allowed) continue;
+      return { element, verdict };
+    }
     return null;
   }
 
@@ -5424,6 +5532,7 @@
           try {
             clickApplicantPager(pager);
             diagnostics.listScroll.paged += 1;
+            notePagerUsed(diagnostics.listScroll, pager);
           } catch {
             diagnostics.listScroll.stoppedBy = "pagination-refused";
             break;
@@ -5465,6 +5574,21 @@
    */
   function clickApplicantPager(pager) {
     pager.element.click();
+  }
+
+  /**
+   * Which pager this run is using, on the record.
+   *
+   * "The run stopped at 25" and "the run never found the pager" are the same
+   * sentence from two ends, and only one of them names a cause. A live report
+   * that carries `pagerReason: "pagination-numbered"` and `page: 2` says the
+   * numbered pager was found AND pressed, which no count of rows can.
+   */
+  function notePagerUsed(walk, pager) {
+    if (!walk || !pager?.verdict) return;
+    walk.pagerReason = pager.verdict.reason || "";
+    walk.pagerLabel = pager.verdict.label || "";
+    if (pager.verdict.page) walk.pages = Math.max(walk.pages || 1, pager.verdict.page);
   }
 
   /**
@@ -5846,6 +5970,7 @@
       try {
         clickApplicantPager(pager);
         walk.paged += 1;
+        notePagerUsed(walk, pager);
       } catch {
         walk.stoppedBy = "pagination-refused";
         break;
