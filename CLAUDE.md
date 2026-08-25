@@ -270,7 +270,8 @@ itself.
 
 Companion docs: [WORKFLOW.md](docs/WORKFLOW.md) · [AGENTS.md](AGENTS.md) · [TECH_STACK.md](docs/TECH_STACK.md) ·
 [CHECKS.md](docs/CHECKS.md) (real results only) · [PHASES.md](docs/PHASES.md) ·
-[PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [INSTALL.md](docs/INSTALL.md) · [MEMORY.md](docs/MEMORY.md) ·
+[PROJECT_STATUS.md](docs/PROJECT_STATUS.md) · [SETUP.md](docs/SETUP.md) (from a clone) ·
+[INSTALL.md](docs/INSTALL.md) (from the installer) · [MEMORY.md](docs/MEMORY.md) ·
 [SKILLS.md](docs/SKILLS.md) · [README.md](README.md).
 
 [COMPLETE_EXTRACTION_SPEC.md](docs/COMPLETE_EXTRACTION_SPEC.md) is a **proposal**, not current behaviour —

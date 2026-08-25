@@ -1,0 +1,35 @@
+{
+  "schema": 2,
+  "id": "TASK-0166",
+  "name": "Setup guide for installing the extension",
+  "request": "Setup guide for installing the extension",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T05:24:53.102Z",
+  "completedAt": "2026-08-25T05:35:02.677Z",
+  "startCommit": "12860204a10c4cf96bf84481ccbdb62258c9d48a",
+  "gitRef": "task/TASK-0166",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "README.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHECKS.md"
+    },
+    {
+      "change": "added",
+      "path": "docs/SETUP.md",
+      "wasUntracked": true
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 531 passed / 0 failed, docs:check 18 files, validate 31 build files"
+  ],
+  "result": "Add docs/SETUP.md: a setup guide covering both routes onto a machine - the packaged .zip for a use-only device (deferring to INSTALL.md) and a full from-source setup for a device that will build it. Prerequisites with a stated Node 22 floor and the reason for it (npm test hands a glob to node --test, which expands it itself only from Node 21, and the Windows shell will not do it); what each of the five npm run check stages actually proves; the two build traps that cost real time - npm run build deletes dist/ before compiling so a failed build leaves no extension, and a direct node scripts/build.mjs deletes dist/ and then fails because tsc resolves from node_modules/.bin only inside an npm script; loading dist/ rather than extension/, which the folder picker accepts because it holds a manifest.json but which has no src/, so Chrome reports a missing service worker; how to confirm the load is real, including why the build ID matters (the popup/worker/content-script handshake refuses and re-injects a mismatched script); a permission table read out of the manifest, with the storage row corrected against background.ts - it holds worker state, not the profiles, which are in IndexedDB and need no permission; the reload-the-card-AND-the-tab step that is the usual reason a change looks like it did nothing; npm run package for handing a build to somebody else; where the data lives and why an unpacked extension's storage follows its folder path; a troubleshooting table of the real failure modes; and an explicit statement that none of it proves live LinkedIn behaviour. Every claim was read out of the tree rather than remembered, and CHECKS.md records where each one was verified. Fixed one stale setup instruction found while writing: README step 8 of From a clone told a new contributor to confirm build ID react-v3.7.8, four releases behind what the tree builds, so the check would have failed for everyone who ran it. docs/MEMORY.md line 7 carries the same stale version and was deliberately left alone as out of scope. Linked the new doc from README and the CLAUDE.md companion list. Doc-only: no production code and no test changed, so the suite is unchanged at 531."
+}

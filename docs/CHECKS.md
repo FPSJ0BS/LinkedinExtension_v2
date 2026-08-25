@@ -1,5 +1,39 @@
 # CHECKS.md
 
+## Documentation - the setup guide (TASK-0166)
+
+Executed in this environment on 2026-08-25. Doc-only: no production code, no test and no version
+changed, so the suite is unchanged at 531 and that is the point — a setup guide that needed a code
+change would have been describing something other than what ships.
+
+| Command | Result |
+|---|---|
+| `node project-time-machine/scripts/status.js` / `audit.js` | no active task, clean tree, audit passed |
+| `npm run check` before the change | typecheck, build, **531 passed / 0 failed**, docs:check (17 files), validate (31 build files) |
+| `npm run check` after the change | typecheck, build, **531 passed / 0 failed**, docs:check (**18** files), validate (31 build files) |
+
+Every factual claim in [`SETUP.md`](SETUP.md) was read out of the tree rather than remembered:
+
+| Claim | Where it was verified |
+|---|---|
+| Version 3.9.0, build ID `2026-08-08-react-v3.9.0` | `dist/build-meta.json`, `extension/manifest.json`, `scripts/build.mjs` |
+| Five check stages, 31 validated build files, 18 link-checked docs | `package.json` scripts, the `npm run check` output above |
+| `npm run build` deletes `dist/` first | [`scripts/build.mjs`](../scripts/build.mjs) — two `rm` calls precede `tsc` |
+| A direct `node scripts/build.mjs` fails on `tsc` | `build.mjs` spawns `tsc` off `PATH`; `command -v tsc` finds no global install here, so it resolves only from `node_modules/.bin` inside an npm script |
+| Loading `extension/` instead of `dist/` yields a missing service worker | `extension/` has no `src/`, while `manifest.json` declares `src/background.js` |
+| The permission table | `extension/manifest.json` verbatim; the `storage` row corrected against the `chrome.storage.local` uses in `src/background.ts` — worker state, not the profiles |
+| The packager's round-trip and `.sha256` | [`scripts/package.mjs`](../scripts/package.mjs) |
+| Node 22 floor | `npm test` passes a glob to `node --test`, which expands it itself only from Node 21; verified running on Node 24.16.0 / npm 11.13.0 |
+
+One stale instruction was fixed while writing it: `README.md` step 8 of *From a clone* told a new
+contributor to confirm a build ID of `react-v3.7.8`, four releases behind what the tree builds — a
+check that would have failed for everyone who ran it. `docs/MEMORY.md` line 7 carries the same stale
+version and was **left alone**, as it is outside this task's scope.
+
+**Not performed:** nothing in `SETUP.md` was executed in a browser. The load steps, the card, the
+popup's build ID and the permission prompt are described from the manifest and the build output, not
+from a run. Rule 20 stands — loading `dist/` in Chrome is the user's step.
+
 ## Automated verification - 3.9.0 multiple LinkedIn applicant UI support
 
 Executed in this environment on 2026-08-08. Every row below is a command that was actually run here
