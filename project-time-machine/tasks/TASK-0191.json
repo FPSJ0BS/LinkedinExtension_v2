@@ -1,0 +1,22 @@
+{
+  "schema": 2,
+  "id": "TASK-0191",
+  "name": "Bring PROJECT_STATUS up to 3.10.0",
+  "request": "Bring PROJECT_STATUS up to 3.10.0",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T12:55:33.449Z",
+  "completedAt": "2026-08-25T12:57:21.323Z",
+  "startCommit": "b2e3ef08a54e43e02932b6732121a06555b9dcf9",
+  "gitRef": "task/TASK-0191",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/PROJECT_STATUS.md"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 678 tests (0 fail), doc links across 19 Markdown files, build validation"
+  ],
+  "result": "TASK-0191: PROJECT_STATUS said 3.9.3 while the extension shipped 3.10.0, and six releases had gone unrecorded. THE DRIFT, and why it was left alone in TASK-0190 rather than half-fixed: bumping the header alone would have left the document describing 3.9.3 under a 3.10.0 heading, which is worse than being visibly stale - a reader trusts a header. So it is done properly here, in its own task, which is what the previous task said it needed. WRITTEN FROM THE CHANGELOG, NOT FROM MEMORY. Every claim in the two new sections was read out of docs/CHANGELOG.md first; nothing is summarised from what I happened to remember of the releases, and the releases I did not do are described in their own entries' words rather than re-characterised. 3.10.0 covers two separate changes and says so: TASK-0189's resume-scan reload, where LinkedIn's own notice asks for a refresh and the run now gives it one, with the loop budget riding on the auto-run lease because a reload destroys every counter in the document it would otherwise bound; and TASK-0188/0190's applicant messaging, which is what makes the release a minor bump. The messaging paragraph leads with the property everything else depends on - it INSERTS and stops, the human presses Enter, send and inmail stay denylisted for every purpose so no Send control could be classified clickable, and there is no SEND message type - then the blocked-variable rule and the recipient check, then the rule 5 amendment and the aria-label hole a TEST found rather than reading. 3.9.4 - 3.9.8 are told as ONE story because that is what they are: one pager defect, reported four times with the same screenshot, taking six releases because each build fixed a different step of the same path - which page is being shown, then forming the group, then the readers contradicting each other, then 3.9.8's finding that the run had pressed the page it was already on for five releases. AND IT SAYS WHERE 3.9.4 AND 3.9.5 WENT: they wrote no CHANGELOG entry of their own, so a reader looking for them finds nothing and cannot tell whether they are missing or never existed. The section states that they are described inside the 3.9.6 and 3.9.7 entries, which is where to look. Recording the absence is the point - a status document that silently skips two releases teaches a reader not to trust its list. A PRE-EXISTING WART FIXED WHILE HERE: 3.9.2, 3.9.1 and 3.9.0 were each still headed 'Latest work', because every session added a new one without demoting the last, so four sections claimed to be the latest at once. They are now 'Previously', and exactly two sections carry 'Latest work' - the 3.10.0 release and the pager story that closed with it. VERIFIED: npm run check passed, 678 tests 0 fail, doc links resolve across 19 Markdown files including the new link to applicant-messaging-guide.md, build validation clean. No source file, test, selector, schema, click or CSV column touched - documentation only. Files: docs/PROJECT_STATUS.md."
+}

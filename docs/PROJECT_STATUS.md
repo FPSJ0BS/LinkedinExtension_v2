@@ -1,10 +1,65 @@
 # Profile Vault React — Project Status
 
 **Status date:** 2026-08-25
-**Version:** 3.9.3
-**Build ID:** `2026-08-25-react-v3.9.3`
+**Version:** 3.10.0
+**Build ID:** `2026-08-25-react-v3.10.0`
 
-## Latest work — the first live diagnostics report (3.9.3)
+## Latest work — the refresh LinkedIn asked for, and messaging one applicant (3.10.0)
+
+Two separate changes, and the second is what makes this a minor bump rather than a patch.
+
+**The resume scan (TASK-0189).** *"Scanning resume for viruses. Please refresh the page now."* —
+LinkedIn's own words, in the resume card, reported a second time and with the detail that settles
+it: *"this is after many applicants profiles are saved"*. The reporter named the remedy themselves,
+and the run now does what the notice asks — reloading at that applicant when waiting does not help,
+and coming back for what it still owes. The budget that stops it looping rides on the auto-run lease
+rather than in the run, because a reload destroys every counter in the document it bounds.
+
+**Applicant messaging (TASK-0188, TASK-0190).** Message one applicant from a reusable template,
+filled from that person's already-collected record. The panel's own **Message** control becomes the
+**ninth click**, exempted from the denylist for that one purpose and no other.
+
+**It inserts and stops.** LinkedIn's composer says *"Press Enter to Send"*, and the human presses it.
+No Send control is resolved, found or pressed — `send` and `inmail` stay denylisted for *every*
+purpose, so none could be classified clickable by any caller, and there is no `SEND` message type.
+There is no bulk anything: one applicant, one composer, one insertion, driven by the user.
+
+An unresolved template variable **blocks** the message rather than rendering nothing, because the
+alternative is sending somebody `Hi ,` — rule 1, a wrong value is worse than a blank one. The
+composer must also say who it is addressed to and agree, since the messaging overlay persists
+between applicants and the *previous* conversation is routinely what is on screen.
+
+**Rule 5 was amended in the same task**, as an amendment to that rule must be. A test — not
+reading — caught the one real hole: `Message` with `aria-label: "Send message"` was allowed, because
+the label check prefers visible text and the anchored allowlist never saw the verb. Closed the same
+day, and recorded in [CHECKS.md](CHECKS.md).
+
+**Still open:** none of the messaging path has run live, and it is the one feature here whose
+mistakes reach a person rather than a spreadsheet cell. See
+[applicant-messaging-guide.md](applicant-messaging-guide.md) for what to do the first time.
+
+## Latest work — six releases on one pager control (3.9.4 – 3.9.8)
+
+One defect, reported four times with the same screenshot — a `1` in a filled circle and a plain `2`
+beside it — and it took six releases because each build fixed a different step of the same path.
+**3.9.4 and 3.9.5 wrote no CHANGELOG entry of their own**; what they did is described inside the
+3.9.6 and 3.9.7 entries, which is where to look for them.
+
+- **3.9.3 – 3.9.5** each answered *which page is being shown* a different way: `aria-current` on the
+  numbered control, then the two ancestors above it, then the walk's own history — standing on the
+  one fact no layout can remove, that pressing the control labelled N leaves you on page N.
+- **3.9.6 (TASK-0185)** — all three were downstream of a step nobody had looked at: **forming the
+  group**. A number is trusted only inside a proven group of page numbers, and the group was never
+  formed.
+- **3.9.7 (TASK-0186)** — the readers *contradicted each other, so none of them ran*. Four builds had
+  worked on controls that offered a page number in the first place, and that was the broken step.
+- **3.9.8 (TASK-0187)** — **the run pressed the page it was already on, and had for five releases.**
+  `APPLICANT_PAGINATION_PATTERN` carried `page \d+` on its **named** branch, which runs first and is
+  handed no `currentPage`, so it could not tell the page being shown from the page after it. On a
+  pager labelled `Page 1` / `Page 2`, the first control the classifier allowed was page one. Found by
+  a parallel trace of the whole click path and confirmed by execution before a line was changed.
+
+## Previously — the first live diagnostics report (3.9.3)
 
 3.9.2 made the report retrievable. This is what the first one said, and **it contradicted the fix
 that had just shipped**: `reason: "no-contact-menu"`, `menuClicked: false`, `menuLabel: ""`. Nothing
@@ -23,7 +78,7 @@ discarded.
 **Open live questions** are in [CHECKS.md](CHECKS.md), and item 0 is now *does the report still
 come back* — it is the instrument the other eight are answered with.
 
-## Latest work — the diagnostics report was unreachable (3.9.2)
+## Previously — the diagnostics report was unreachable (3.9.2)
 
 Reported live: **Download Diagnostics answered "Nothing to report yet"** on an account that had
 just collected a whole job. Three separate nulls, each on its own sufficient — the page deleted its
@@ -38,7 +93,7 @@ questions are meant to be answered with, which is why it was worth its own relea
 contact details behind `More...` are not being saved. `diagnostics.contact` records where that path
 stops, and until 3.9.2 that record could not be retrieved.
 
-## Latest work — the first live capture (3.9.1)
+## Previously — the first live capture (3.9.1)
 
 Screenshots of a real recruiter account arrived after 3.9.0 shipped and contradicted three
 assumptions at once — all three in one screenshot, and none of them in a reader:
@@ -62,7 +117,7 @@ to read its content-type.
 **Open live questions** are in [CHECKS.md](CHECKS.md). The one to watch hardest: this is the first
 release that opens an ATS menu, and nothing inside it may ever be activated.
 
-## Latest work — the same person, whichever way the page is drawn (3.9.0)
+## Previously — the same person, whichever way the page is drawn (3.9.0)
 
 Twelve phases of [`multiple-linkedin-dom-ui-support-guide.md`](multiple-linkedin-dom-ui-support-guide.md),
 TASK-0153 to TASK-0165, one Time Machine task each. Applicant collection now has a fallback layer
