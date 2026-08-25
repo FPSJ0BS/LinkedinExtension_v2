@@ -301,13 +301,72 @@
   const RESUME_CONTROL_PATTERN =
     /\b(?:resume|résumé|cv|curriculum\s+vitae)\b/i;
 
-  /** A collapsed section's own expander. */
+  /**
+   * A collapsed section's own expander.
+   *
+   * **The count is the point of the rewrite (3.9.1).** LinkedIn does not write
+   * "Show more" above a list it can count — it writes "Show 5 more experiences".
+   * The old pattern required the word after the verb to be one of
+   * more/all/details/full, so a digit in between refused it, and the Experience
+   * list was never expanded on the surface that matters most. That is not a
+   * cosmetic miss: `current_role`, `current_company` and `total_experience` are
+   * derived from the Experience section and from nothing else, and all three
+   * have come back empty for four consecutive releases (docs/CHECKS.md). An
+   * optional count is now allowed between the verb and the noun.
+   *
+   * Two things this must NOT match, both of them controls sitting within a few
+   * pixels of a real expander in the applicant panel:
+   *
+   *   - **a navigation control.** "See full profile" matched `see\s+full` and
+   *     was therefore clicked, which LEAVES THE APPLICANTS PAGE. Everything the
+   *     run needs next — the panel, the resume card, the list pager — only
+   *     exists there. Refused by `APPLICANT_NAVIGATION_CONTROL_PATTERN`.
+   *   - **an overflow menu opener.** A bare "More" / "More..." is not a section
+   *     expander; it is the ATS action menu, and every destructive control on
+   *     this surface lives inside it. Refused by `APPLICANT_MENU_OPENER_PATTERN`
+   *     here, and reached deliberately — for the contact disclosure and nothing
+   *     else — through `CONTROL_PURPOSE.CONTACT_MENU`.
+   */
   const DISCLOSURE_CONTROL_PATTERN =
-    /^(?:show\s+(?:more|all|details|full)|see\s+(?:more|all|details|full)|view\s+(?:more|all|details)|read\s+more|expand|more)\b/i;
+    /^(?:show|see|view|read)\s+(?:\d+\s+)?(?:more|all|details|full)\b|^expand\b/i;
+
+  /**
+   * A control that takes the tab somewhere else.
+   *
+   * Not a *forbidden action* — it sends nothing and changes nothing, so it does
+   * not belong on the denylist — but it must never be pressed during a run.
+   * On profile pages a navigating "Show all N" IS allowed, because that flow
+   * captures the profile URL first and navigates back (CLAUDE.md rule 5); this
+   * surface has no equivalent return path, so here it is simply refused.
+   */
+  const APPLICANT_NAVIGATION_CONTROL_PATTERN =
+    /\b(?:full\s+profile|view\s+profile|see\s+profile|open\s+profile|profile\s+page|linkedin\s+profile|in\s+new\s+tab)\b/i;
+
+  /**
+   * The applicant panel's overflow menu opener.
+   *
+   * Anchored on the WHOLE label, so "Show 3 more experiences" is untouched —
+   * this is only the bare button, however LinkedIn spells its ellipsis.
+   */
+  const APPLICANT_MENU_OPENER_PATTERN =
+    /^(?:more|more\s*(?:\.{2,}|…)|more\s+(?:actions?|options?)|other\s+actions?|options)$/i;
 
   /** What a caller may ask permission for. Anything else is refused. */
   const CONTROL_PURPOSE = Object.freeze({
     CONTACT: "contact",
+    /**
+     * The applicant panel+s overflow menu, opened ONLY to reach the contact
+     * disclosure inside it (3.9.1, rule 9j).
+     *
+     * On the layout the user captured there is no Contact control in the
+     * panel at all — the applicant+s email and phone live behind "More...".
+     * Opening that menu renders controls LinkedIn is already offering this
+     * recruiter and changes nothing; the menu is closed again immediately.
+     * The only item the caller may then press is one this same classifier
+     * allows for CONTROL_PURPOSE.CONTACT, so the denylist still governs
+     * every destructive action the menu contains.
+     */
+    CONTACT_MENU: "contact-menu",
     RESUME: "resume",
     /**
      * The opened viewer's own Download control (3.7.9, rule 9i).
@@ -423,9 +482,27 @@
       return { allowed: true, forbidden: false, label, purpose, reason: "resume-download" };
     }
     if (purpose === CONTROL_PURPOSE.DISCLOSURE) {
+      // These two run BEFORE the allowlist, and the order is the point: both
+      // sit inside the applicant panel, so `inContainer` cannot tell either of
+      // them from a real expander, and both must say WHY they were refused
+      // rather than falling through to a generic "not a disclosure". That
+      // reason is what `diagnostics.expansions` reports (3.9.1).
+      if (APPLICANT_NAVIGATION_CONTROL_PATTERN.test(combined)) return refuse("navigates-away");
+      if (APPLICANT_MENU_OPENER_PATTERN.test(label)) return refuse("overflow-menu-not-a-disclosure");
       if (!DISCLOSURE_CONTROL_PATTERN.test(label)) return refuse("not-a-disclosure-control");
       if (!inContainer) return refuse("outside-applicant-panel");
       return { allowed: true, forbidden: false, label, purpose, reason: "expand-section" };
+    }
+    if (purpose === CONTROL_PURPOSE.CONTACT_MENU) {
+      // Opening a menu is not acting on the applicant: it renders controls the
+      // recruiter is already being offered and sends nothing. What makes it safe
+      // is not the opening but what the caller is then allowed to press —
+      // `openContactAndCollect` looks inside the opened menu for a CONTACT
+      // control and nothing else, and this classifier's denylist still runs
+      // first on that item, so every ATS action in the menu stays refused.
+      if (!APPLICANT_MENU_OPENER_PATTERN.test(label)) return refuse("not-a-menu-opener");
+      if (!inContainer) return refuse("outside-applicant-panel");
+      return { allowed: true, forbidden: false, label, purpose, reason: "contact-menu" };
     }
     if (purpose === CONTROL_PURPOSE.APPLICANT_ROW) {
       if (!inContainer) return refuse("outside-applicant-list");
@@ -3394,6 +3471,7 @@
     COLUMN_SCROLL_EPSILON, chooseColumnScrollTarget,
     // click policy
     CONTROL_PURPOSE, FORBIDDEN_APPLICANT_CONTROL_PATTERN, APPLICANT_CONTACT_CONTROL_PATTERN,
+    APPLICANT_NAVIGATION_CONTROL_PATTERN, APPLICANT_MENU_OPENER_PATTERN,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
     APPLICANT_PAGINATION_PATTERN, classifyApplicantControl,
     // qualifications and screening

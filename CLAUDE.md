@@ -113,6 +113,12 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
    control · a row of the applicant list · the resume viewer's own Download.
 
+   **On hiring pages a control that navigates is refused, even when its label reads like an
+   expander.** "See full profile" sits inside the applicant panel and matched the expander rule until
+   3.9.1; pressing it leaves the applicants page, and the panel, the resume card and the list pager
+   only exist there. The profile-page exception above does not transfer — it works only because that
+   flow captures the profile URL first and comes back, and this surface has no such return path.
+
    **Permanently forbidden everywhere:** Connect, Follow, Message, InMail, Endorse, Remove
    connection, Withdraw, Invite, Report, Block, Send, Share, Accept, Ignore, Save — and on hiring
    pages also **Shortlist, Move to, Reject, Archive, Hire, Offer, Interview, Schedule, Rate,

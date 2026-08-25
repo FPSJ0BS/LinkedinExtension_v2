@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0168",
+  "name": "Fix the applicant section expander: refuse navigation and menu openers, accept counted expanders",
+  "request": "Fix the applicant section expander: refuse navigation and menu openers, accept counted expanders",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T06:55:05.207Z",
+  "completedAt": "2026-08-25T07:00:46.675Z",
+  "startCommit": "5ed94d6ccc243fe21445bbf824498604d860d3ef",
+  "gitRef": "task/TASK-0168",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 536 tests passed (was 531), docs:check 18 files, validate 31 build files"
+  ],
+  "result": "Correct the applicant panel's expander against the first live capture of the applicants page. The user's screenshot contains three controls the old DISCLOSURE_CONTROL_PATTERN got wrong at once. (1) 'Show 5 more experiences' was REFUSED: the pattern required more/all/details/full to follow the verb immediately, so every counted expander LinkedIn renders was rejected - and the Experience section is the sole source of current_role, current_company and total_experience, all three of which CHECKS.md records as empty for four consecutive releases. An optional count is now allowed between verb and noun. (2) 'See full profile' was ALLOWED: it matched see\\s+full, and expandCollapsedSections presses whatever the classifier allows anywhere in the panel, so the collector tab navigated to the member's profile - where there is no applicant panel, no resume card and no list to page, so every step after it read the wrong page. Refused now by APPLICANT_NAVIGATION_CONTROL_PATTERN, as a navigation control rather than a forbidden one, because it sends nothing and changes nothing and calling it forbidden would be a false statement on the record. (3) 'More...' was ALLOWED as a disclosure: it matched the bare 'more' alternative, so the walk opened the ATS action menu - Reject, Move to, Archive, Rate - and left it open over the panel it was about to read. Refused now by APPLICANT_MENU_OPENER_PATTERN, anchored on the whole label so counted expanders are untouched. Both refusals run BEFORE the allowlist so each reports its own reason into diagnostics.expansions rather than falling through to a generic one. Added CONTROL_PURPOSE.CONTACT_MENU, inert in this task, which is the deliberate and single-purpose route to that same menu - the wiring lands next. CLAUDE.md rule 5 amended to state that a navigating control is refused on hiring pages and why the profile-page exception does not transfer. Five new tests: counted expanders allowed with every previously-working label re-asserted, navigation refused and marked not-forbidden, the menu refused as a disclosure but reachable as CONTACT_MENU, the denylist still beating the new purpose, and the click budget unchanged at seven. Policy only - no click site moved and the seventeen-field schema is re-asserted."
+}

@@ -6686,3 +6686,130 @@ test("Phase 12: twelve phases changed no schema, no CSV and no click", async () 
     "and the same nine CSV columns, byte for byte"
   );
 });
+
+// ---------------------------------------------------------------------------
+// 3.9.1 — the applicant panel's expander, corrected against a live capture
+//
+// The first live screenshots of the applicants page arrived after 3.9.0 shipped
+// and contradicted three assumptions at once. All three are in one screenshot:
+// the panel offers "Show 5 more experiences", "See full profile" and "More...",
+// and the old DISCLOSURE pattern got every one of them wrong — it refused the
+// first, and allowed the second and third.
+// ---------------------------------------------------------------------------
+
+test("3.9.1: an expander that counts what it will reveal is still an expander", () => {
+  const allowed = (text) =>
+    Applicants.classifyApplicantControl({
+      text, purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE, inContainer: true
+    }).allowed;
+
+  // The control in the capture, verbatim. LinkedIn writes the count whenever it
+  // has one, and the old pattern required more/all/details/full to follow the
+  // verb IMMEDIATELY, so every counted expander on the page was refused.
+  assert.equal(allowed("Show 5 more experiences"), true, "the control in the live capture");
+  assert.equal(allowed("Show 3 more educations"), true);
+  assert.equal(allowed("Show 2 more"), true);
+  assert.equal(allowed("See 4 more skills"), true);
+
+  // Everything that worked before still works — this is a widening, and a
+  // widening that dropped a working label would be the regression it exists to
+  // prevent.
+  for (const label of [
+    "Show more", "Show all", "Show details", "Show all 12 skills",
+    "See more", "See all", "View details", "View more", "Read more", "Expand"
+  ]) {
+    assert.equal(allowed(label), true, `${label} was allowed before and must stay allowed`);
+  }
+
+  // And the count is not a licence to match anything with a digit in it.
+  for (const label of ["5 more", "more 5", "Showing 5 of 12", "Show"]) {
+    assert.equal(allowed(label), false, `${label} is not an expander`);
+  }
+});
+
+test("3.9.1: the expander never presses a control that leaves the applicants page", () => {
+  const verdict = (text) =>
+    Applicants.classifyApplicantControl({
+      text, purpose: Applicants.CONTROL_PURPOSE.DISCLOSURE, inContainer: true
+    });
+
+  // THE DEFECT. "See full profile" is an anchor sitting inside the applicant
+  // panel, a few pixels from the real expanders, and it matched `see\s+full`.
+  // `expandCollapsedSections` walks every button and anchor in the panel and
+  // presses whatever this classifier allows — so it navigated the collector tab
+  // to the member's profile, where there is no applicant panel, no resume card
+  // and no list to page. Everything after that in the run reads the wrong page.
+  assert.equal(verdict("See full profile").allowed, false);
+  assert.equal(verdict("See full profile").reason, "navigates-away");
+  for (const label of ["View profile", "See profile", "Open profile", "View LinkedIn profile"]) {
+    assert.equal(verdict(label).allowed, false, `${label} navigates`);
+  }
+
+  // It is refused as a NAVIGATION control, not as a forbidden one: it sends
+  // nothing and changes nothing about the applicant, so it never belonged on the
+  // denylist and calling it forbidden would have been a false statement on the
+  // record.
+  assert.equal(verdict("See full profile").forbidden, false);
+});
+
+test("3.9.1: the overflow menu is not a section expander", () => {
+  const verdict = (text, purpose) =>
+    Applicants.classifyApplicantControl({ text, purpose, inContainer: true });
+  const { DISCLOSURE, CONTACT_MENU } = Applicants.CONTROL_PURPOSE;
+
+  // "More..." matched the old pattern's bare `more` alternative, so the walk
+  // opened the ATS action menu — Reject, Move to, Archive, Rate — and left it
+  // open over the panel it was about to read.
+  for (const label of ["More", "More...", "More…", "More actions", "More options"]) {
+    assert.equal(verdict(label, DISCLOSURE).allowed, false, `${label} is a menu, not a disclosure`);
+    assert.equal(verdict(label, DISCLOSURE).reason, "overflow-menu-not-a-disclosure");
+  }
+
+  // The same label IS reachable, deliberately and for one purpose only.
+  assert.equal(verdict("More...", CONTACT_MENU).allowed, true);
+  assert.equal(verdict("More...", CONTACT_MENU).reason, "contact-menu");
+
+  // Anchored on the whole label, so a counted expander that merely starts with
+  // the same three letters is untouched in both directions.
+  assert.equal(verdict("Show 5 more experiences", DISCLOSURE).allowed, true);
+  assert.equal(verdict("Show 5 more experiences", CONTACT_MENU).allowed, false);
+  assert.equal(verdict("More about this job", CONTACT_MENU).allowed, false);
+});
+
+test("3.9.1: opening a menu never widens what may be pressed inside it", () => {
+  const verdict = (text, inContainer = true) =>
+    Applicants.classifyApplicantControl({
+      text, purpose: Applicants.CONTROL_PURPOSE.CONTACT_MENU, inContainer
+    });
+
+  // The denylist runs before every allowlist, on this purpose exactly as on the
+  // others. A menu is only safe to open because nothing inside it becomes
+  // pressable by being there.
+  for (const label of ["Message", "Reject", "Move to", "Archive", "Rate", "Share", "Save", "Report"]) {
+    const seen = verdict(label);
+    assert.equal(seen.allowed, false, `${label} is never a menu opener`);
+    assert.equal(seen.forbidden, true, `${label} is refused as a forbidden action`);
+  }
+
+  // And the container proof is mandatory, exactly as it is for CONTACT: a
+  // "More..." elsewhere on a hiring page belongs to something that is not this
+  // applicant.
+  assert.equal(verdict("More...", false).allowed, false);
+  assert.equal(verdict("More...", false).reason, "outside-applicant-panel");
+});
+
+test("3.9.1: correcting the expander added no click and moved no schema", async () => {
+  const source = withoutComments(
+    await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
+  );
+  // This task changed policy only. Not one call site moved.
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 7, "the click budget is unchanged");
+
+  assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
+    "name", "profileUrl", "headline", "location",
+    "currentRole", "currentCompany", "totalExperience",
+    "appliedAt", "contactedAt",
+    "contact", "resume", "experience", "education", "skills",
+    "screeningResponses", "qualifications", "applicationStatus"
+  ], "the same seventeen applicant fields");
+});
