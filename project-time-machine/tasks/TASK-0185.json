@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "id": "TASK-0185",
+  "name": "Group a numbered pager by what it renders, not by where the number sits",
+  "request": "Group a numbered pager by what it renders, not by where the number sits",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-25T11:06:48.583Z",
+  "completedAt": "2026-08-25T11:14:53.408Z",
+  "startCommit": "d55a1136443d57d22379a09f11f3086be96b71df",
+  "gitRef": "task/TASK-0185",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed (typecheck, build 3.9.6, 640 tests, doc links, validate)"
+  ],
+  "result": "3.9.6 — the numbered pager was never READ because the group was never FORMED. Three builds fixed 'which page is being shown' (aria-current on the control, then on its two ancestors, then the walk's own history needing no mark at all) and every one of them is downstream of identifying the GROUP of page numbers, which had two positional assumptions in it: members had to share an ancestor at exactly two levels (element.parentElement.parentElement — a child-index assumption rule 7 forbids, defeated by one extra wrapper div), and every member had to be a CONTROL (a pager has no reason to make the page you are already on pressable, and plenty paint it as plain text). Either one leaves a group of one, the group is dropped, and the search reports no-pager — which is CONCLUSIVE, so the job is COMPLETED at the bottom of page one and claimAutoRun refuses to re-arm a completed job. Numbers are now registered under every ancestor up to PAGER_GROUP_LEVELS and groups tried deepest-first so the tightest wrapper still wins; pageMarkersWithin adds the non-control pages a container renders, scoped to a container that already holds a numbered control and holds no applicant row and no panel, and a marker may prove the shape and carry the current-page mark but may NEVER be pressed. pagerSearchReason is a new pure rule so 'may this job be called finished' is executed in a test rather than inline in a DOM walk, and it asserts a pager's fingerprint at both ends — a page one AND some page after it, seen anywhere the search looked, grouped or not — so a 1 and a 2 outside every applicant row can never again be reported as the end of the list (unproven-pager, inconclusive, run stays restartable). A stray number alone is not enough, so a single-page job still completes normally. PAGER_SCOPE_LEVELS 4 to 6, still stopping at main. BUILD_ID had read v3.9.3 since 3.9.3, so 3.9.4 and 3.9.5 announced themselves as 3.9.3 in the recruiter's console and two of the three rounds on this pager could not tell 'the fix does not work' from 'the fix is not loaded' — bumped to v3.9.6 in all six asserted places. No new click (still exactly eight), no selector, schema, CSV column or permission touched. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, and the six version locations."
+}

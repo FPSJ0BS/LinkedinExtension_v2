@@ -8194,7 +8194,10 @@ test("3.9.4: a numbered pager may mark its current page on the item wrapping the
   // And a pager search that finds nothing now says WHICH nothing. "No pager at
   // all" is the last page; "a pager whose current page is unmarked" is a layout
   // this reader cannot see — and both used to arrive as the conclusive `settled`.
-  assert.match(adapter, /note\.reason = note\.refused[\s\S]{0,240}?note\.numbered > 0/,
+  // 3.9.6 moved the MAPPING into the core — "which nothing was it" decides
+  // whether the job may be called finished, so it belongs where a test can
+  // execute it — but every input it needs is still gathered here.
+  assert.match(adapter, /note\.reason = Applicants\.pagerSearchReason\(\{[\s\S]{0,320}?numbered: note\.numbered/,
     "the search records why it found nothing");
   assert.match(adapter, /walk\.pagerSearch = pagerSearch;/, "and the walk carries it into the report");
 });
@@ -8667,6 +8670,117 @@ test("3.9.5: a pager that names no current page is walked one page at a time, ne
     "and a pager walked to its last rendered page has nothing left to press");
 });
 
+// --------------------------------------------------------------------------
+// 3.9.6 — "there are 2 pages but it stops at the first", reported a third time
+// with the same screenshot: a `1` in a filled circle and a plain `2`.
+//
+// 3.9.3 and 3.9.4 guessed at WHERE the current-page mark sits; 3.9.5 added a
+// reader that needs no mark at all. All three are downstream of the same step —
+// forming the GROUP — and that step had two positional assumptions in it, either
+// of which drops the pager silently and completely:
+//
+//   * the members had to share an ancestor at EXACTLY two levels
+//     (`element.parentElement.parentElement`), so one extra wrapper puts each
+//     number in a group of one; and
+//   * every member had to be a CONTROL, so a pager that paints the page you are
+//     on as plain text — there is nowhere to click to — offers one member.
+//
+// Either way the group is dropped for having fewer than two members, the reason
+// is `no-pager`, and `no-pager` is CONCLUSIVE: the job is marked COMPLETED at
+// the bottom of page one and `claimAutoRun` refuses to re-arm it.
+// --------------------------------------------------------------------------
+
+test("3.9.6: a pager the reader could not group is never the end of the list", () => {
+  const why = Applicants.pagerSearchReason;
+
+  // THE DEFECT, in one assertion. A `1` and a `2` were rendered outside every
+  // applicant row, no group could be formed from them, and the old rule called
+  // that `no-pager` — "nothing on this page offers another one" — which finished
+  // the job. Both ends of a pager's fingerprint are what make it a pager: a page
+  // one, and some page after it.
+  assert.equal(why({ seen: [1, 2] }), "unproven-pager");
+  assert.equal(Applicants.isConclusivePagerReason("unproven-pager"), false,
+    "so the run stops, stays restartable, and says which reader failed");
+
+  // AND THE NEGATIVE THAT KEEPS A ONE-PAGE JOB FINISHING NORMALLY. A stray
+  // number on its own is not a pager, and a page that offers only page one has
+  // no second page — both are the genuine end of the list.
+  assert.equal(why({ seen: [] }), "no-pager", "nothing numbered at all");
+  assert.equal(why({ seen: [1] }), "no-pager", "a pager offering only page one");
+  assert.equal(why({ seen: [2] }), "no-pager", "a stray number with no page one beside it");
+  assert.equal(why({ seen: [7, 9] }), "no-pager", "and numbers that never start at one");
+  assert.equal(Applicants.isConclusivePagerReason("no-pager"), true);
+
+  // THE PAGE AFTER THIS ONE IS RENDERED AND CANNOT BE PRESSED. That is a reader
+  // failure — there IS a next page — and it must never be read as the end.
+  assert.equal(why({ numbered: 2, seen: [1, 2], unpressable: true }), "next-page-not-pressable");
+  assert.equal(Applicants.isConclusivePagerReason("next-page-not-pressable"), false);
+
+  // Unchanged, and asserted so widening the reason cannot quietly move any of
+  // them: the click policy's own refusal is never the list's verdict, a proven
+  // pager with nothing after the current page IS the end, and a group that
+  // failed the shape proof is the reader again.
+  assert.equal(why({ refused: "not-a-pagination-control", numbered: 2, seen: [1, 2] }),
+    "pagination-refused", "a refusal the run caused itself concludes nothing");
+  assert.equal(why({ numbered: 2, ordinal: "walked-out", seen: [1, 2] }), "no-next-number");
+  assert.equal(why({ numbered: 2, ordinal: "", seen: [1, 2] }), "no-next-number");
+  assert.equal(why({ numbered: 3, ordinal: "not-a-pager", seen: [1, 2, 3] }), "unreadable-pager");
+  assert.equal(why(), "no-pager", "and no arguments at all is still the plain end of a list");
+
+  // The order matters as much as the clauses: a refusal is reported even when a
+  // group WAS proven, because the run may conclude nothing from a control it
+  // declined to press itself.
+  assert.equal(why({ refused: "outside-applicant-list", numbered: 4, ordinal: "not-a-pager" }),
+    "pagination-refused");
+});
+
+test("3.9.6: the pager group no longer depends on how deeply the number is wrapped", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+  const finder = source.slice(
+    source.indexOf("function numberedPagerWithin"),
+    source.indexOf("async function loadEveryApplicantRow")
+  );
+
+  // THE FIXED DEPTH IS GONE. This is the assertion that would go red if it came
+  // back, and it is rule 7 in its plainest form: a child index is never proof.
+  assert.ok(!/element\.parentElement\?\.parentElement/.test(finder),
+    "a pager is not identified by a number sitting exactly two levels down");
+  assert.match(finder, /for \(let level = 1; level <= PAGER_GROUP_LEVELS && node instanceof Element/,
+    "a number is registered under every ancestor up to a bound");
+  assert.match(source, /const PAGER_GROUP_LEVELS = 4;/, "and the bound is named");
+  assert.match(finder, /elementDepth\(b\[0\]\) - elementDepth\(a\[0\]\)/,
+    "deepest first, so the tightest container holding the whole pager still wins");
+
+  // THE PAGE YOU ARE ON NEED NOT BE PRESSABLE. Added after the reader that
+  // already works, never in place of it — the multiple-UI guide's one rule.
+  assert.match(finder, /const controls = \[\];[\s\S]{0,600}?controls\.push\(\{ element, page, pressable: true \}\)/,
+    "the numbered controls are read exactly as before");
+  assert.match(finder, /: pageMarkersWithin\(container, found, outsideTheContent, note\);/,
+    "and the members that reader cannot see are added to the group");
+  assert.match(finder, /const members = \[\.\.\.found, \.\.\.markers\]\.sort\(inDocumentOrder\);/,
+    "in the order the page rendered them, which is what the shape proof reads");
+
+  // ...but only a control is ever clicked. This is the safety half: a marker may
+  // prove the shape and may carry the current-page mark, and may never be
+  // pressed.
+  const markers = source.slice(source.indexOf("function pageMarkersWithin"), source.indexOf("function numberedPagerWithin"));
+  assert.match(markers, /pressable: false/, "a marker is never pressable");
+  assert.match(markers, /if \(element\.closest\("button,a,\[role='button'\]"\)\) continue;/,
+    "and nothing inside a control is read twice");
+  assert.match(markers, /if \(!outsideTheContent\(element\)\) continue;/,
+    "a number inside a row or inside the panel is still never a page");
+  assert.match(finder, /const markers = wrapsTheContent\(container\)[\s\S]{0,40}?\? \[\]/,
+    "and a container holding a row or the panel is content, never a pager's wrapper");
+  assert.match(finder, /if \(!next\.pressable\) \{[\s\S]{0,120}?note\.unpressable = true;/,
+    "a next page that cannot be pressed is recorded as a reader failure");
+
+  // And the verdict is the pure rule's, so "may this job be called finished" is
+  // decided somewhere it can be executed rather than inline in a DOM walk.
+  const climb = source.slice(source.indexOf("function findNumberedPagerControl"), source.indexOf("function numberedPagerWithin"));
+  assert.match(climb, /Applicants\.pagerSearchReason\(\{/, "the reason comes from the core");
+  assert.match(climb, /seen: note\.seen/, "carrying every page number the search saw");
+});
+
 test("3.9.5: only two answers about a pager may finish a job", () => {
   // `claimAutoRun` refuses to re-arm a job whose execution reported COMPLETED,
   // so a run that completes on "I could not read the pager" does not merely
@@ -8676,7 +8790,13 @@ test("3.9.5: only two answers about a pager may finish a job", () => {
     assert.equal(Applicants.isConclusivePagerReason(reason), true,
       `${reason} is a verdict about the LIST`);
   }
-  for (const reason of ["unreadable-pager", "pagination-refused", "many-marked-current", "no-current-page", "", "settled"]) {
+  for (const reason of [
+    "unreadable-pager", "pagination-refused", "many-marked-current", "no-current-page",
+    // 3.9.6: a pager whose members could not be grouped, and a next page that is
+    // rendered but is not something that can be pressed.
+    "unproven-pager", "next-page-not-pressable",
+    "", "settled"
+  ]) {
     assert.equal(Applicants.isConclusivePagerReason(reason), false,
       `${reason} is a verdict about the READER, so the run must stay restartable`);
   }

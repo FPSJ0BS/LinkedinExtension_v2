@@ -1,5 +1,73 @@
 # CHANGELOG.md
 
+## 3.9.6 — the pager was never read, because the group was never formed
+
+TASK-0185. **"There are 2 pages but it stops at the first"**, reported a third
+time with the same screenshot: a `1` in a filled circle and a plain `2` beside
+it.
+
+3.9.3 read `aria-current` off the numbered control. 3.9.4 widened that to the two
+ancestors above it. 3.9.5 added a third reader that needs no mark at all — the
+walk's own history, standing on the one fact no layout can take away, that
+pressing the control labelled N leaves you on page N. **All three answer the same
+question, "which page is being shown", and all three are downstream of a step
+nobody had looked at: forming the GROUP.** A pager is identified as a group of
+page numbers, and only inside a proven group is a number trusted; if the group
+does not form, none of the three readers is ever reached.
+
+That step had two positional assumptions in it, and either one drops the pager
+silently and completely:
+
+* **The members had to share an ancestor at exactly two levels** —
+  `element.parentElement.parentElement`, which is `button` → `li` → `ul` and
+  nothing else. One extra wrapper `div` puts every number in a group of its own.
+  That is a child-index assumption of exactly the kind **rule 7** forbids, and it
+  is now a bound rather than a depth: a number is registered under every ancestor
+  up to `PAGER_GROUP_LEVELS`, and the groups are tried deepest first so the
+  tightest container holding the whole pager still wins.
+* **Every member had to be a CONTROL.** A pager has no reason to make the page
+  you are already on pressable — there is nowhere to go — and plenty of them
+  paint it as plain text. On that layout the group is `[2]`: one member, dropped.
+  `pageMarkersWithin` adds the pages a container renders that are not controls,
+  scoped to a container that already holds a numbered control and that holds no
+  applicant row and no panel, so nothing goes hunting for bare numbers across the
+  page. **A marker may prove the shape and may carry the current-page mark; it
+  may never be pressed** — `pressable` is checked before the click, and a next
+  page that is only a marker is recorded as a reader failure.
+
+Either way the group was dropped for having fewer than two members and the search
+reported `no-pager` — which is CONCLUSIVE. The job was marked COMPLETED at the
+bottom of page one, and `claimAutoRun` refuses to re-arm a completed job, so the
+run could not even restart itself. **A reader failure that finishes a job is the
+one failure this surface cannot recover from**, so `pagerSearchReason` is now a
+pure rule with the mapping executed in a test rather than spelled out inline in a
+DOM walk, and it asserts a pager's fingerprint at BOTH ends: a page one, and some
+page after it, seen anywhere the search looked and whether or not the two could
+be grouped. A `1` and a `2` outside every applicant row is a second page of
+applicants however the markup defeated this reader — that is `unproven-pager`,
+and the run stops restartable and names it. A stray number on its own is not
+enough, which is what keeps a genuinely single-page job completing normally.
+
+`PAGER_SCOPE_LEVELS` goes from four to six; the climb still stops at `main`, so
+it now says "up to the page's own main content" rather than guessing at how many
+wrappers sit between the row list and the pager below it. What makes a wider
+scope safe is not the distance — it is the shape proof, the exclusion of anything
+inside a row or inside the mounted panel, and the click policy's own refusal of
+any number that is not exactly `current + 1`.
+
+**And the build finally names itself.** `BUILD_ID` had read `v3.9.3` since 3.9.3,
+so the code of 3.9.4 and 3.9.5 announced itself in the recruiter's console as
+3.9.3 as well. Two of the three rounds spent on this pager could not distinguish
+"the fix does not work" from "the fix is not loaded", which is most of why there
+were three. Bumped in all six places the check asserts.
+
+No new click — still exactly eight. No selector, schema, CSV column or permission
+is touched. Three new tests; three existing assertions updated where they pinned
+the old shapes.
+
+**No live claim: rule 20 stands.** `npm run check` passed; loading `dist/` in
+Chrome is the user's step.
+
 ## 3.9.3 — the first release driven by a live diagnostics report
 
 TASK-0173 to TASK-0176. 3.9.2 made the diagnostics report retrievable. This is

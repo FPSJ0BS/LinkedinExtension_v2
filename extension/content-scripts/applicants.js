@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-25-react-v3.9.3";
+  const BUILD_ID = "2026-08-25-react-v3.9.6";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -5415,6 +5415,8 @@
     note.currentPageFrom = "";
     note.ordinal = "";
     note.refused = "";
+    note.unpressable = false;
+    note.seen = [];
     note.reason = "";
     if (!list) {
       note.reason = "no-list";
@@ -5438,8 +5440,19 @@
     return findNumberedPagerControl(list, note, visited);
   }
 
-  /** How far above the list a pager may sit and still be this list's pager. */
-  const PAGER_SCOPE_LEVELS = 4;
+  /**
+   * How far above the list a pager may sit and still be this list's pager.
+   *
+   * Six rather than four, and the climb still stops at `main` or `body`, so in
+   * practice this says "up to the page's own main content" rather than naming a
+   * depth. Four was a guess at how many wrappers LinkedIn puts between the row
+   * list and the pager below it, and a guess one wrapper short finds nothing at
+   * all. It is safe to widen because what makes a wider scope acceptable here is
+   * not the distance — it is the shape proof in `planPagerOrdinalStep`, the
+   * exclusion of anything inside a row or inside the mounted panel, and the
+   * click policy's own refusal of any number that is not exactly `current + 1`.
+   */
+  const PAGER_SCOPE_LEVELS = 6;
 
   /**
    * Which page a pager control says it is, if it says anything at all.
@@ -5578,10 +5591,25 @@
       if (panel instanceof Element && panel.contains(element)) return false;
       return !rows.some((row) => row.contains(element));
     };
+    /**
+     * The same rule pointed the other way, for a CONTAINER rather than a number.
+     *
+     * A pager's own wrapper holds pages and nothing else — never an applicant
+     * row, never the panel showing one person. Asking this before reading a
+     * container's plain-text page markers does two jobs at once: it keeps a
+     * stray number somewhere in the page's main content from ever being read as
+     * a page, and it stops the marker scan from walking a container the size of
+     * `main` on the one call per page where the pager is not found.
+     */
+    const wrapsTheContent = (element) => {
+      if (!(element instanceof Element)) return true;
+      if (panel instanceof Element && element.contains(panel)) return true;
+      return rows.some((row) => element.contains(row));
+    };
 
     let scope = list;
     for (let level = 0; level <= PAGER_SCOPE_LEVELS && scope; level += 1) {
-      const found = numberedPagerWithin(scope, note, visited, outsideTheContent);
+      const found = numberedPagerWithin(scope, note, visited, outsideTheContent, wrapsTheContent);
       if (found) {
         note.reason = "numbered-pager";
         return found;
@@ -5596,22 +5624,110 @@
     // pages left. Written down rather than reasoned about again from source —
     // 3.9.2 spent two rounds guessing at a defect one downloaded report settled.
     if (!note.reason) {
-      // Only two of these mean the LIST has ended, and `isConclusivePagerReason`
+      // Only some of these mean the LIST has ended, and `isConclusivePagerReason`
       // is where that is decided — everything else means this reader could not
       // see, and a run that completes on "I could not see" can never restart.
-      note.reason = note.refused
-        ? "pagination-refused"
-        : note.numbered > 0
-          ? (note.ordinal === "not-a-pager" ? "unreadable-pager" : "no-next-number")
-          : "no-pager";
+      // The mapping itself is pure and executed in a test (`pagerSearchReason`),
+      // because it decides whether the job may be called finished.
+      note.reason = Applicants.pagerSearchReason({
+        refused: note.refused,
+        numbered: note.numbered,
+        ordinal: note.ordinal,
+        unpressable: note.unpressable,
+        // Both ends of a pager's fingerprint: a page one, and some page after
+        // it. Seen ANYWHERE this search looked, whether or not the two could be
+        // grouped together — a `1` and a `2` outside every applicant row is a
+        // second page of applicants however this reader failed to read it, and
+        // reporting that as the end of the list is what completed the job at the
+        // bottom of page one.
+        seen: note.seen
+      });
     }
     return null;
   }
 
-  function numberedPagerWithin(scope, note = {}, visited = [], outsideTheContent = () => true) {
-    // Grouped by the parent the numeric controls share, so a pager is told from
-    // numbers scattered through the list — a rating, a count, a year in a card.
-    const groups = new Map();
+  /**
+   * How far above a page number the element that GROUPS the pager may sit.
+   *
+   * Through 3.9.5 this was not a bound at all, it was a fixed depth: the group
+   * was `element.parentElement.parentElement`, exactly two levels, which is
+   * `button` → `li` → `ul` and nothing else. **That is a positional assumption of
+   * exactly the kind rule 7 forbids**, and it fails silently and totally — one
+   * extra wrapper `div` around the number puts every member of the pager in a
+   * group of its own, each group is dropped for having fewer than two members,
+   * and the search reports `no-pager`, which is CONCLUSIVE and means "the list
+   * has ended".
+   *
+   * So a number is registered under EVERY ancestor up to this bound and the
+   * groups are tried deepest first, which keeps the old behaviour's intent — the
+   * tightest wrapper holding the whole pager wins — without requiring the pager
+   * to be nested to any particular depth.
+   */
+  const PAGER_GROUP_LEVELS = 4;
+
+  /** In the order the page rendered them, which is what the shape proof reads. */
+  function inDocumentOrder(a, b) {
+    const position = a.element.compareDocumentPosition(b.element);
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
+  }
+
+  /** Every page number this search saw, which is what `pagerSearchReason` reads. */
+  function noteSeenPage(note, page) {
+    if (!Array.isArray(note.seen)) note.seen = [];
+    if (!note.seen.includes(page)) note.seen.push(page);
+  }
+
+  /**
+   * The pages a container renders that are NOT controls.
+   *
+   * **The page you are on is not always something you can click.** A pager has
+   * no reason to make the current page pressable — there is nowhere to go — and
+   * plenty of them paint it as plain text and leave only the other pages as
+   * controls. Every reader for "which page is being shown" is downstream of
+   * forming a group, so on that layout the group is `[2]`, one member, dropped
+   * before any of the three readers runs at all, and the search reports
+   * `no-pager` about a pager that is visibly rendering a `1` and a `2`.
+   *
+   * This is the multiple-UI guide's one rule applied to the group itself: the
+   * numbered CONTROLS are read exactly as they were and nothing about them
+   * changes — this only adds the members that reader cannot see.
+   *
+   * Scoped to a container that already holds a numbered control, so nothing goes
+   * looking for bare numbers across the page. A member is a leaf that is not
+   * part of any control, so `<li><span>1</span></li>` contributes the span once
+   * rather than the pair twice, and `<li><button>2</button></li>` is left
+   * entirely to the reader that already has it.
+   *
+   * **A marker may prove the shape and may carry the current-page mark; it may
+   * never be pressed.** `pressable` is what the caller checks before clicking,
+   * and a next page that is only a marker is a reader failure, never the end of
+   * the list.
+   */
+  function pageMarkersWithin(container, controls, outsideTheContent, note) {
+    const taken = new Set(controls.map((entry) => entry.element));
+    const markers = [];
+    for (const element of container.querySelectorAll("*")) {
+      if (taken.has(element)) continue;
+      if (element.children.length) continue;
+      if (element.closest("button,a,[role='button']")) continue;
+      const page = pagerPageNumber(element);
+      if (page === null) continue;
+      if (!isVisible(element)) continue;
+      if (!outsideTheContent(element)) continue;
+      noteSeenPage(note, page);
+      markers.push({ element, page, pressable: false });
+    }
+    return markers;
+  }
+
+  function numberedPagerWithin(
+    scope, note = {}, visited = [], outsideTheContent = () => true, wrapsTheContent = () => false
+  ) {
+    // Every control in this scope that offers a page number. Unchanged, and
+    // still the only kind of member that may ever be pressed.
+    const controls = [];
     for (const element of scope.querySelectorAll("button,a,[role='button']")) {
       if (!isVisible(element)) continue;
       const page = pagerPageNumber(element);
@@ -5619,14 +5735,37 @@
       // A number painted inside somebody's row, or inside the panel showing one
       // person, is never a page. See `findNumberedPagerControl`.
       if (!outsideTheContent(element)) continue;
-      const parent = element.parentElement?.parentElement || element.parentElement;
-      if (!parent) continue;
-      if (!groups.has(parent)) groups.set(parent, []);
-      groups.get(parent).push({ element, page });
+      noteSeenPage(note, page);
+      controls.push({ element, page, pressable: true });
+    }
+
+    // Grouped by an ancestor the numeric controls share — at ANY depth up to
+    // `PAGER_GROUP_LEVELS` rather than at exactly two — so a pager is still told
+    // from numbers scattered through the list (a rating, a count, a year in a
+    // card) without depending on how deeply it happens to be wrapped.
+    const groups = new Map();
+    for (const entry of controls) {
+      let node = entry.element.parentElement;
+      for (let level = 1; level <= PAGER_GROUP_LEVELS && node instanceof Element; level += 1) {
+        if (!groups.has(node)) groups.set(node, []);
+        groups.get(node).push(entry);
+        node = node.parentElement;
+      }
     }
 
     note.groups = Math.max(note.groups || 0, groups.size);
-    for (const members of groups.values()) {
+    // Deepest first: the tightest container holding the whole pager is the one
+    // to believe, and a wider one is only ever reached when it did not answer.
+    const candidates = [...groups.entries()].sort(
+      (a, b) => elementDepth(b[0]) - elementDepth(a[0])
+    );
+    for (const [container, found] of candidates) {
+      // A container holding an applicant row or the panel is the page's content,
+      // not a pager's own wrapper, so its plain text is never read for pages.
+      const markers = wrapsTheContent(container)
+        ? []
+        : pageMarkersWithin(container, found, outsideTheContent, note);
+      const members = [...found, ...markers].sort(inDocumentOrder);
       if (members.length < 2) continue;
       note.numbered = Math.max(note.numbered || 0, members.length);
       const marked = members.filter((member) => isCurrentPageControl(member.element, members));
@@ -5664,6 +5803,13 @@
       note.currentPage = current;
       const next = members.find((member) => member.page === current + 1);
       if (!next) continue;
+      // The page after this one is rendered, and it is not something that can be
+      // pressed. There IS a next page, so this may never reach the caller as the
+      // end of the list — see `pagerSearchReason`.
+      if (!next.pressable) {
+        note.unpressable = true;
+        continue;
+      }
       const element = next.element;
       if (element.disabled || element.getAttribute("aria-disabled") === "true") continue;
       const verdict = Applicants.classifyApplicantControl({

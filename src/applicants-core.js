@@ -3991,6 +3991,61 @@
     return CONCLUSIVE_PAGER_REASONS.includes(cleanText(reason));
   }
 
+  /**
+   * WHICH nothing the pager search found, decided in one place.
+   *
+   * **The reason is not a label on the outcome — it IS the outcome**, because
+   * `isConclusivePagerReason` reads it back to decide whether the job may be
+   * called finished, and a job called finished cannot restart itself. So the
+   * mapping from "what the search saw" to "what that means" is pure, executed in
+   * a test, and no longer spelled out inline in a function that also walks the
+   * DOM.
+   *
+   * The order is the point, and every clause before the last one is a reader
+   * failure rather than a verdict about the list:
+   *
+   *   1. **the click policy refused** the control that would have been pressed —
+   *      the run may not conclude anything from a refusal it caused itself;
+   *   2. **the next page is rendered but cannot be pressed.** A pager may paint
+   *      the page you are ON as plain text and only the others as controls; if
+   *      the one that is plain is the page AFTER this one, there is a next page
+   *      and this reader cannot reach it. That is emphatically not "the list has
+   *      ended";
+   *   3. a group of page numbers WAS proven a pager, so its own answer stands —
+   *      `not-a-pager` from the shape proof means this reader could not see,
+   *      while anything else means the pager offers nothing after the page being
+   *      shown, which is the genuine end;
+   *   4. **no group could be formed at all**, and the two cases under that are
+   *      the whole reason this function exists.
+   *
+   * THE LAST ONE IS THE LIVE DEFECT (3.9.6). `no-pager` is CONCLUSIVE — it means
+   * "nothing on this page offers another one" — and it was returned whenever
+   * fewer than two page numbers could be grouped together. A pager the reader
+   * merely failed to GROUP therefore ended the job exactly as a single-page list
+   * did, which is the reported "there are 2 pages but it stops at the first" in
+   * its most permanent form: `claimAutoRun` refuses to re-arm a completed job,
+   * so the run could not restart itself to try again.
+   *
+   * A pager's fingerprint is asserted rather than assumed, and it is BOTH ends:
+   * a page one, and some page after it. Every pager LinkedIn renders offers page
+   * one, and a pager with a page two is a list with a second page whatever this
+   * reader could make of the markup. A stray `2` on its own is not enough — that
+   * is what keeps a genuinely single-page job completing normally instead of
+   * stopping for a reader that saw a number somewhere.
+   */
+  function pagerSearchReason({
+    refused = "", numbered = 0, ordinal = "", unpressable = false, seen = []
+  } = {}) {
+    if (cleanText(refused)) return "pagination-refused";
+    if (unpressable) return "next-page-not-pressable";
+    if (Number(numbered) > 0) {
+      return cleanText(ordinal) === "not-a-pager" ? "unreadable-pager" : "no-next-number";
+    }
+    const pages = (seen || []).filter((page) => Number.isInteger(page) && page > 0);
+    const looksLikeAPager = pages.includes(1) && pages.some((page) => page >= 2);
+    return looksLikeAPager ? "unproven-pager" : "no-pager";
+  }
+
   function isConclusiveListStop(stoppedBy = "") {
     return LIST_STOP_CONCLUSIVE.includes(cleanText(stoppedBy));
   }
@@ -4244,6 +4299,7 @@
     isProvenApplicantRow,
     PANEL_ARRIVAL, PANEL_MIN_SECTIONS, describePanelArrival,
     LIST_STOP_CONCLUSIVE, isConclusiveListStop, CONCLUSIVE_PAGER_REASONS, isConclusivePagerReason,
+    pagerSearchReason,
     MAX_PAGE_COMPLETION_SWEEPS, planPageCompletion,
     AUTO_RUN_STATE, createAutoRunEntry, claimAutoRun, settleAutoRun,
     // capturing a layout nobody has seen, with nobody's details in it
