@@ -25,7 +25,15 @@ test("STOP_ALL is one shared literal, not a string repeated per caller", async (
   const messages = await read("src/messages.ts");
   assert.match(messages, /export const STOP_ALL = "PV_STOP_ALL"/, "one declaration, imported everywhere");
 
-  for (const file of ["src/react/popup.tsx", "src/react/applicants-dashboard.tsx"]) {
+  // The Messages page joined this list in 3.14.0, when it gained a run that can
+  // send. It is the surface where a Stop matters most — the other two stop
+  // reading, this one stops writing to strangers — so it reaches the literal
+  // the same way every other surface does, through the one exported constant.
+  for (const file of [
+    "src/react/popup.tsx",
+    "src/react/applicants-dashboard.tsx",
+    "src/react/messages-dashboard.tsx"
+  ]) {
     const source = await read(file);
     assert.match(source, /STOP_ALL/, `${file} must use the shared constant`);
     assert.ok(!/"PV_STOP_ALL"/.test(source), `${file} must not hard-code the literal`);

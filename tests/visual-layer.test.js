@@ -85,14 +85,39 @@ const PAGES = [
     dynamic: ["error", "success", "selected"]
   },
   {
-    // The Messages page (3.13.0). Its own sheet, plus the shared layer.
+    // The Messages page (3.13.0; sending added in 3.14.0). Own sheet + shared layer.
     tsx: "src/react/messages-dashboard.tsx",
     sheets: ["theme.css", "messages.css"],
-    // Only the status-banner kinds, which are interpolated. The page's
-    // ready/blocked states are spelled as whole class names in a ternary
-    // (`msg-var-unavailable` and friends), so the scanner already sees them and
-    // listing them here would demand rules for names nothing emits.
-    dynamic: ["error", "success", "info"]
+    //
+    // THE COMMENT THAT USED TO BE HERE WAS WRONG, and it was wrong in the
+    // direction that costs coverage. It claimed the scanner already saw the
+    // ready/blocked names because they are "spelled as whole class names in a
+    // ternary". It does not: `classesUsedIn` matches the literal `className="`,
+    // and a ternary renders `className={`, so NOTHING inside those braces is
+    // ever scanned. Every name below had no coverage at all until now — each
+    // one does have a rule, so the suite passed while asserting nothing about
+    // them, which is the failure mode this whole test exists to prevent.
+    //
+    // Found while adding the run states, and fixed here rather than filed, for
+    // the same reason the `add a note` denylist hole was: it is a live gap in a
+    // check the project relies on, and the next person to trust this list
+    // should be able to.
+    //
+    // Two groups. First, the banner kinds, which are genuinely interpolated:
+    dynamic: [
+      "error", "success", "info",
+      // Then every class emitted from inside a `className={…}` expression —
+      // ternaries and, for the run states, a lookup map in the page. The map is
+      // RUN_STATE_CLASS in messages-dashboard.tsx and these must match it
+      // exactly; a state added there and not here ships unstyled, green.
+      "msg-audience-option", "msg-audience-option-current",
+      "msg-recipient", "msg-recipient-blocked",
+      "msg-status", "msg-status-ready", "msg-status-blocked",
+      "msg-template-item", "msg-template-item-current",
+      "msg-var", "msg-var-unavailable",
+      "msg-run-state", "msg-run-pending", "msg-run-opening",
+      "msg-run-awaiting", "msg-run-sent", "msg-run-skipped", "msg-run-failed"
+    ]
   },
   {
     // The shared navigation is a component rather than a page, and it is listed

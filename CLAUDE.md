@@ -113,7 +113,36 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    *Hiring pages:* contact disclosure · resume · a collapsed section's expander · the list's next-page
    control · a row of the applicant list · the resume viewer's own Download · the applicant panel's
    overflow menu, opened only to reach the contact disclosure inside it · **the resume card's own
-   Download, when the card mounts no viewer.**
+   Download, when the card mounts no viewer** · **the panel's `Message` control and the composer's
+   own `Send`, during a run the recruiter started.**
+
+   **The Message control and the Send are the tenth and eleventh clicks, and they are not like the
+   nine before them (3.14.0).** Every earlier entry on this list opens something LinkedIn is already
+   showing this recruiter, and the worst a mistake could do was read the wrong thing. These two
+   *write*, to a stranger, from the recruiter's own account, and nothing later undoes it. They were
+   added because the recruiter asked for an automated send with that trade-off stated plainly, and
+   they are the reason the rest of this rule got stricter rather than looser.
+
+   `Message` and `Send` remain forbidden words. What changed is that the denylist now reports **which**
+   word a label fired rather than only that one did, so a purpose may forgive exactly one word and
+   nothing else: `message-open` forgives `message`, `message-send` forgives `send`, and every other
+   purpose forgives neither. `Send InMail` fires `send` **and** `inmail`, so it is still refused;
+   so are `Message and reject`, `Send connection request` (which the allowlist catches, because
+   `connect` does not match inside `connection`), and `Message` under any other purpose. The word
+   list itself is untouched and is still written once, so a word added to it tomorrow is refused
+   inside the composer too.
+
+   Send is **proven inside a composer this extension opened**, established by sampling the visible
+   messaging surfaces before the press and requiring the composer to be one that was not there
+   before. That is not ceremony: LinkedIn keeps a messaging bubble mounted across applicants holding
+   whichever conversation was open last, so a resolver that merely found "a composer" would type into
+   the previous applicant's thread. Identity is re-checked from the panel's own markup immediately
+   before the press, not only before opening.
+
+   **Pressing Send is never evidence that a message was sent.** The send is confirmed by observing
+   the composer empty *and* the text appear in the thread; anything less is reported as an
+   unconfirmed press and that person is settled and never retried, because a person who may have
+   received the message must not receive it twice.
 
    **The resume card's Download is the ninth click and the newest (3.13.0).** LinkedIn previews a PDF
    and cannot preview a `.doc` — that attachment renders as a tile with a type badge, mounts no viewer,
@@ -145,15 +174,24 @@ Reading (`status`, `diff`, `log`, `show`) is always fine. Commits and tags come 
    only exist there. The profile-page exception above does not transfer — it works only because that
    flow captures the profile URL first and comes back, and this surface has no such return path.
 
-   **Permanently forbidden everywhere:** Connect, Follow, Message, InMail, Endorse, Remove
-   connection, Withdraw, Invite, Report, Block, Send, Share, Accept, Ignore, Save — and on hiring
+   **Permanently forbidden everywhere:** Connect, Follow, InMail, Endorse, Remove
+   connection, Withdraw, Invite, Report, Block, Share, Accept, Ignore, Save — and on hiring
    pages also **Shortlist, Move to, Reject, Archive, Hire, Offer, Interview, Schedule, Rate,
    Good fit / Maybe / Not a fit, Add note**, because those change the recruiter's own ATS.
+   **Message and Send are forbidden everywhere except their own two purposes above** — one word
+   each, nothing more, and a label carrying any second forbidden word is still refused.
    **The denylist always beats the allowlist**, including when only the `aria-label` matches.
 
 6. Scope to the main content. Reject `aside`, `footer`, `nav`, `[role='complementary']`, messaging
    overlays and modals — except an overlay this extension opened itself. Lazy scrolling always
    restores the scroll position, on the failure path too.
+
+   **The messaging overlay is the one exception, and only for the send step (3.14.0).** Every panel,
+   list and section resolver still refuses `.msg-overlay-list-bubble` and `.msg-overlay-conversation-bubble`
+   outright — that exclusion is not weakened, because a composer caught by a *section* resolver would
+   be read as if it were the applicant's own content. One resolver may look inside it, it is used
+   only by the send step, and what makes the overlay ours is not the selector but the proof that the
+   composer appeared after this extension pressed Message.
 
 **Resilience**
 

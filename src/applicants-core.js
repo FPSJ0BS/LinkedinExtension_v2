@@ -295,6 +295,57 @@
   const FORBIDDEN_APPLICANT_CONTROL_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_APPLICANT_ACTIONS})\\b`, "i");
 
   /**
+   * WHICH forbidden word fired — the same list, asked to show its evidence.
+   *
+   * The pattern above answers yes or no, and until 3.14.0 yes was the end of the
+   * conversation. It cannot be any more. The user has decided, having been shown
+   * what it costs, that this extension may press two controls it has always
+   * refused: the applicant panel's `Message`, and the composer's `Send`. Those
+   * two words are on the list above and must STAY on it, because every other
+   * purpose on this surface must go on refusing them — and a boolean cannot tell
+   * "Send", which is the composer's own button, from "Send InMail", which is an
+   * InMail control that happens to begin with the word Send. Knowing that the
+   * denylist fired says nothing about which of the two it just refused.
+   *
+   * COMPILED FROM THE SAME STRING, for exactly the reason the comment above that
+   * string gives. The exemption below is stated as a list of WORDS, so a word
+   * added to `FORBIDDEN_APPLICANT_ACTIONS` tomorrow refuses "Message and poach"
+   * inside the composer without anyone having to remember that a second copy of
+   * the list exists. A hand-maintained set of alternatives here is how the
+   * denylist rots, and it would rot in the one direction that lets a click
+   * through.
+   *
+   * A SEPARATE RegExp OBJECT from the one above, and that is not tidiness. A `g`
+   * regex carries `lastIndex` across calls; sharing one object with the boolean
+   * test would make each control's verdict depend on the label of the control
+   * judged before it — a button refused once and allowed the next time round the
+   * list. For a click policy that is the worst failure there is, because it is
+   * not reproducible.
+   */
+  const FIRED_FORBIDDEN_ACTION_PATTERN = new RegExp(`\\b(?:${FORBIDDEN_APPLICANT_ACTIONS})\\b`, "gi");
+
+  /**
+   * Every forbidden word in `text`, lowercased, in the order the label says them.
+   *
+   * `lastIndex` is reset before each sweep as well as the object being its own:
+   * `matchAll` reads `lastIndex` to seed the clone it iterates, so a stray write
+   * from anywhere else would silently skip the front of a label. Resetting costs
+   * nothing and removes the entire class of bug from the one function in this
+   * file whose wrong answer ends in a click.
+   *
+   * Inner whitespace is collapsed so a two-word alternative comes back as the
+   * list spells it — `move to`, not `move  to` — because the exemption below
+   * compares these against literal words.
+   */
+  function firedForbiddenWords(text) {
+    const value = normalizeLabel(text);
+    if (!value) return [];
+    FIRED_FORBIDDEN_ACTION_PATTERN.lastIndex = 0;
+    return [...value.matchAll(FIRED_FORBIDDEN_ACTION_PATTERN)]
+      .map((match) => match[0].toLowerCase().replace(/\s+/g, " "));
+  }
+
+  /**
    * Is this string ITSELF a forbidden action? The rule for a proven row.
    *
    * **THE DEFECT THIS EXISTS FOR, reported live with a screenshot of the badge:
@@ -375,6 +426,62 @@
     // `Download resume, then reject` cannot reach it even before the denylist —
     // which is still consulted first, on the whole label, and still refuses it.
     /^download(?:\s+(?:resume|résumé|cv|curriculum\s+vitae|file|documents?|attachment|pdf|original)|\s+[\p{L}\p{N}'’.-]+(?:\s+[\p{L}\p{N}'’.-]+){0,5}\s+(?:resume|résumé|cv|curriculum\s+vitae))?$/iu;
+
+  /**
+   * The applicant panel's own Message control (3.14.0).
+   *
+   * This is the first control on this surface that CONTACTS somebody. Every
+   * other allowed click reveals something LinkedIn is already showing this
+   * recruiter; pressing this one opens a composer addressed to a real person,
+   * and what goes into it leaves the machine. The user asked for it outright and
+   * rule 5 was amended for it, so the question here is not whether to press a
+   * Message control but how narrowly to recognise one.
+   *
+   * ANCHORED ON THE WHOLE LABEL, like the download rule above, and then narrowed
+   * again. LinkedIn names this button `Message` or, once the screen-reader half
+   * of the label is folded in, `Message <the applicant's name>` — so a bounded
+   * run of NAME characters is allowed after the verb and nothing else is.
+   *
+   * THE LOOKAHEAD IS THE POINT, and it is this rule's version of the sentence
+   * the download pattern makes with punctuation. A name is letters and digits,
+   * and so are `and`, `or`, `then` and `plus` — so without it "Message and
+   * reject" reads as a Message control addressed to somebody called "and
+   * reject". The denylist refuses that label anyway, on `reject`, and it is
+   * consulted first; this is the second lock, and it is here because the two
+   * catch different things. The denylist knows the words that name an ATS
+   * action; this knows the words that JOIN A SECOND CLAUSE, whatever that clause
+   * turns out to say. Conjunctions are a closed class in English, which is why
+   * this list can be written once and left alone.
+   *
+   * Three tokens at most, because that is a person's name. It is not the only
+   * thing standing between this pattern and a control that merely starts with
+   * the word Message — `inContainer` still has to prove the button was
+   * enumerated from inside the applicant's own panel, exactly as the contact
+   * disclosure must.
+   */
+  const MESSAGE_OPEN_CONTROL_PATTERN =
+    /^message(?:\s+(?!(?:and|or|then|plus|also|before|after|to)\b)[\p{L}\p{N}'’.-]+){0,3}$/iu;
+
+  /**
+   * The composer's own Send, and nothing that reads like it.
+   *
+   * The strictest allowlist in this file, deliberately: one literal, no optional
+   * tail, no name, no punctuation. Every other control this extension presses
+   * can be pressed again if the first press achieved nothing — a viewer reopened,
+   * a menu reopened, a page re-paged. **A sent message has no undo.** There is no
+   * state on LinkedIn this extension can reach that unsends it, and the person
+   * who receives it is a real applicant, so the cost of matching one control too
+   * many here is not a wasted click.
+   *
+   * What that buys, concretely: `Send InMail` and `Send connection request` are
+   * not Send controls under this rule, and neither is `Send message to Gaurang`.
+   * The first is also refused by the denylist on `inmail` — but the second is
+   * NOT, because `\bconnect\b` does not match inside "connection" and `send` is
+   * the exempt word at this purpose. **This pattern, on its own, is what refuses
+   * it.** That is the whole reason it is a single literal rather than a
+   * `^send\b` prefix, and the reason there is a test pinning that exact label.
+   */
+  const MESSAGE_SEND_CONTROL_PATTERN = /^send$/i;
 
   /** The applicant's attached CV. "Download" is a read, not an action on them. */
   const RESUME_CONTROL_PATTERN =
@@ -506,8 +613,89 @@
      * the recruiter is already looking at and changes nothing on LinkedIn —
      * the same standard every other allowed control is held to.
      */
-    PAGINATION: "pagination"
+    PAGINATION: "pagination",
+    /**
+     * The applicant panel's own Message control (3.14.0, rule 5 amended).
+     *
+     * Every purpose above this line reveals something LinkedIn is already
+     * showing the recruiter. This one does not: it opens a composer addressed
+     * to a real applicant, and it exists because the user asked for templated
+     * messages to be sent from the walk and accepted, having been shown them,
+     * the risks of pressing a control that contacts somebody.
+     *
+     * What keeps it bounded is that it is a PURPOSE rather than a hole in the
+     * denylist. `message` stays on `FORBIDDEN_APPLICANT_ACTIONS` and stays
+     * refused for the contact disclosure, the resume, the row, the pager and
+     * every purpose ever added after this one; it is forgiven here and only
+     * here, and only when it is the only forbidden word the label contains.
+     * "Message and reject" is not a Message control.
+     */
+    MESSAGE_OPEN: "message-open",
+    /**
+     * The composer's own Send (3.14.0, rule 5 amended).
+     *
+     * Separated from MESSAGE_OPEN rather than folded into it, because these are
+     * the two halves of the amendment and only one of them is irreversible.
+     * Opening a composer can be undone by closing it; sending cannot be undone
+     * at all. Keeping them apart means `send` is forgiven ONLY at the moment a
+     * verified message is being sent, and `message` is forgiven ONLY at the
+     * moment a composer is being opened — so a `Send` sitting anywhere in the
+     * applicant panel is still refused as the forbidden action it has always
+     * been, and so is a `Message` found inside an open composer.
+     */
+    MESSAGE_SEND: "message-send"
   });
+
+  /**
+   * The only words a purpose may forgive, and the whole of the 3.14.0 carve-out.
+   *
+   * READ THIS AS THE SAFETY ARGUMENT, because it is. The denylist is not being
+   * shortened and no word is leaving `FORBIDDEN_APPLICANT_ACTIONS`: `message`
+   * and `send` are still refused everywhere, for every caller, at every other
+   * purpose, exactly as they were before this release. What changes is that ONE
+   * word is forgiven at ONE purpose, and only when the label contains nothing
+   * else the list knows. Every other word the same label fires still refuses it.
+   *
+   * That is what makes the carve-out bounded rather than a door: the exemption
+   * is per purpose AND per word AND total — a single unexempt word anywhere in
+   * the label is enough. "Send InMail" fires `send` and `inmail`, and `inmail`
+   * is on nobody's exemption, so it is refused at MESSAGE_SEND like everywhere
+   * else. So is "Message and reject", on `reject`. So is a bare "Message" asked
+   * for at MESSAGE_SEND, because the exemption belongs to the purpose and not to
+   * the word.
+   *
+   * Every purpose not named here forgives nothing, and there is a permanent test
+   * that walks `CONTROL_PURPOSE` and proves it.
+   */
+  const PURPOSE_EXEMPT_WORDS = Object.freeze({
+    [CONTROL_PURPOSE.MESSAGE_OPEN]: Object.freeze(["message"]),
+    [CONTROL_PURPOSE.MESSAGE_SEND]: Object.freeze(["send"])
+  });
+
+  /**
+   * Does this label still fire a word this purpose may NOT forgive?
+   *
+   * The question the denylist gate asks after it has already decided the label
+   * is forbidden. True means refuse, which is also what it answers to anything
+   * it does not understand — every branch that is not "the exemption covers
+   * every word that fired" returns true.
+   *
+   * `Array.isArray` rather than a truthiness check, and that is load-bearing:
+   * `purpose` is a caller-supplied string that reaches this object as a property
+   * name, so `purpose: "constructor"` would otherwise come back with a function
+   * and `exempt.includes` would throw inside the one gate that must never fail
+   * open. An inherited key is not an exemption.
+   */
+  function firesOutsideExemption(purpose, text) {
+    const exempt = PURPOSE_EXEMPT_WORDS[purpose];
+    if (!Array.isArray(exempt) || !exempt.length) return true;
+    const fired = firedForbiddenWords(text);
+    // Forbidden, but with nothing to attribute it to. The two patterns compile
+    // from one string so today this cannot happen; if a later edit ever makes
+    // them disagree, the disagreement is settled by refusing.
+    if (!fired.length) return true;
+    return fired.some((word) => !exempt.includes(word));
+  }
 
   /**
    * The pager, by name.
@@ -916,7 +1104,22 @@
       ? FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(text))
         || FORBIDDEN_APPLICANT_ROW_LABEL_PATTERN.test(normalizeLabel(ariaLabel))
       : FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(combined);
-    if (forbidden) return refuse("forbidden-action", true);
+    // THE ONE LINE 3.14.0 CHANGED, and it is still the first gate in the file.
+    //
+    // `forbidden` above is computed exactly as it always was — the proven row
+    // still asks the anchored question, everything else still asks the whole of
+    // `combined`, aria-label included. What is new is the second clause, and it
+    // can only ever REFUSE MORE than the exemption allows, never less: for every
+    // purpose that forgives nothing `firesOutsideExemption` returns true without
+    // reading the label at all, so the row branch and all six original purposes
+    // behave identically to the release before this one, byte for byte.
+    //
+    // At the two message purposes it re-asks the same denylist for its evidence
+    // and refuses unless every word that fired is one this purpose may forgive.
+    // `combined` is what it is given, deliberately: the same widest string the
+    // denylist itself judged, so an `aria-label="Message and reject"` on a
+    // button whose visible text is a bare "Message" is refused on `reject`.
+    if (forbidden && firesOutsideExemption(purpose, combined)) return refuse("forbidden-action", true);
 
     if (purpose === CONTROL_PURPOSE.CONTACT) {
       if (!APPLICANT_CONTACT_CONTROL_PATTERN.test(label)) return refuse("not-a-contact-control");
@@ -1001,6 +1204,27 @@
         reason: named ? "pagination" : "pagination-numbered",
         page: numbered ? offered : null
       };
+    }
+    if (purpose === CONTROL_PURPOSE.MESSAGE_OPEN) {
+      if (!MESSAGE_OPEN_CONTROL_PATTERN.test(label)) return refuse("not-a-message-control");
+      // Proven inside the applicant's own panel, exactly as the contact
+      // disclosure is. This surface renders `Message` in more than one place —
+      // the messaging overlay LinkedIn pins to the corner is the obvious one —
+      // and a composer opened from anywhere but this applicant's panel is
+      // addressed to whoever that other control belongs to. Rule 6 already
+      // refuses the overlay by scope; this refuses it by proof as well.
+      if (!inContainer) return refuse("outside-applicant-panel");
+      return { allowed: true, forbidden: false, label, purpose, reason: "message-open" };
+    }
+    if (purpose === CONTROL_PURPOSE.MESSAGE_SEND) {
+      if (!MESSAGE_SEND_CONTROL_PATTERN.test(label)) return refuse("not-a-send-control");
+      // Proven inside the composer this extension opened itself — not the
+      // panel, not the page. `Send` is a bare, common label and the only one in
+      // this file whose press cannot be taken back, so the container is the
+      // difference between sending the message that was just verified and
+      // pressing whatever else on a hiring page happens to say Send.
+      if (!inContainer) return refuse("outside-message-composer");
+      return { allowed: true, forbidden: false, label, purpose, reason: "message-send" };
     }
     return refuse("unknown-purpose");
   }
@@ -4027,6 +4251,93 @@
   }
 
   /**
+   * How far a templated message has got, and what may be done next (3.14.0).
+   *
+   * THE ONE IRREVERSIBLE THING THIS EXTENSION DOES. Every other ladder in this
+   * file can be re-run from the top at no cost: a viewer reopened, a menu
+   * reopened, a page re-paged, a card hovered twice. A sent message cannot be
+   * unsent, it went to a real applicant on the recruiter's own account, and the
+   * recruiter's name is on it. So this ladder is written as the argument for why
+   * a send is safe rather than as the sequence that produces one, and every rule
+   * in it exists to refuse rather than to progress.
+   *
+   * There is no DOM here and no clock, on purpose and for the reason the whole
+   * file is built this way: there is no jsdom in this repository, so the only
+   * questions that can be ANSWERED rather than argued are the ones asked of a
+   * pure function. The three worth being certain about are can it send to the
+   * wrong person, can it send half a message, and can it send twice — and all
+   * three are decided here, in Node, rather than by watching a live account.
+   *
+   * THE ORDER IS THE SAFETY ARGUMENT:
+   *
+   *   1. `wrongPerson` FIRST, and it beats everything, including a message
+   *      already sent. LinkedIn routes ahead of its own render (see the panel
+   *      arrival note): the address bar names the next applicant while the panel
+   *      still shows the previous one, which is the defect that made
+   *      `describePanelArrival` necessary in the first place. A composer opened
+   *      on that race belongs to somebody else, and it must never be typed into,
+   *      whatever else is true of the run.
+   *   2. `confirmed` next, then `sent`. A message already gone is a fact, not a
+   *      step: the only thing left to do with it is observe it, and observing it
+   *      is what CONFIRM is. This is also why the veto below sits UNDER these
+   *      two — Stop ends work, it never discards what that work produced (rule
+   *      12), and a send that already happened is not made un-happened by
+   *      pressing Stop a moment later. It is recorded instead.
+   *   3. `canSend === false` — the caller's veto: Stop, a rate limit, a daily
+   *      cap, a person who must not be messaged. Checked BEFORE the composer is
+   *      opened, because there is no reason to open a composer this run is not
+   *      allowed to send from, and an abandoned composer is the next applicant's
+   *      problem exactly as an abandoned menu was.
+   *   4. OPEN, INSERT, VERIFY, SEND — and SEND is reachable only through a
+   *      read-back that MATCHED.
+   *
+   * WHY `readBackMatches` IS THREE-VALUED AND NOT TWO. "The text has not been
+   * read back yet" and "the text was read back and it was not the message" are
+   * different facts with opposite answers, and a boolean cannot hold both: it
+   * would either loop on VERIFY for ever or give up before verifying. `null`
+   * (the default, and anything that is not a boolean) means not yet asked, so
+   * VERIFY. Exactly `false` means asked and answered wrongly, so GIVE UP —
+   * a composer holding a truncated message, or a template whose variables did
+   * not resolve, is not a message to send at a lower confidence, and re-inserting
+   * risks appending a second copy to whatever is already in there. Only exactly
+   * `true` reaches SEND.
+   *
+   * DONE and GIVE_UP are terminal because their causes are sticky: every input
+   * that produces one is a fact the caller has recorded, so feeding the same
+   * state back produces the same answer. A driven walk therefore always ends.
+   */
+  const MESSAGE_STEP = Object.freeze({
+    OPEN: "open",
+    INSERT: "insert",
+    VERIFY: "verify",
+    SEND: "send",
+    CONFIRM: "confirm",
+    DONE: "done",
+    GIVE_UP: "give-up"
+  });
+
+  function planMessageStep({
+    composerOpen = false,
+    textInserted = false,
+    readBackMatches = null,
+    sent = false,
+    confirmed = false,
+    wrongPerson = false,
+    canSend = true
+  } = {}) {
+    const step = (action, reason) => ({ action, reason });
+    if (wrongPerson) return step(MESSAGE_STEP.GIVE_UP, "the composer is not this applicant's");
+    if (confirmed) return step(MESSAGE_STEP.DONE, "the message was sent and the send was observed");
+    if (sent) return step(MESSAGE_STEP.CONFIRM, "send was pressed and nothing has confirmed it yet");
+    if (!canSend) return step(MESSAGE_STEP.GIVE_UP, "this run may not send right now");
+    if (!composerOpen) return step(MESSAGE_STEP.OPEN, "no composer is open yet");
+    if (!textInserted) return step(MESSAGE_STEP.INSERT, "the composer is open and empty");
+    if (readBackMatches === false) return step(MESSAGE_STEP.GIVE_UP, "the read-back is not the message");
+    if (readBackMatches !== true) return step(MESSAGE_STEP.VERIFY, "the text is in and has not been read back");
+    return step(MESSAGE_STEP.SEND, "the read-back matched, so the composer holds the whole message");
+  }
+
+  /**
    * Which applicants a run is allowed to skip, keyed by what a list row knows.
    *
    * The live complaint: a run stopped half way and started again went back to
@@ -4769,6 +5080,13 @@
     isApplicantMenuOpenerLabel,
     RESUME_CONTROL_PATTERN, RESUME_DOWNLOAD_CONTROL_PATTERN, DISCLOSURE_CONTROL_PATTERN,
     APPLICANT_PAGINATION_PATTERN, APPLICANT_PAGINATION_PHRASE_PATTERN,
+    // the 3.14.0 carve-out, exported whole so a test can walk it rather than
+    // trust a sentence about it: which words fired, which purpose forgives
+    // which, and the two whole-label rules that still have to match afterwards
+    FIRED_FORBIDDEN_ACTION_PATTERN, firedForbiddenWords,
+    PURPOSE_EXEMPT_WORDS, firesOutsideExemption,
+    MESSAGE_OPEN_CONTROL_PATTERN, MESSAGE_SEND_CONTROL_PATTERN,
+    MESSAGE_STEP, planMessageStep,
     classifyApplicantControl, pageNumberFrom, paginationLabel,
     saysCurrentPage, planPagerOrdinalStep,
     // qualifications and screening

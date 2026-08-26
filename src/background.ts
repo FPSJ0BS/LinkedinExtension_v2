@@ -1,4 +1,4 @@
-import { APPLICANT_MESSAGES, IMPORT_MESSAGES, PROFILE_MESSAGES, CONNECTION_MESSAGES, STOP_ALL } from "./messages.js";
+import { APPLICANT_MESSAGES, IMPORT_MESSAGES, MESSAGE_RUN_MESSAGES, PROFILE_MESSAGES, CONNECTION_MESSAGES, STOP_ALL } from "./messages.js";
 import * as Queue from "./import-queue-core.js";
 import { loadState, saveSession, replaceItems, putItem } from "./queue-db.js";
 import { findByProfileUrl, saveProfile } from "./db.js";
@@ -12,15 +12,26 @@ import "./connections-core.js";
 // same reason the other cores are. It owns every tab decision in the run, over an
 // injected Chrome API, so the whole policy is testable without a browser.
 import "./collector-tabs-core.js";
+// Side-effect import: the message queue, same export-free IIFE shape again. The
+// worker walks it — see the message-run section near the bottom of this file —
+// because it is the only thing on this surface that outlives a navigation, and
+// the record of who has already been messaged must outlive the page that asked.
+import "./message-queue-core.js";
 
 const Connections: any = (globalThis as any).ProfileVaultConnections;
 const TabsCore: any = (globalThis as any).ProfileVaultTabs;
+/**
+ * Published by the side-effect import above. Pure: no DOM, no chrome, no clock.
+ * Every decision about who is next, who is already settled, and how long the
+ * walk owes before the next person is made in there and only obeyed here.
+ */
+const MessageQueue: any = (globalThis as any).ProfileVaultMessageQueue;
 // Published by the side-effect import inside `applicant-db.js`. The worker uses
 // it for one thing only: deciding whether a stored applicant counts as already
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-08-26-react-v3.13.0";
+const BUILD_ID = "2026-08-26-react-v3.14.0";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];
@@ -2337,6 +2348,14 @@ async function stopEverything(): Promise<any> {
   // Before anything else that can fail: the standing instruction to restart an
   // applicant run on return. A Stop that a navigation could undo is not a Stop.
   await disarmAutoRuns();
+  // And the message run, for the same reason and one stronger. It is the only
+  // work this extension does that a person on the other end can see, so a Stop
+  // that let one more message out would be the worst kind of Stop there is. It
+  // burns the run's generation before it awaits anything, so a walk in flight
+  // cannot open one more person; and it keeps the record, because everyone
+  // already messaged stays messaged and the person mid-flight is written down
+  // rather than abandoned.
+  await stopMessageRun("stopped-by-user").catch(() => undefined);
   const reached = await stopAllContentScripts();
   await setDiscoveryRunning(false).catch(() => undefined);
   try {
@@ -2572,6 +2591,734 @@ async function handleApplicantCommand(type: string, message: any, sender?: any):
   return { ok: false, error: `Unknown applicant command: ${type}` };
 }
 
+// ======================================================= messaging a list (3.14.0)
+//
+// The worker walks the queue; the page never does. That is the whole shape of
+// this section and it is forced by three facts, none of them negotiable:
+//
+//   1. **A content script does not survive a navigation.** On this surface the
+//      address bar moves on every applicant, so the document that started the
+//      run is destroyed several times over before the run finishes. The list of
+//      who has already been messaged has to live somewhere that outlasts it, and
+//      an interruption that loses that list is a second message to somebody who
+//      already got theirs.
+//   2. **The queue is pure and holds no clock.** `planQueueStep` answers "what
+//      next" and nothing else — see src/message-queue-core.js. Something has to
+//      own the loop, the timer and the storage, and this is that something.
+//   3. **The worker itself dies.** Thirty seconds idle and MV3 tears it down,
+//      which is shorter than the gap between two messages. So every transition is
+//      persisted before it is acted on, a long wait is spent in short chunks that
+//      each touch an extension API, and an alarm brings a dead run back.
+//
+// WHAT THIS SECTION WILL NOT DO. It never decides that a message went. The
+// content script observes; the worker records. `markSent` is reachable from
+// exactly one place below and only on a literal `observedSent: true` — see
+// `applyMessageObservation`, which is where every ambiguous outcome is turned
+// into something terminal that is NOT a send.
+
+/** The one live run. Singular by design: two walks is two composers. */
+const MESSAGE_RUN_KEY = "profileVaultMessageRun";
+/** Long enough to survive a lunch break, short enough not to be a surprise. */
+const MESSAGE_RUN_TTL_MS = 12 * 60 * 60 * 1000;
+/** Brings a run back after the worker was torn down mid-walk. */
+const MESSAGE_RUN_ALARM = "profile-vault-message-run";
+/**
+ * One person's whole round trip: open them, find the composer, prove it is
+ * theirs, fill it, press, and watch for the message to appear. Generous,
+ * because the last step is a wait on LinkedIn rather than on us, and a timeout
+ * here is not "it failed" — it is "we do not know", which costs that person
+ * their place in the run (see `applyMessageObservation`).
+ */
+const MESSAGE_SEND_TIMEOUT_MS = 120000;
+/**
+ * How a long wait is actually spent.
+ *
+ * The gap between two messages is thirty seconds and is never shortened — but a
+ * bare thirty-second `setTimeout` does not keep an MV3 worker alive, and a
+ * worker torn down mid-gap takes the loop with it. So the wait is spent in
+ * chunks, and each chunk ends in a `chrome.storage` read, which resets the idle
+ * timer AND is how a Stop written by anybody else reaches this loop.
+ */
+const MESSAGE_KEEPALIVE_MS = 20000;
+/** A paused run is asked again this often. `planQueueStep` answers pause with `waitMs: 0`. */
+const MESSAGE_PAUSE_POLL_MS = 5000;
+
+/**
+ * Bumped whenever the current run ends or is replaced.
+ *
+ * A detached walk reads it before every step and before it opens anybody, so a
+ * Stop ends the loop rather than merely asking it to notice. It does NOT gate
+ * writes: a reply that arrives after a Stop still has to be recorded, because
+ * Stop ends work and never discards what the work produced — rule 12. See
+ * `recordMessageOutcome`, which decides that by run id instead.
+ */
+let messageRunGeneration = 1;
+/**
+ * The generation of the walk in flight in THIS worker, or 0 for none.
+ *
+ * Which is why the generation above starts at 1 and not at 0: 0 has to mean
+ * "nobody is walking" and nothing else, or a fresh worker — where both are 0 —
+ * would decide it already had a walk in flight and refuse to resume the run it
+ * just came back to find.
+ */
+let messageRunWalker = 0;
+
+function cleanRunReason(value: unknown): string {
+  const text = value instanceof Error ? value.message : String(value ?? "");
+  return text.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/**
+ * Does the composer hold the text that was approved?
+ *
+ * Compared here rather than trusted from the page, because the worker is what
+ * holds the approved string — the content script only ever sees a copy, and
+ * "did the copy match" is not a question the copy may answer alone. Whitespace
+ * is collapsed on both sides because a `contenteditable` composer normalises
+ * line breaks and non-breaking spaces of its own accord; nothing else is
+ * forgiven. An empty approved text never matches, so a blank message cannot be
+ * verified into existence.
+ */
+function messageTextMatches(approved: unknown, readBack: unknown): boolean {
+  const normalise = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim();
+  const wanted = normalise(approved);
+  if (!wanted) return false;
+  return normalise(readBack) === wanted;
+}
+
+/** Idle, running or paused — a run there is still something to do about. */
+function isLiveMessageQueue(queue: any): boolean {
+  const state = String(queue?.state || "");
+  return state === MessageQueue.QUEUE_STATE.IDLE
+    || state === MessageQueue.QUEUE_STATE.RUNNING
+    || state === MessageQueue.QUEUE_STATE.PAUSED;
+}
+
+async function readMessageRunRecord(): Promise<any> {
+  try {
+    const stored = await chrome.storage.local.get(MESSAGE_RUN_KEY);
+    const record = stored?.[MESSAGE_RUN_KEY];
+    if (!record || typeof record !== "object" || !record.queue) return null;
+    const startedAt = Date.parse(record.startedAt || "");
+    if (Number.isFinite(startedAt) && Date.now() - startedAt > MESSAGE_RUN_TTL_MS) {
+      // A run from yesterday is not a run. Swept rather than resumed, exactly as
+      // an expired auto-run lease is, so nothing starts messaging people because
+      // the recruiter happened to open the extension again.
+      await chrome.storage.local.remove(MESSAGE_RUN_KEY).catch(() => undefined);
+      return null;
+    }
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the run.
+ *
+ * Called before every dispatch and after every reply, and that ordering is the
+ * point rather than the frequency: the worker can be torn down between any two
+ * lines here, so the durable record must already say "this person is being
+ * opened" BEFORE anything opens them. A crash then leaves them mid-flight and
+ * recoverably so; a crash with no record would leave them pending and eligible
+ * to be opened a second time.
+ */
+async function writeMessageRunRecord(record: any): Promise<void> {
+  if (!record) return;
+  record.updatedAt = nowIso();
+  await chrome.storage.local.set({ [MESSAGE_RUN_KEY]: record }).catch(() => undefined);
+}
+
+/**
+ * Settle anybody the worker's death left mid-flight.
+ *
+ * A recipient found in `opening` or `awaiting-send` by a NEW worker was in the
+ * middle of a round trip nobody watched the end of. Three things are true about
+ * them and only three: nobody observed a send, so they may not be marked sent;
+ * a Send may nevertheless have been pressed, so they may not be retried; and
+ * they are not nothing, so they may not be dropped. Terminal, recorded, with a
+ * reason that says exactly what happened — the same choice `stopQueue` makes for
+ * the person open when the user stops, and for the same reason.
+ *
+ * The loop is not defensive padding: `activeEntry` returns one person because
+ * there can only be one, and looping until it returns none means this function
+ * does not have to trust that.
+ */
+function reviveMessageRun(record: any): { record: any; stranded: string[] } {
+  const stranded: string[] = [];
+  const queue = record?.queue;
+  if (!queue) return { record, stranded };
+  for (;;) {
+    const open = MessageQueue.activeEntry(queue);
+    if (!open) break;
+    stranded.push(String(open.id));
+    MessageQueue.markSkipped(queue, open.id, "interrupted-while-open");
+  }
+  return { record, stranded };
+}
+
+/** The summary the Messages page reads. `describeQueue` owns every count. */
+function describeMessageRun(queue: any): any {
+  const summary = MessageQueue.describeQueue(queue, Date.now());
+  return {
+    audience: "",
+    dailyCap: MessageQueue.QUEUE_LIMITS.DAILY_CAP,
+    minGapMs: MessageQueue.QUEUE_LIMITS.MIN_GAP_MS,
+    stoppedReason: "",
+    ...summary
+  };
+}
+
+/**
+ * Per-recipient progress, **without the message bodies**.
+ *
+ * The page composed the text and still has it; echoing every rendered message
+ * back on every status poll would put the whole run through the message channel
+ * several times a minute to answer a question about six fields.
+ */
+function messageRunEntries(queue: any): any[] {
+  if (!queue?.entries) return [];
+  return queue.entries.map((entry: any) => ({
+    id: entry.id,
+    name: entry.name,
+    profileUrl: entry.profileUrl,
+    applicationId: entry.applicationId,
+    state: entry.state,
+    reason: entry.reason || "",
+    attempts: Number(entry.attempts) || 0,
+    sentAt: Number(entry.sentAt) || 0
+  }));
+}
+
+/**
+ * Turn one content-script reply into one queue transition.
+ *
+ * **THE RULE THIS FILE EXISTS TO ENFORCE.** `markSent` is called from exactly
+ * one branch below and only on a literal `observedSent === true` alongside a
+ * composer that was proven to hold the approved text for the right person.
+ * Pressing Send is an action; a message going is an outcome, and they come apart
+ * constantly — LinkedIn rejects the body, a restriction interstitial replaces
+ * the thread, the network drops it. A person wrongly marked sent is a person who
+ * never gets their message, and nobody ever finds out.
+ *
+ * THE OTHER HALF, which matters just as much: an ambiguous outcome is TERMINAL,
+ * not retried. `markFailed` returns somebody to the queue to be opened again,
+ * and opening again somebody whose Send may already have gone is precisely the
+ * double-message this queue is built to make impossible. So `markFailed` is used
+ * only for an EVIDENCED non-send — the adapter says, in the same breath, that it
+ * did not press — and every "we do not know" lands in `markSkipped` with a
+ * reason that names the doubt. That reason is shown to the recruiter, who can
+ * look at the thread and decide; the extension cannot, and does not guess.
+ */
+function applyMessageObservation(queue: any, recipient: any, reply: any, now: number): string {
+  const id = String(recipient?.id || "");
+
+  // 1. Rule 12 beats everything, including a send this reply might be reporting.
+  //    A Stop that reached the page mid-flight ends the run here too, and
+  //    `stopQueue` records the person who was open rather than abandoning them.
+  if (reply?.stopped === true) {
+    MessageQueue.stopQueue(queue, "stopped-by-user");
+    return "stopped";
+  }
+
+  // 2. Who is this reply about — and did anybody answer at all?
+  //    On this surface the address bar names the NEXT applicant while the panel
+  //    still shows the previous one, so identity has to travel with the answer
+  //    and a reply that does not echo the id we asked about is not evidence
+  //    about this person. It is not evidence about the other person either — we
+  //    never asked for them — so it settles nobody except the one we did ask
+  //    about, terminally, because a round trip we cannot attribute may still
+  //    have pressed something.
+  //
+  //    **A missing `recipientId` is how a round trip that never answered arrives
+  //    here** — a timeout, a content script torn down mid-send — and it lands in
+  //    this branch on purpose. That is the whole difference between "we do not
+  //    know" and "it did not happen": an adapter that answered and says it did
+  //    not press is evidence, and is retried below; silence is not evidence, and
+  //    is never retried, because silence is exactly what a send nobody watched
+  //    looks like.
+  const echoed = String(reply?.recipientId || "");
+  if (!reply || !echoed) {
+    MessageQueue.markSkipped(queue, id, cleanRunReason(reply?.error) || "no-observation");
+    return "unobserved";
+  }
+  if (echoed !== id) {
+    MessageQueue.markSkipped(queue, id, "identity-mismatch");
+    return "unobserved";
+  }
+
+  const pressed = reply.pressed === true;
+  const observed = reply.observedSent === true;
+
+  // 3. LinkedIn offers no way to message this person at all — no composer, no
+  //    control, nothing pressed. Terminal without burning attempts on somebody
+  //    a retry cannot help.
+  if (reply.blocked === true && !pressed) {
+    MessageQueue.markSkipped(queue, id, cleanRunReason(reply.error) || "cannot-be-messaged");
+    return "blocked";
+  }
+
+  // 4. Was the composer proven to be theirs and to hold the approved text?
+  //    All four, and the read-back checked here rather than taken on trust.
+  const verified = reply.ok === true
+    && reply.opened === true
+    && reply.identityConfirmed === true
+    && reply.filled === true
+    && messageTextMatches(recipient?.text, reply.readBack);
+  if (verified) MessageQueue.markAwaitingSend(queue, id);
+
+  // 5. THE ONLY ROUTE TO SENT.
+  if (verified && observed) {
+    MessageQueue.markSent(queue, id, now);
+    return "sent";
+  }
+
+  // 6. Something was pressed and nothing watched it land — or something landed
+  //    in a composer we never verified, which is worse. Either way this person
+  //    is finished: not sent, because nothing proved it, and never retried,
+  //    because something may have gone.
+  if (pressed || observed) {
+    MessageQueue.markSkipped(
+      queue,
+      id,
+      observed && !verified ? "sent-to-an-unverified-composer" : "pressed-but-not-confirmed"
+    );
+    // The gap is started anyway. If that press DID reach LinkedIn then a message
+    // just went out, and opening the next person immediately would be exactly
+    // the cadence the limit exists to prevent. It costs at most one wait nobody
+    // owed. The daily cap cannot be charged the same way — `sentInWindow` counts
+    // recipients in `sent` and this person is deliberately not one — so an
+    // unconfirmed press is under-counted there, and that is a known cost of
+    // never marking an unobserved message as sent.
+    queue.lastSentAt = now;
+    return "unconfirmed";
+  }
+
+  // 7. An EVIDENCED non-send: the adapter reached the end and says it did not
+  //    press. Nothing went, so this is the one case a retry cannot duplicate,
+  //    and the core's own attempt budget bounds it.
+  MessageQueue.markFailed(queue, id, cleanRunReason(reply.error) || (verified ? "not-sent" : "no-composer"));
+  return "failed";
+}
+
+/**
+ * Carry a concurrent Stop or Pause onto the copy this walk is holding.
+ *
+ * The walk reads the run, spends up to two minutes on one person, then writes
+ * back — and a Stop pressed inside that window lands in storage underneath it.
+ * Blindly writing would undo the Stop; blindly discarding would throw away the
+ * observation, and a message that actually went would go unrecorded. Neither is
+ * acceptable, so both are kept: the control state comes from storage, the
+ * per-recipient outcome from the walk.
+ *
+ * A Stop and a Pause are the only things another writer can have changed —
+ * nothing else writes this record concurrently, because there is one run and one
+ * walk — so copying those two fields captures all of it.
+ */
+function adoptMessageRunControl(mine: any, stored: any): void {
+  const theirs = stored?.queue;
+  if (!theirs || !mine) return;
+  if (theirs.state === MessageQueue.QUEUE_STATE.STOPPED) {
+    mine.state = MessageQueue.QUEUE_STATE.STOPPED;
+    mine.stoppedReason = theirs.stoppedReason || "stopped-by-user";
+    return;
+  }
+  if (theirs.state === MessageQueue.QUEUE_STATE.PAUSED && isLiveMessageQueue(mine)) {
+    mine.state = MessageQueue.QUEUE_STATE.PAUSED;
+  }
+}
+
+/**
+ * The ONLY way the walk writes. Every write it makes goes through here.
+ *
+ * Two things have to be true of a write from a walk and neither is automatic.
+ *
+ * IT MUST NOT UNDO A STOP. The walk holds its copy across a round trip that can
+ * take two minutes, and a Stop pressed inside that window lands in storage
+ * underneath it. A plain write would put `running` back over it and a later
+ * alarm would happily carry on messaging people after the recruiter stopped —
+ * which is the worst bug this file could have. `adoptMessageRunControl` brings
+ * the Stop forward onto the copy first, so the write cannot lose it.
+ *
+ * IT MUST NOT TOUCH A DIFFERENT RUN. If the recruiter stopped this one and
+ * started another, the stored `runId` has changed and everything this walk is
+ * holding belongs to a run that no longer exists.
+ *
+ * What it deliberately does NOT do is refuse a late write outright. Rule 12:
+ * Stop ends work and never discards what the work produced, so an observation
+ * that arrives after a Stop is still recorded — with the Stop intact around it.
+ */
+async function persistMessageRun(record: any): Promise<boolean> {
+  const stored = await readMessageRunRecord();
+  if (stored?.runId && record?.runId && String(stored.runId) !== String(record.runId)) return false;
+  adoptMessageRunControl(record.queue, stored);
+  await writeMessageRunRecord(record);
+  return true;
+}
+
+/**
+ * Record what one round trip produced, whatever happened to the run meanwhile.
+ *
+ * The observation is applied to the walk's OWN copy, because that copy is the
+ * one with this person mid-flight and therefore the only one their outcome can
+ * be applied to — a `markSent` against a stored copy where a Stop has already
+ * settled them returns `false`, and the send would simply vanish.
+ */
+async function recordMessageOutcome(record: any, recipient: any, reply: any): Promise<string> {
+  const verdict = applyMessageObservation(record.queue, recipient, reply, Date.now());
+  await persistMessageRun(record);
+  return verdict;
+}
+
+/**
+ * Spend a wait without losing the worker.
+ *
+ * The thirty-second gap is honoured in full — `waitMs` comes straight from
+ * `planQueueStep` and is never reduced here. What is chunked is only HOW it is
+ * spent: each chunk ends in a storage read, which both keeps MV3 from tearing
+ * this worker down mid-gap and is how a Stop written elsewhere reaches the loop.
+ *
+ * Returns false when there is no longer a run to come back to.
+ */
+async function messageRunSleep(waitMs: number, generation: number): Promise<boolean> {
+  const until = Date.now() + Math.max(0, Number(waitMs) || 0);
+  for (;;) {
+    const left = until - Date.now();
+    if (left <= 0) return true;
+    if (generation !== messageRunGeneration) return false;
+    await delay(Math.min(MESSAGE_KEEPALIVE_MS, left));
+    const record = await readMessageRunRecord();
+    if (!record || !isLiveMessageQueue(record.queue)) return false;
+  }
+}
+
+/**
+ * One person: open them, have the text typed, press, and record what was seen.
+ *
+ * Every step here is bounded and every outcome is written down. The only way out
+ * without a written outcome is the run being replaced underneath it, which
+ * `recordMessageOutcome` refuses to write over.
+ */
+async function messageOneRecipient(record: any, recipient: any, generation: number): Promise<void> {
+  const queue = record.queue;
+  const id = String(recipient?.id || "");
+
+  // The tab is resolved BEFORE anybody's attempt is spent, because a hiring page
+  // that cannot be reached is not a fact about this recipient. Charging it to
+  // them would walk the whole list down to `failed` two attempts at a time over
+  // a problem none of them has. Rule 13: every tab decision goes through the one
+  // controller; this function never touches `chrome.tabs` itself.
+  let tabId = 0;
+  try {
+    const tab = await resolveApplicantTab();
+    tabId = Number(tab?.id) || 0;
+    if (!tabId) throw new Error("The hiring tab could not be reached.");
+    // Rule 9: LinkedIn does not render a tab Chrome is not painting, so a
+    // composer in a hidden tab never appears and every signal reads as failure.
+    // Activated, never focused — rule 15 keeps focus for a direct user command,
+    // and a walk between two messages is not one.
+    await Tabs.activate(tabId, { focusWindow: false }).catch(() => false);
+    await ensureContentScript(tabId, APPLICANT_SCRIPTS, APPLICANT_MESSAGES.PING);
+  } catch (error) {
+    MessageQueue.stopQueue(queue, cleanRunReason(error) || "hiring-tab-unavailable");
+    await persistMessageRun(record);
+    return;
+  }
+
+  record.tabId = tabId;
+  // Durable before the dispatch. If the worker dies during the round trip, the
+  // next one finds this person `opening` and settles them rather than opening
+  // them again — see `reviveMessageRun`.
+  MessageQueue.markOpening(queue, id);
+  await persistMessageRun(record);
+  // Re-read AFTER the write, not only before it. A Stop pressed while that write
+  // was in flight is now on this copy — `persistMessageRun` brought it across —
+  // and this is the last moment it can be honoured before somebody is opened.
+  // The generation check catches the same thing one layer up, in this worker.
+  if (generation !== messageRunGeneration || !isLiveMessageQueue(queue)) return;
+
+  let reply: any = null;
+  try {
+    reply = await sendTabMessage(
+      tabId,
+      {
+        type: MESSAGE_RUN_MESSAGES.SEND_ONE,
+        // Exactly the queue's entry shape, minus its bookkeeping. The content
+        // script is handed the FINAL text; it composes nothing and renders no
+        // template, so there is one place a message body can be decided.
+        recipient: {
+          id,
+          name: String(recipient.name || ""),
+          profileUrl: String(recipient.profileUrl || ""),
+          applicationId: String(recipient.applicationId || ""),
+          text: String(recipient.text || "")
+        },
+        jobId: String(record.jobId || "")
+      },
+      MESSAGE_SEND_TIMEOUT_MS
+    );
+  } catch (error) {
+    // A timeout is NOT a failure — it is "we do not know", and the difference
+    // decides whether this person is opened a second time. The synthesized reply
+    // deliberately carries NO `recipientId`: a round trip that never answered
+    // cannot vouch for anybody, and that absence is exactly what routes them to
+    // the terminal `no-observation` branch instead of the retrying one. Two
+    // minutes of silence from a content script that was told to press Send is
+    // indistinguishable from a send that went — so it is treated as one might
+    // have.
+    reply = { ok: false, error: cleanRunReason(error) || "the content script did not answer" };
+  }
+
+  await recordMessageOutcome(record, recipient, reply);
+}
+
+/**
+ * The loop. `planQueueStep` decides; this obeys.
+ *
+ * Nothing here chooses who is next, whether the cap is reached, or how long is
+ * owed — all of that is in the pure core, where it is answerable in a Node test.
+ * What lives here is only the doing: the clock, the tab, the storage.
+ */
+async function walkMessageRun(generation: number): Promise<void> {
+  if (messageRunWalker === generation) return;
+  messageRunWalker = generation;
+  try {
+    for (;;) {
+      if (generation !== messageRunGeneration) return;
+      const record = await readMessageRunRecord();
+      if (!record?.queue) return;
+      const queue = record.queue;
+      const step = MessageQueue.planQueueStep({ queue, now: Date.now() });
+
+      if (step.action === "done" || step.action === "stop") {
+        await settleMessageRun(record, step.reason || step.action);
+        return;
+      }
+
+      if (step.action === "wait") {
+        // A paused run answers `waitMs: 0`, which would spin. The GAP is never
+        // shortened; only a pause is given a poll interval it does not have.
+        const owed = step.reason === "paused" ? MESSAGE_PAUSE_POLL_MS : Number(step.waitMs) || 0;
+        if (!(await messageRunSleep(owed, generation))) return;
+        continue;
+      }
+
+      if (step.action === "await-open" || step.action === "await-send") {
+        // Unreachable from this walk's own steps — open, fill, press and observe
+        // are one round trip, so nobody is left mid-flight by a loop that is
+        // still running. It means a previous worker died holding this person.
+        MessageQueue.markSkipped(queue, step.recipient?.id, "interrupted-while-open");
+        await persistMessageRun(record);
+        continue;
+      }
+
+      if (step.action !== "open" || !step.recipient) {
+        await settleMessageRun(record, `unknown-step-${step.action}`);
+        return;
+      }
+
+      await messageOneRecipient(record, step.recipient, generation);
+    }
+  } finally {
+    if (messageRunWalker === generation) messageRunWalker = 0;
+  }
+}
+
+/**
+ * The run has nothing left to do.
+ *
+ * The record is KEPT, not deleted: rule 12 says work that ends never discards
+ * what it produced, and "who did this run message" is the entire product. It
+ * ages out on the TTL like every other lease here.
+ */
+async function settleMessageRun(record: any, reason: string): Promise<void> {
+  if (!record) return;
+  // A run that finished normally is already `done`; only one stopped by a cap or
+  // an unreachable page still needs a reason written on it.
+  if (isLiveMessageQueue(record.queue)) MessageQueue.stopQueue(record.queue, reason || "ended");
+  record.endedAt = nowIso();
+  record.endedReason = cleanRunReason(reason);
+  // Through the same guard as every other walk write: a Stop that landed while
+  // this was deciding keeps its own reason rather than being relabelled with a
+  // cap or a tab failure the recruiter never saw.
+  await persistMessageRun(record);
+  await chrome.alarms.clear(MESSAGE_RUN_ALARM).catch(() => undefined);
+}
+
+/**
+ * End the run, now, and keep everything it produced — rule 12.
+ *
+ * The generation is burned FIRST, before any `await`, so a walk already in
+ * flight cannot take one more step while this is still writing. Everyone already
+ * sent stays sent; the person mid-flight is recorded as `stopped-while-open` by
+ * `stopQueue` rather than abandoned; and the record survives so the recruiter can
+ * still see what happened.
+ */
+async function stopMessageRun(reason = "stopped-by-user"): Promise<any> {
+  messageRunGeneration += 1;
+  await chrome.alarms.clear(MESSAGE_RUN_ALARM).catch(() => undefined);
+  const record = await readMessageRunRecord();
+  if (!record?.queue) return { ok: true, stopped: true, active: false };
+  const changed = MessageQueue.stopQueue(record.queue, cleanRunReason(reason) || "stopped-by-user");
+  record.endedAt = nowIso();
+  record.endedReason = cleanRunReason(reason) || "stopped-by-user";
+  await writeMessageRunRecord(record);
+  return { ok: true, stopped: true, active: true, changed, run: describeMessageRun(record.queue) };
+}
+
+async function ensureMessageRunHeartbeat(): Promise<void> {
+  const existing = await chrome.alarms.get(MESSAGE_RUN_ALARM).catch(() => null);
+  if (!existing) await chrome.alarms.create(MESSAGE_RUN_ALARM, { periodInMinutes: 1 });
+}
+
+/** Start the walk unless one is already in flight in this worker. */
+function kickMessageRun(): void {
+  if (messageRunWalker === messageRunGeneration) return;
+  walkMessageRun(messageRunGeneration).catch(() => undefined);
+}
+
+/**
+ * Bring a run back after the worker died holding it.
+ *
+ * Runs on every worker start and on the minute alarm. `messageRunWalker` is the
+ * signal that decides which of those it is: a fresh worker has no walk in
+ * flight, so anybody found mid-flight really was stranded — whereas a live walk
+ * has one open by design, and reviving underneath it would settle a person whose
+ * composer is open right now.
+ */
+async function resumeMessageRun(): Promise<boolean> {
+  if (messageRunWalker) return false;
+  const record = await readMessageRunRecord();
+  if (!record?.queue || !isLiveMessageQueue(record.queue)) {
+    await chrome.alarms.clear(MESSAGE_RUN_ALARM).catch(() => undefined);
+    return false;
+  }
+  const { stranded } = reviveMessageRun(record);
+  if (stranded.length) await writeMessageRunRecord(record);
+  await ensureMessageRunHeartbeat();
+  kickMessageRun();
+  return true;
+}
+
+async function handleMessageRunCommand(type: string, message: any, sender?: any): Promise<any> {
+  if (type === MESSAGE_RUN_MESSAGES.STATUS) {
+    // Read-only, and safe with no run at all: "there is nothing running" is an
+    // answer, not an error, and the page asks this on every poll.
+    const record = await readMessageRunRecord();
+    const queue = record?.queue || null;
+    return {
+      ok: true,
+      active: Boolean(queue && isLiveMessageQueue(queue)),
+      run: describeMessageRun(queue),
+      entries: messageRunEntries(queue),
+      startedAt: String(record?.startedAt || ""),
+      updatedAt: String(record?.updatedAt || ""),
+      endedReason: String(record?.endedReason || "")
+    };
+  }
+
+  if (type === MESSAGE_RUN_MESSAGES.STOP) {
+    const stopped = await stopMessageRun(String(message?.reason || "stopped-by-user"));
+    // The page is told too, and told with STOP_ALL rather than with this
+    // command. Ending the run here stops the NEXT person being opened, but the
+    // one already in flight is a round trip inside the content script, and if
+    // nothing reaches it that round trip finishes — pressing Send after the
+    // recruiter pressed Stop. STOP_ALL is the one signal the applicants script
+    // is already guaranteed to honour, checked by the same `assertRunnable()`
+    // guard as everything else on that surface, so it lands within a step.
+    //
+    // It is deliberately broader than this command: it would also end an
+    // applicant collection in that tab. That costs nothing real, because both
+    // drive the same applicant panel and cannot be running at once anyway, and
+    // the alternative is a Stop that lets one more message out.
+    const tab = await resolveApplicantTab().catch(() => null);
+    if (tab?.id) await sendTabMessage(tab.id, { type: STOP_ALL }, PING_TIMEOUT_MS).catch(() => undefined);
+    return stopped;
+  }
+
+  if (type === MESSAGE_RUN_MESSAGES.PAUSE) {
+    const record = await readMessageRunRecord();
+    if (!record?.queue) return { ok: false, error: "There is no message run to pause." };
+    const paused = MessageQueue.pauseQueue(record.queue);
+    await writeMessageRunRecord(record);
+    return { ok: true, paused, run: describeMessageRun(record.queue) };
+  }
+
+  if (type === MESSAGE_RUN_MESSAGES.RESUME) {
+    const record = await readMessageRunRecord();
+    if (!record?.queue) return { ok: false, error: "There is no message run to resume." };
+    const resumed = MessageQueue.resumeQueue(record.queue);
+    await writeMessageRunRecord(record);
+    if (resumed) {
+      await ensureMessageRunHeartbeat();
+      kickMessageRun();
+    }
+    return { ok: true, resumed, run: describeMessageRun(record.queue) };
+  }
+
+  if (type === MESSAGE_RUN_MESSAGES.START) {
+    // Anchor "the same window" to the window the button was actually pressed in,
+    // before any tab is opened — exactly as the applicant commands do.
+    await rememberOrigin(sender);
+
+    // Is a run already live? The applicant equivalent asks the page, because the
+    // page owns that run. This one is owned here, so the worker asks itself —
+    // and a second START must never build a second queue over the same people.
+    const existing = await readMessageRunRecord();
+    if (existing && isLiveMessageQueue(existing.queue)) {
+      return { ok: true, started: true, alreadyRunning: true, run: describeMessageRun(existing.queue) };
+    }
+
+    const recipients = Array.isArray(message?.recipients) ? message.recipients : [];
+    if (!recipients.length) return { ok: false, error: "No recipients were given to message." };
+
+    const tab = await resolveApplicantTab();
+    await revealApplicantTab(tab);
+    await ensureContentScript(tab.id, APPLICANT_SCRIPTS, APPLICANT_MESSAGES.PING);
+
+    // The core does the refusing: a duplicate id is one person, and a recipient
+    // with no text is failed at creation rather than discovered with a composer
+    // already open.
+    const queue = MessageQueue.createMessageQueue({
+      recipients,
+      audience: String(message?.audience || ""),
+      limits: message?.limits || {},
+      startedAt: Date.now()
+    });
+    const record = {
+      runId: createApplicantRunId(),
+      queue,
+      jobId: Applicants.parseHiringContext(String(tab?.url || "")).jobId || "",
+      tabId: Number(tab.id) || 0,
+      startedAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: "",
+      endedReason: ""
+    };
+    await writeMessageRunRecord(record);
+    await ensureMessageRunHeartbeat();
+
+    // Detached, exactly like Collect All: a list of forty people at a
+    // thirty-second gap is twenty minutes, and the page is allowed to close the
+    // moment the button is pressed.
+    const generation = (messageRunGeneration += 1);
+    walkMessageRun(generation).catch(() => undefined);
+    return { ok: true, started: true, total: queue.entries.length, run: describeMessageRun(queue) };
+  }
+
+  return { ok: false, error: `Unknown message command: ${type}` };
+}
+
+chrome.alarms.onAlarm.addListener((alarm: any) => {
+  if (alarm?.name === MESSAGE_RUN_ALARM) {
+    resumeMessageRun().catch(() => undefined);
+  }
+});
+
+// Every worker start, including after MV3 tore the last one down mid-gap. A run
+// with nothing left to do clears its own alarm and does nothing at all.
+resumeMessageRun().catch(() => undefined);
+
 // ------------------------------------------------------------------- lifecycle
 
 /**
@@ -2622,6 +3369,19 @@ chrome.runtime.onMessage.addListener((message: any, _sender: any, sendResponse: 
     // The universal Stop. Handled before every other branch so it is never
     // queued behind the work it is trying to end.
     stopEverything()
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
+  if (typeof message?.type === "string" && message.type.startsWith("PV_MESSAGE_")) {
+    // AFTER the universal Stop and before everything else. The ordering is not
+    // cosmetic: this family is the one that can put words in front of another
+    // human being, so a Stop must never be queued behind it.
+    //
+    // `_sender` is where the window the button was pressed in lives, and START
+    // anchors "the same window" to it exactly as the applicant commands do.
+    handleMessageRunCommand(message.type, message, _sender)
       .then((response) => sendResponse(response))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;

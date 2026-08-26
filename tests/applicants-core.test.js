@@ -98,6 +98,16 @@ test("every control that acts on the applicant is refused before any allowlist",
   ];
   for (const label of forbidden) {
     for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
+      // The 3.14.0 carve-out, and the only one: `message` is forgiven at
+      // MESSAGE_OPEN and `send` at MESSAGE_SEND, because the user asked for
+      // templated messages and rule 5 was amended for them. Skipped here in the
+      // same shape the APPLICANT_ROW exemption is skipped further down, and
+      // bounded by the PERMANENT test that walks every purpose against these
+      // same labels and proves the exemption reaches nothing else — including
+      // "Send InMail" and "Message and reject", which stay refused AT the two
+      // message purposes.
+      if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_OPEN) continue;
+      if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_SEND) continue;
       const verdict = Applicants.classifyApplicantControl({ text: label, purpose, inContainer: true });
       assert.equal(verdict.allowed, false, `"${label}" must never be clicked (purpose ${purpose})`);
       assert.equal(verdict.forbidden, true, `"${label}" must be refused by the denylist, not merely unmatched`);
@@ -1169,10 +1179,18 @@ test("the applicants adapter clicks only its gated controls", async () => {
   // one call site: a second site for a control rule 9 already names would raise
   // this number without adding a control, and the number is only worth asserting
   // while it counts controls.
-  assert.equal(clicks.length, 9, `only eight gated controls and one dismiss may be clicked, found ${clicks.length}`);
+  //
+  // The tenth and eleventh arrived together in 3.14.0: `clickMessageOpen`
+  // presses the panel's Message control and `clickMessageSend` presses the
+  // composer's own Send. They are the only clicks in this extension that cannot
+  // be undone by a later step, which is why they are two owners rather than one
+  // shared presser — the tripwire's value is naming WHICH control a site
+  // belongs to, and "a message was opened" and "a message was sent" are not the
+  // same event to be wrong about. Rules 5 and 6 were amended in the same task.
+  assert.equal(clicks.length, 11, `only ten gated controls and one dismiss may be clicked, found ${clicks.length}`);
   assert.equal(
     (source.match(/control\.element\.click\(\)/g) || []).length,
-    6,
+    8,
     "every open must go through a classified verdict"
   );
   assert.match(source, /pager\.element\.click\(\);/, "and so must the pager");
@@ -2446,7 +2464,7 @@ test("the run walks the list by identity, so a position can never address the wr
   assert.ok(!/rowId !== openId/.test(withoutComments(source)),
     "the address bar can no longer decide on its own that an applicant is already open");
   // Still exactly nine click call sites: this adds no control (rule 9).
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("a control in the list header can never retire the open applicant's row", async () => {
@@ -3369,7 +3387,7 @@ test("coming back to an unfinished job run resumes it, but a completed run stays
 
   // And it costs no new click: the restart replays the run, it does not invent
   // a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("the worker lifecycle admits one newest execution and never reopens a completed run", async () => {
@@ -3652,7 +3670,7 @@ test("the page is settled before anybody on it is opened, and the pager waits fo
     "every list scan feeds the roster");
 
   // Rule 9: this adds no control, on any path.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("a roster seeded before the page is settled walks it from the middle, not the top", () => {
@@ -3815,7 +3833,7 @@ test("an applicant is opened, read and saved exactly once, and 'already open' is
     "and a collected row joins that ledger before the walk moves on");
 
   // Rule 9: none of this adds a control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("returning to a job's applicant list is an arrival; opening a row is not", () => {
@@ -3909,7 +3927,7 @@ test("an arrival survives a lost race, a back button and a bfcache restore", asy
   assert.match(source, /if \(previous\?\.pageShowHandler\) window\.removeEventListener\("pageshow", previous\.pageShowHandler\)/);
 
   // And none of it costs a click: the restart replays the run, it invents no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("coming back to the tab restarts the run, and the page says so", async () => {
@@ -3988,7 +4006,7 @@ test("coming back to the tab restarts the run, and the page says so", async () =
   assert.match(source, /previous\.noticeElement\.remove\(\)/);
 
   // Still no new control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 });
 
 test("the run collects every page of the applicant list, not only the first", async () => {
@@ -4512,7 +4530,7 @@ test("a row that would not open is opened again, because nothing was read when i
 
   // No new click: re-resolving a row is finding it again, not pressing anything.
   assert.equal((select.match(/\.click\(\)/g) || []).length, 1, "still one click per applicant");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and still exactly nine in the file");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "and still exactly eleven in the file");
 });
 
 test("a numbered pager is the pager too, but only against the page it says it is on", () => {
@@ -4611,7 +4629,7 @@ test("the numbered pager is identified as a group, and never pressed on a guess"
     "and the numbered reader runs only when it found nothing");
 
   // No new click site: the pager press is the one that already existed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "still exactly eleven clicks");
   assert.match(source, /walk\.pagerReason = pager\.verdict\.reason/, "and which pager was used is on the record");
 });
 
@@ -4629,7 +4647,7 @@ test("the panel Download probe observes and never presses", async () => {
   assert.ok(!/return \{ element/.test(probe), "and must not hand an element back to be pressed");
 
   // The click budget is untouched: rule 9 governs controls that are pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "still exactly nine clicks");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "still exactly eleven clicks");
 
   // And what it found reaches the recruiter's console, which is the point.
   assert.match(source, /panelDownloadLabels: resume\.panelDownloadLabels \|\| \[\]/,
@@ -4880,10 +4898,10 @@ test("Collect Every Applicant is gone, and it took nothing else with it", async 
   assert.match(source, /options\.recollect === true/, "which the walk still honours");
 
   // The click budget is a count of CONTROLS (rule 9), and no control was
-  // removed here — only a caller. Nine: eight gated opens plus one shared
+  // removed here — only a caller. Eleven: ten gated opens plus one shared
   // dismiss.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9,
-    "applicants.js must still click exactly nine times");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11,
+    "applicants.js must still click exactly eleven times");
 });
 
 // ------------------------------------------------- pacing the walk to the page
@@ -5286,17 +5304,21 @@ test("Phase 1 tripwire: nine clicks, and each one is owned by a named function",
     "resumeAddressFromCard",   // the resume card's own Download (3.13.0, rule 9k)
     "collectResume",           // the resume control
     "selectApplicantRow",      // a row of the applicant list
-    "clickApplicantPager"      // the list's next-page control
+    "clickApplicantPager",     // the list's next-page control
+    // The two from 3.14.0, and the only presses here that no later step can
+    // undo. Everything above this line reads; these two write to a stranger.
+    "clickMessageOpen",        // the panel's Message control (rule 9l)
+    "clickMessageSend"         // the composer's own Send (rule 9m)
   ];
 
   assert.equal((source.match(/\.click\(\)/g) || []).length, owners.length,
-    "the click budget is eight: seven gated opens and one shared dismiss");
+    "the click budget is eleven: ten gated opens and one shared dismiss");
 
   const declarations = adapterFunctions(source);
   const found = [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(declarations, match.index));
 
   assert.deepEqual([...found].sort(), [...owners].sort(),
-    "every click is owned by exactly one of the nine sanctioned functions — none may move house");
+    "every click is owned by exactly one of the eleven sanctioned functions — none may move house");
 });
 
 test("Phase 1 tripwire: the panel's column scrolls, the position is always restored, and only three functions move the list", async () => {
@@ -6084,7 +6106,7 @@ test("Phase 4: the layout verdict reaches the dispatch and the diagnostics, and 
   assert.match(signals, /held\.panel\?\.isConnected/, "a remount re-measures rather than answering from a detached node");
 
   // The click budget is untouched by any of this.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 });
 
 // ------ Phase 5 of the multiple-LinkedIn-UI support guide: the fallbacks
@@ -6285,7 +6307,7 @@ test("Phase 5: a document card names the file when there is no viewer to ask", a
   assert.match(card, /DOCUMENT_EXTENSION_PATTERN\.test\(line\)/, "a file name is a line carrying a document extension");
   assert.match(card, /VIEWER_NOISE_PATTERN\.test\(line\)/, "and not one of the viewer's own chrome lines");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 });
 
 test("Phase 5: the labelled reader refuses the posting's own title and company", async () => {
@@ -6478,7 +6500,7 @@ test("Phase 6: the header window ends at the first section on SCREEN, not the fi
   assert.match(own, /Applicants\.cutToOwnSection\(toLines\(/, "the adapter calls the tested cut");
   assert.ok(!/const cut = rest\.findIndex/.test(source), "and no longer carries its own copy");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 });
 
 
@@ -6657,7 +6679,7 @@ test("Phase 7: whether the left list moved is measured on the page, because it c
   // The panel's own position is still restored on every path, failure included.
   const scan = source.slice(source.indexOf("async function scanApplicantPanel"), source.indexOf("function wrongApplicantError"));
   assert.match(scan, /\} finally \{[\s\S]{0,400}?scrollPanelTo\(originalY, target\);/, "restored in a finally");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "and the click budget is still eleven");
 });
 
 
@@ -6909,7 +6931,7 @@ test("Phase 9: capturing presses nothing, scrolls nothing, saves nothing and rea
     "and the header window is the one the extraction already read, not a second reading");
 
   // Still nine clicks in the whole file.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 
   // Stop is still matched before every other branch that does work.
   const handler = source.slice(source.indexOf("state.handler = (message"), source.length);
@@ -7012,7 +7034,7 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   assert.equal(Applicants.isResumeDocumentUrl("https://media.licdn.com/dms/document/abc/resume.pdf"), true);
 
   // And none of it costs a click.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
   const declarations = [...source.matchAll(/^ {2}(?:async )?function ([A-Za-z0-9_]+)\(/gm)]
     .map((match) => ({ name: match[1], at: match.index }));
   const ownerOf = (offset) => {
@@ -7025,7 +7047,7 @@ test("Phase 11: every resume variant is reached without a click of its own", asy
   };
   assert.deepEqual(
     [...source.matchAll(/\.click\(\)/g)].map((match) => ownerOf(match.index)).sort(),
-    ["clickApplicantPager", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "resumeAddressFromCard", "selectApplicantRow"],
+    ["clickApplicantPager", "clickMessageOpen", "clickMessageSend", "clickResumeDownload", "closeOpenedOverlay", "collectResume", "expandCollapsedSections", "openContactAndCollect", "openContactMenu", "resumeAddressFromCard", "selectApplicantRow"],
     // `openContactMenu` is the eighth, added in 3.9.1 to reach the contact
     // disclosure — NOT the resume.
     //
@@ -7161,7 +7183,7 @@ test("Phase 12: twelve phases changed no schema, no CSV and no click", async () 
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
   const { APPLICANT_CSV_COLUMNS, APPLICANT_TABLE_COLUMNS, applicantsToCsv } = await import("../src/applicant-csv.js");
 
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "nine clicks in, nine clicks out");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "eleven clicks in, eleven clicks out");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7299,7 +7321,7 @@ test("3.9.1: correcting the expander added no click and moved no schema", async 
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
   // This task changed policy only. Not one call site moved.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is eleven");
 
   assert.deepEqual(Object.keys(Applicants.normalizeApplicantRecord({}).applicant), [
     "name", "profileUrl", "headline", "location",
@@ -7429,9 +7451,10 @@ test("3.9.1: the eighth click is a new control, and it is the only new one", asy
   const source = withoutComments(
     await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8")
   );
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "eight gated opens and one shared dismiss");
-  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 6,
-    "the verdict-gated opens are the five of 3.9.1 plus the card's Download (3.13.0)");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "ten gated opens and one shared dismiss");
+  assert.equal((source.match(/control\.element\.click\(\)/g) || []).length, 8,
+    "the verdict-gated opens are the five of 3.9.1, the card's Download (3.13.0), "
+    + "and the Message and Send of 3.14.0");
   assert.equal((source.match(/opener\.element\.click\(\)/g) || []).length, 1,
     "and the new one is the menu opener, once");
 
@@ -7606,7 +7629,7 @@ test("3.9.1: handling the scan cost no click and no new status", async () => {
   );
   // The eighth click is the contact menu and remains the only new one. Nothing
   // about the scan is pressed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 
   // Reusing NOT_ATTEMPTED rather than inventing a status is deliberate: a new one
   // would have to be taught to the merge, the CSV and the dashboard, and this
@@ -7762,7 +7785,7 @@ test("3.9.2: none of this added a click, a column, a status or a permission", as
   );
   // The whole fix is reporting. It reads nothing new off the page and presses
   // nothing at all.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
   assert.equal((source.match(/trusted: true/g) || []).length, 1, "and trusted:true is still at one site");
 
   const { APPLICANT_TABLE_COLUMNS } = await import("../src/applicant-csv.js");
@@ -7916,7 +7939,7 @@ test("3.9.3: the opener can never be returned as its own menu", async () => {
 
   // Still exactly one press. The whole route is one click and the budget is nine.
   assert.equal((open.match(/\.click\(\)/g) || []).length, 1, "the menu is opened once");
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "and the file's budget is unchanged");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "and the file's budget is unchanged");
 });
 
 test("3.9.3: 'it appeared when we pressed' means newly VISIBLE, not newly created", async () => {
@@ -8021,7 +8044,7 @@ test("3.9.3: a whole-job run expands collapsed sections, on a smaller budget tha
     "the same one budget still reaches the scan's second pass");
 
   // No new click site. The budget moved; the places that press did not.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine sites");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven sites");
 });
 
 test("3.9.3: an expander budget that runs out says so, and a refusal says why", async () => {
@@ -8289,7 +8312,7 @@ test("3.9.4: the completion gate stands between the last row and the pager", asy
   assert.match(run, /pageSweeps = 0;\s*\n\s*unfinished\.clear\(\);/, "a pager press resets the page's allowance");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 });
 
 test("3.9.4: a numbered pager may mark its current page on the item wrapping the number", async () => {
@@ -8474,6 +8497,14 @@ test("3.9.4: every other purpose still tests the whole string, aria-label includ
   // sees. This is what stops the fix leaking sideways.
   for (const purpose of Object.values(Applicants.CONTROL_PURPOSE)) {
     if (purpose === Applicants.CONTROL_PURPOSE.APPLICANT_ROW) continue;
+    // And the 3.14.0 exemption, for the same reason the row is skipped: this
+    // list contains "Message", "Message Gaurang" and "Send", which are now the
+    // two controls rule 5 was amended to allow. Every OTHER label on the list —
+    // "Send InMail" and "InMail" included — is still refused at both message
+    // purposes, and the PERMANENT test below is where that is proved rather
+    // than assumed.
+    if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_OPEN) continue;
+    if (purpose === Applicants.CONTROL_PURPOSE.MESSAGE_SEND) continue;
     for (const label of FORBIDDEN_ACTION_LABELS) {
       const verdict = Applicants.classifyApplicantControl({
         text: label, purpose, inContainer: true, href: ROW_HREF
@@ -8550,7 +8581,7 @@ test("3.9.4: the adapter hands the row's own address to the classifier", async (
   assert.ok(!/href: row\.href/.test(select), "the proof must describe the node being clicked");
 
   // Rule 9: this adds no control.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 });
 
 
@@ -9156,7 +9187,7 @@ test("3.9.5: the adapter asks three readers in order and presses no new control"
 
   // Rule 5, first: this task adds no click. The pager press is the one that
   // already existed; all that changed is which control it is handed.
-  assert.equal((source.match(/\.click\(\)/g) || []).length, 9, "the click budget is still nine");
+  assert.equal((source.match(/\.click\(\)/g) || []).length, 11, "the click budget is still eleven");
 
   // READER 1 — unchanged, and still ARIA only (rule 7).
   assert.match(adapter, /function marksCurrentPage\(node\) \{[\s\S]{0,320}?aria-current[\s\S]{0,200}?aria-selected/);
@@ -10202,4 +10233,361 @@ test("3.13.0: what the card did is on the record, so the next report needs no gu
   }
   assert.match(card, /pressedLabel: control\.verdict\.label/,
     "and names the control it pressed, rather than leaving that to be guessed");
+});
+
+// ---------------------------------------------------------- 3.14.0 messaging
+// The user decided, having been shown what it costs, that this extension may
+// press two controls it has always refused: the applicant panel's `Message` and
+// the composer's `Send`. Rule 5 was amended for them. Everything below is the
+// proof that the amendment is exactly two label/purpose pairs wide and that
+// nothing else moved.
+
+test("3.14.0: the denylist says WHICH word fired, so one word can be forgiven at one purpose", () => {
+  const { CONTROL_PURPOSE, firedForbiddenWords, classifyApplicantControl } = Applicants;
+
+  // The reader first, because the whole carve-out is built on it. A boolean
+  // cannot tell `Send`, which is the composer's own button, from `Send InMail`,
+  // which is an InMail control that begins with the word Send.
+  assert.deepEqual(firedForbiddenWords("Message"), ["message"]);
+  assert.deepEqual(firedForbiddenWords("Send"), ["send"]);
+  assert.deepEqual(firedForbiddenWords("Send InMail"), ["send", "inmail"]);
+  assert.deepEqual(firedForbiddenWords("Message and reject"), ["message", "reject"]);
+  assert.deepEqual(firedForbiddenWords("Download resume"), [], "a control that fires nothing reports nothing");
+
+  // It is compiled from the SAME string as the boolean, so a word added to the
+  // denylist tomorrow is refused inside the composer without anyone having to
+  // remember that a second copy of the list exists. Asserted by walking the
+  // words the boolean knows rather than by re-listing them here.
+  for (const label of ["Reject", "Shortlist", "Move to", "Good fit", "Add a note", "Try Premium", "Email applicant"]) {
+    assert.equal(Applicants.FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(label.toLowerCase()), true);
+    assert.ok(firedForbiddenWords(label).length > 0, `"${label}" fires the boolean but names no word`);
+  }
+
+  // A `g` regex carries `lastIndex`. If the reader ever shared one object with
+  // the boolean test, a control's verdict would depend on the label judged
+  // before it — a button refused once and allowed the next time round the list.
+  assert.notEqual(Applicants.FIRED_FORBIDDEN_ACTION_PATTERN, Applicants.FORBIDDEN_APPLICANT_CONTROL_PATTERN);
+  assert.equal(Applicants.FORBIDDEN_APPLICANT_CONTROL_PATTERN.global, false);
+  assert.equal(Applicants.FIRED_FORBIDDEN_ACTION_PATTERN.global, true);
+  for (let round = 0; round < 3; round += 1) {
+    assert.deepEqual(firedForbiddenWords("Send InMail"), ["send", "inmail"],
+      "the same label must give the same answer however many labels came before it");
+  }
+
+  // THE TRUTH TABLE. Each row is a label, the purpose it is asked for, and
+  // whether it may be pressed — and the rows that refuse are the argument.
+  const verdict = (text, purpose) => classifyApplicantControl({ text, purpose, inContainer: true });
+
+  // Forgiven: the word fired is the one word this purpose may forgive.
+  assert.equal(verdict("Message", CONTROL_PURPOSE.MESSAGE_OPEN).allowed, true);
+  assert.equal(verdict("Message", CONTROL_PURPOSE.MESSAGE_OPEN).reason, "message-open");
+  assert.equal(verdict("Send", CONTROL_PURPOSE.MESSAGE_SEND).allowed, true);
+  assert.equal(verdict("Send", CONTROL_PURPOSE.MESSAGE_SEND).reason, "message-send");
+
+  // Refused, because a second word fired and the exemption is TOTAL: one word
+  // the purpose may not forgive is enough, wherever in the label it sits.
+  const inmail = verdict("Send InMail", CONTROL_PURPOSE.MESSAGE_SEND);
+  assert.equal(inmail.allowed, false, "Send InMail is an InMail control that starts with Send");
+  assert.equal(inmail.forbidden, true, "and it is refused BY THE DENYLIST, not merely unmatched");
+  const compound = verdict("Message and reject", CONTROL_PURPOSE.MESSAGE_OPEN);
+  assert.equal(compound.allowed, false);
+  assert.equal(compound.forbidden, true, "`reject` is on nobody's exemption");
+
+  // Refused, because the exemption belongs to the PURPOSE and not to the word.
+  const wrongWay = verdict("Message", CONTROL_PURPOSE.MESSAGE_SEND);
+  assert.equal(wrongWay.allowed, false, "a Message control found inside a composer is not a Send control");
+  assert.equal(wrongWay.forbidden, true);
+  const otherWay = verdict("Send", CONTROL_PURPOSE.MESSAGE_OPEN);
+  assert.equal(otherWay.allowed, false, "a Send sitting in the applicant panel is still the forbidden action it was");
+  assert.equal(otherWay.forbidden, true);
+
+  // Refused everywhere else, exactly as before this release.
+  for (const purpose of [
+    CONTROL_PURPOSE.CONTACT, CONTROL_PURPOSE.CONTACT_MENU, CONTROL_PURPOSE.RESUME,
+    CONTROL_PURPOSE.RESUME_DOWNLOAD, CONTROL_PURPOSE.DISCLOSURE, CONTROL_PURPOSE.PAGINATION
+  ]) {
+    for (const label of ["Message", "Send"]) {
+      const refused = verdict(label, purpose);
+      assert.equal(refused.allowed, false, `"${label}" leaked at purpose ${purpose}`);
+      assert.equal(refused.forbidden, true, `"${label}" must stay denylisted at purpose ${purpose}`);
+    }
+  }
+
+  // **AND THE ROW IS BYTE-FOR-BYTE WHAT IT WAS.** A row forgives nothing, so
+  // the anchored rule still decides it and a person's card still opens.
+  const rowHref = "https://www.linkedin.com/hiring/applicants/?jobId=4277798308&applicationId=25550787924";
+  const asRow = (text) => classifyApplicantControl({
+    text, purpose: CONTROL_PURPOSE.APPLICANT_ROW, inContainer: true, href: rowHref
+  });
+  assert.equal(asRow("Message").allowed, false, "a whole label of `Message` is a control, not a person");
+  assert.equal(asRow("Message").forbidden, true);
+  assert.equal(asRow("Komal Sharma Senior Engineer Good fit").allowed, true,
+    "and a rated applicant's card still opens — 3.9.4 is untouched");
+});
+
+/**
+ * PERMANENT. This is the boundary of the 3.14.0 carve-out, and the carve-out is
+ * the only time this project has ever allowed a control that CONTACTS somebody.
+ *
+ * The exemption is stated as one map: which purpose may forgive which word. A
+ * third entry, a second word on either list, or a widening of either whole-label
+ * rule would let this extension press something the user has not agreed to —
+ * and none of those would fail any other test in this file, because every other
+ * test asks whether a specific label is refused rather than whether the set of
+ * allowed ones has grown. This test asks the second question.
+ *
+ * Do not delete or weaken it. If the exemption must genuinely grow, rule 5 in
+ * CLAUDE.md changes first, in its own task, and this test changes with it.
+ */
+test("3.14.0: PERMANENT — the message exemption is two label/purpose pairs and reaches nothing else", () => {
+  const { CONTROL_PURPOSE, PURPOSE_EXEMPT_WORDS, classifyApplicantControl } = Applicants;
+
+  // 1. THE MAP ITSELF. Two purposes, one word each, and both frozen — so a
+  //    third exemption is a source change somebody has to justify, never a
+  //    line quietly pushed onto an array at runtime.
+  assert.deepEqual(
+    Object.keys(PURPOSE_EXEMPT_WORDS).sort(),
+    [CONTROL_PURPOSE.MESSAGE_OPEN, CONTROL_PURPOSE.MESSAGE_SEND].sort(),
+    "no purpose but the two message purposes may forgive anything"
+  );
+  assert.deepEqual(PURPOSE_EXEMPT_WORDS[CONTROL_PURPOSE.MESSAGE_OPEN], ["message"]);
+  assert.deepEqual(PURPOSE_EXEMPT_WORDS[CONTROL_PURPOSE.MESSAGE_SEND], ["send"]);
+  assert.equal(Object.isFrozen(PURPOSE_EXEMPT_WORDS), true);
+  for (const words of Object.values(PURPOSE_EXEMPT_WORDS)) assert.equal(Object.isFrozen(words), true);
+
+  // 2. NEITHER WORD LEFT THE DENYLIST. This is what makes it an exemption
+  //    rather than a deletion: `message` and `send` are still forbidden actions,
+  //    and every purpose added after this one inherits that refusal for free.
+  for (const words of Object.values(PURPOSE_EXEMPT_WORDS)) {
+    for (const word of words) {
+      assert.equal(Applicants.FORBIDDEN_APPLICANT_CONTROL_PATTERN.test(word), true,
+        `"${word}" must stay on FORBIDDEN_APPLICANT_ACTIONS — the carve-out forgives, it does not delete`);
+    }
+  }
+
+  // 3. THE SWEEP. Every purpose the enum knows, against the four labels this
+  //    release is about. Exactly two cells may be allowed; every other cell in
+  //    the grid must refuse, and a purpose invented tomorrow joins the grid
+  //    automatically because the loop reads the enum rather than a list.
+  const EXEMPT_PAIRS = new Map([
+    [CONTROL_PURPOSE.MESSAGE_OPEN, "Message"],
+    [CONTROL_PURPOSE.MESSAGE_SEND, "Send"]
+  ]);
+  const LABELS = ["Message", "Send", "Send InMail", "Message and reject"];
+  let allowedCells = 0;
+  for (const purpose of Object.values(CONTROL_PURPOSE)) {
+    for (const label of LABELS) {
+      const verdict = classifyApplicantControl({ text: label, purpose, inContainer: true });
+      if (EXEMPT_PAIRS.get(purpose) === label) {
+        // Asserted rather than skipped, so the test cannot pass by the
+        // exemption having quietly stopped working.
+        assert.equal(verdict.allowed, true, `the one allowed pairing "${label}" @ ${purpose} must still work`);
+        allowedCells += 1;
+        continue;
+      }
+      assert.equal(verdict.allowed, false, `"${label}" leaked at purpose ${purpose}`);
+    }
+  }
+  assert.equal(allowedCells, 2, "exactly two cells in the grid, and they are the two rule 5 names");
+
+  // 4. AND THE CONTAINER PROOF IS NOT OPTIONAL. A Message loose on a hiring
+  //    page belongs to LinkedIn's own messaging overlay, and a Send loose on
+  //    one belongs to something that is not this composer.
+  const loose = (text, purpose) => classifyApplicantControl({ text, purpose, inContainer: false });
+  assert.equal(loose("Message", CONTROL_PURPOSE.MESSAGE_OPEN).allowed, false);
+  assert.equal(loose("Message", CONTROL_PURPOSE.MESSAGE_OPEN).reason, "outside-applicant-panel");
+  assert.equal(loose("Send", CONTROL_PURPOSE.MESSAGE_SEND).allowed, false);
+  assert.equal(loose("Send", CONTROL_PURPOSE.MESSAGE_SEND).reason, "outside-message-composer");
+
+  // 5. A caller-supplied purpose reaches the map as a property NAME, so an
+  //    inherited key must not read as an exemption. `constructor` returns a
+  //    function; `Array.isArray` is what stops the gate throwing — or worse,
+  //    forgiving — inside the one branch that must never fail open.
+  for (const purpose of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    const verdict = classifyApplicantControl({ text: "Message", purpose, inContainer: true });
+    assert.equal(verdict.allowed, false, `purpose "${purpose}" must not inherit an exemption`);
+    assert.equal(verdict.forbidden, true);
+  }
+});
+
+test("3.14.0: both message allowlists are whole-label rules, and Send is a single literal", async () => {
+  const { CONTROL_PURPOSE, classifyApplicantControl } = Applicants;
+  const opens = (text) =>
+    classifyApplicantControl({ text, purpose: CONTROL_PURPOSE.MESSAGE_OPEN, inContainer: true }).allowed;
+  const sends = (text) =>
+    classifyApplicantControl({ text, purpose: CONTROL_PURPOSE.MESSAGE_SEND, inContainer: true }).allowed;
+
+  // What LinkedIn actually paints: the bare verb, and the verb with the
+  // applicant's name once the screen-reader half of the label is folded in.
+  assert.equal(opens("Message"), true);
+  assert.equal(opens("Message Gaurang"), true);
+  assert.equal(opens("Message Gaurang Kumar"), true);
+  assert.equal(opens("Message Sushmitha.L"), true);
+  assert.equal(opens("Message O'Brien"), true);
+
+  // A name is letters and digits, and so is `and`. Without the lookahead this
+  // rule reads "Message and reject" as a Message control addressed to somebody
+  // called "and reject". The denylist refuses that label too — this is the
+  // second lock, and it catches the clause-joining words the denylist has no
+  // opinion about.
+  for (const label of [
+    "Message and reject", "Message or skip", "Message then archive",
+    "Message and forward to the team", "Message Gaurang and reject",
+    "Message the applicant about the role today"
+  ]) {
+    assert.equal(opens(label), false, `"${label}" must not read as a Message control`);
+  }
+
+  // `Send` is the strictest allowlist in the file: one literal, no tail. Every
+  // other control this extension presses can be pressed again if the first
+  // press achieved nothing. A sent message has no undo.
+  assert.equal(sends("Send"), true);
+  for (const label of ["Send InMail", "Send message", "Send message to Gaurang", "Send now", "Resend"]) {
+    assert.equal(sends(label), false, `"${label}" must not read as the composer's Send`);
+  }
+
+  // **THE ONE THAT THE DENYLIST DOES NOT CATCH, and the reason this pattern is
+  // a literal rather than a `^send` prefix.** `\bconnect\b` does not match
+  // inside "connection", so the only forbidden word "Send connection request"
+  // fires is `send` — which is precisely the word MESSAGE_SEND forgives. The
+  // whole-label rule is the only thing standing between this label and a click.
+  assert.deepEqual(Applicants.firedForbiddenWords("Send connection request"), ["send"],
+    "the denylist really does fire only the exempt word here — this is not a hypothetical");
+  const invite = classifyApplicantControl({
+    text: "Send connection request", purpose: CONTROL_PURPOSE.MESSAGE_SEND, inContainer: true
+  });
+  assert.equal(invite.allowed, false, "and it is still refused");
+  assert.equal(invite.reason, "not-a-send-control", "by the allowlist, because the denylist could not");
+
+  // The branches are textually BELOW the denylist gate, like every other
+  // purpose. Order here is not style: the gate is what the exemption runs
+  // inside, so a branch above it would answer before the denylist ever spoke.
+  const core = await readFile(resolve(root, "src/applicants-core.js"), "utf8");
+  const policy = core.slice(
+    core.indexOf("function classifyApplicantControl"),
+    core.indexOf('return refuse("unknown-purpose")')
+  );
+  assert.ok(
+    policy.indexOf("firesOutsideExemption") < policy.indexOf("CONTROL_PURPOSE.MESSAGE_OPEN"),
+    "the denylist gate is consulted before the Message branch"
+  );
+  assert.ok(
+    policy.indexOf("firesOutsideExemption") < policy.indexOf("CONTROL_PURPOSE.MESSAGE_SEND"),
+    "and before the Send branch"
+  );
+});
+
+test("3.14.0: a message is opened, inserted, verified and only then sent — never for the wrong person", () => {
+  const { MESSAGE_STEP, planMessageStep } = Applicants;
+  const step = (options) => planMessageStep(options).action;
+
+  // THE HAPPY PATH, driven rather than asserted step by step, because the
+  // question worth answering is whether a real walk terminates — and in exactly
+  // one send.
+  const drive = (seed) => {
+    const state = { ...seed };
+    const walked = [];
+    let sends = 0;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const next = planMessageStep(state);
+      walked.push(next.action);
+      if (next.action === MESSAGE_STEP.DONE || next.action === MESSAGE_STEP.GIVE_UP) break;
+      if (next.action === MESSAGE_STEP.OPEN) state.composerOpen = true;
+      else if (next.action === MESSAGE_STEP.INSERT) state.textInserted = true;
+      else if (next.action === MESSAGE_STEP.VERIFY) state.readBackMatches = true;
+      else if (next.action === MESSAGE_STEP.SEND) { sends += 1; state.sent = true; }
+      else if (next.action === MESSAGE_STEP.CONFIRM) state.confirmed = true;
+    }
+    return { walked, sends, state };
+  };
+
+  const happy = drive({});
+  assert.deepEqual(happy.walked, [
+    MESSAGE_STEP.OPEN, MESSAGE_STEP.INSERT, MESSAGE_STEP.VERIFY,
+    MESSAGE_STEP.SEND, MESSAGE_STEP.CONFIRM, MESSAGE_STEP.DONE
+  ], "open, insert, verify, send, confirm, done — and the verify is not optional");
+  assert.equal(happy.sends, 1, "one send, and the ladder never offers a second");
+
+  // WRONG PERSON, AT EVERY STAGE. LinkedIn routes ahead of its own render, so
+  // the address bar names the next applicant while the panel still shows the
+  // previous one — the same race `describePanelArrival` exists for. A composer
+  // caught on it belongs to somebody else and must never be typed into,
+  // whatever else is true, INCLUDING a message this run has already sent.
+  const stages = [
+    {},
+    { composerOpen: true },
+    { composerOpen: true, textInserted: true },
+    { composerOpen: true, textInserted: true, readBackMatches: true },
+    { composerOpen: true, textInserted: true, readBackMatches: true, sent: true },
+    { composerOpen: true, textInserted: true, readBackMatches: true, sent: true, confirmed: true }
+  ];
+  for (const stage of stages) {
+    assert.equal(step({ ...stage, wrongPerson: true }), MESSAGE_STEP.GIVE_UP,
+      `a composer belonging to somebody else must stop the ladder at ${JSON.stringify(stage)}`);
+  }
+
+  // A FAILED READ-BACK NEVER REACHES SEND. A composer holding a truncated
+  // message, or a template whose variables did not resolve, is not a message to
+  // send at a lower confidence — and there is no undo to fall back on. `null`
+  // (not asked yet) verifies; exactly `false` (asked, and the answer was no)
+  // gives up. Nothing but exactly `true` sends.
+  assert.equal(step({ composerOpen: true, textInserted: true }), MESSAGE_STEP.VERIFY,
+    "not read back yet is a step, not a verdict");
+  assert.equal(step({ composerOpen: true, textInserted: true, readBackMatches: null }), MESSAGE_STEP.VERIFY);
+  assert.equal(step({ composerOpen: true, textInserted: true, readBackMatches: false }), MESSAGE_STEP.GIVE_UP,
+    "a half-inserted message gives up; it is never sent");
+  const failed = drive({ composerOpen: true, textInserted: true, readBackMatches: false });
+  assert.equal(failed.sends, 0, "and a driven walk over it presses Send exactly never");
+  assert.deepEqual(failed.walked, [MESSAGE_STEP.GIVE_UP]);
+
+  // THE CALLER'S VETO — Stop, a rate limit, a cap, a person who must not be
+  // messaged. Checked before the composer is opened, because there is no reason
+  // to open one this run may not send from.
+  assert.equal(step({ canSend: false }), MESSAGE_STEP.GIVE_UP);
+  assert.equal(step({ composerOpen: true, canSend: false }), MESSAGE_STEP.GIVE_UP);
+  assert.equal(step({ composerOpen: true, textInserted: true, readBackMatches: true, canSend: false }),
+    MESSAGE_STEP.GIVE_UP, "a verified message is still not sent once the veto is in");
+  assert.equal(drive({ canSend: false }).sends, 0);
+
+  // ...but it does NOT discard a send that already happened. Rule 12: Stop ends
+  // work, it never discards what that work produced. A message already gone is
+  // a fact, and the only thing left to do with it is observe it and record it.
+  assert.equal(step({ composerOpen: true, textInserted: true, readBackMatches: true, sent: true, canSend: false }),
+    MESSAGE_STEP.CONFIRM, "a message already sent is confirmed, not abandoned unrecorded");
+
+  // DONE AND GIVE_UP ARE TERMINAL. Their causes are facts the caller has
+  // recorded, so feeding the same state back gives the same answer and a driven
+  // walk always ends.
+  const done = { composerOpen: true, textInserted: true, readBackMatches: true, sent: true, confirmed: true };
+  assert.equal(step(done), MESSAGE_STEP.DONE);
+  assert.equal(step(done), MESSAGE_STEP.DONE, "DONE is not left");
+  assert.equal(step({ ...done, canSend: false }), MESSAGE_STEP.DONE, "and a late veto does not unfinish it");
+  for (const gaveUp of [
+    { wrongPerson: true },
+    { canSend: false },
+    { composerOpen: true, textInserted: true, readBackMatches: false }
+  ]) {
+    assert.equal(step(gaveUp), MESSAGE_STEP.GIVE_UP);
+    assert.equal(step(gaveUp), MESSAGE_STEP.GIVE_UP, "GIVE_UP is not left");
+  }
+
+  // Every verdict says why, in its own words. The last two releases each spent
+  // a round guessing at a defect one line of diagnostics would have named.
+  const reasons = new Set([
+    planMessageStep({}).reason,
+    planMessageStep({ composerOpen: true }).reason,
+    planMessageStep({ composerOpen: true, textInserted: true }).reason,
+    planMessageStep({ composerOpen: true, textInserted: true, readBackMatches: true }).reason,
+    planMessageStep({ composerOpen: true, textInserted: true, readBackMatches: false }).reason,
+    planMessageStep({ canSend: false }).reason,
+    planMessageStep({ wrongPerson: true }).reason,
+    planMessageStep(done).reason
+  ]);
+  assert.equal(reasons.size, 8, "eight distinct states, eight distinct reasons");
+
+  // And the ladder is pure: no DOM, no clock, no chrome. It is the only place
+  // the send order can be ANSWERED rather than argued, because there is no
+  // jsdom here and none of these questions is answerable on a live account.
+  assert.equal(typeof planMessageStep, "function");
+  assert.equal(Object.isFrozen(MESSAGE_STEP), true);
 });

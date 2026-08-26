@@ -1,0 +1,90 @@
+{
+  "schema": 2,
+  "id": "TASK-0205",
+  "name": "Automated send over queued or selected applicants",
+  "request": "Automated send over queued or selected applicants",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-08-26T06:25:52.490Z",
+  "completedAt": "2026-08-26T07:49:14.158Z",
+  "startCommit": "c153586b4efb2ffbfd8d2857de62119afc0ed795",
+  "gitRef": "task/TASK-0205",
+  "files": [
+    {
+      "change": "modified",
+      "path": "CLAUDE.md"
+    },
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "extension/styles/messages.css"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/messages.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/messages-dashboard.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/message-queue-core.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/universal-stop.test.js"
+    },
+    {
+      "change": "modified",
+      "path": "tests/visual-layer.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck clean, build ok, 725 tests 0 fail, doc links 18 files, validate 34 build files and 5 React entry points. Verified in the BUILT dist: build-meta reads 3.14.0 / 2026-08-26-react-v3.14.0, dist/applicants.js carries 11 click sites and PV_MESSAGE_SEND_ONE and clickMessageSend, dist/src/applicants-core.js carries message-open, message-send and planMessageStep, dist/src/background.js carries the PV_MESSAGE_ branch, and the messages page carries the confirmation gate and checkbox and hard-codes no PV_STOP_ALL literal. NO LIVE LINKEDIN CLAIM - rule 20 stands; nothing here was run against a real account."
+  ],
+  "result": "TASK-0205 / 3.14.0: the extension opens an applicant's composer, types a templated message and presses Send, with nobody reading it in between. Asked for directly with the trade-off stated; the human-keypress alternative was offered and declined. THIS REVERSES A DECISION MADE TWICE - TASK-0188 built messaging and TASK-0196 reversed it, TASK-0203 attempted the queue-driven version and was aborted, and message-queue-core.test.js carried a test whose own comment called its property THE PROPERTY THE WHOLE FEATURE RESTS ON. Rules 5 and 6 were amended in this task rather than overridden quietly, and that test was retitled and kept rather than deleted, because its mechanical assertion is still true and still valuable. THE DENYLIST NOW REPORTS WHICH WORD FIRED. Skipping it per-purpose was the obvious fix and the worst one: LinkedIn's composer sits beside InMail upsells and the ATS rail, so the words worth refusing are concentrated exactly where the exemption would apply. A third pattern is compiled from the SAME one string with g, firedForbiddenWords reports every word a label actually fired, and a purpose forgives exactly one: message-open forgives message, message-send forgives send. Send InMail fires send AND inmail and is refused; so are Message and reject, and Message under any other purpose. The word list is untouched, so a word added tomorrow is refused inside the composer too. A PERMANENT test drives the whole enum against four labels and asserts exactly two allowed cells in the grid. FOUND RATHER THAN ASSUMED: 'Send connection request' is not caught by the denylist at all, because \\bconnect\\b does not match inside 'connection' - the only word it fires is send, precisely the word message-send forgives. The sole thing refusing it is that the allowlist is /^send$/i rather than a prefix, and a test pins that exact label. PRESSING SEND IS NOT EVIDENCE ANYTHING WAS SENT. markSent now means the adapter pressed Send AND observed it went - composer emptied AND the text present in the thread, both required, since either alone is ambiguous. Everything short of that is terminal rather than retried: an unconfirmed press and a lost reply are both settled and never offered again, because a person who may have received the message must not receive it twice. The stated cost: a genuinely failed press is skipped rather than retried, and an unconfirmed press is under-counted against the 50/day cap. TWO DOUBLE-MESSAGE DEFECTS were found and fixed during the work - a synthesized timeout reply echoed recipientId and routed two minutes of silence into the retrying branch, and the run generation counter started at 0 and collided with the walker's nobody-walking sentinel. THE COMPOSER MUST BE ONE WE JUST OPENED: LinkedIn keeps a bubble mounted across applicants holding the last conversation, so a resolver that merely found a composer would type into the PREVIOUS applicant's thread. Visible surfaces are sampled before the press and only a new one may be typed into. isExcludedContext still refuses msg-overlay-* for every panel, list and section resolver - not weakened - and rule 6 was amended for one narrow resolver used only by the send step. Identity is re-checked from panel markup immediately before the press, with previousIdentity passed, without which describePanelArrival answers ARRIVED by default on a panel rendering no application link. SETTING textContent DOES NOT WORK - the composer is React-controlled contenteditable, so the characters paint, React never learns, Send stays disabled. execCommand insertText, existing contents selected first so a retry replaces rather than doubles, then read back and compared. readBackMatches is three-valued: not-yet-read and read-and-wrong are different facts with opposite answers, and only an exact true reaches SEND. CLICK BUDGET 9 to 11, two owners not one, because the tripwire's value is naming which control a site belongs to; 26 count assertions and two owner lists updated by hand. ALSO FIXED, FOUND WHILE PROVING THIS SAFE: visual-layer.test.js claimed its scanner saw ternary class names. It does not - the regex needs a literal className=\" and a ternary emits className={ - so seventeen names had no coverage while the suite passed green. Verified by executing the scanner, not reading it, and fixed in place. NOT DONE DELIBERATELY: no Gemini - text comes from the template engine and the queue takes recipients whose text is already final, so a model-written message is a new text provider and no change to the send loop. No contact ledger - within a run the queue's terminal states make double-messaging structurally impossible, but ACROSS runs nothing prevents re-messaging, and re-selecting the same people will message them again. Files: src/applicants-core.js, src/background.ts, src/messages.ts, src/react/messages-dashboard.tsx, extension/content-scripts/applicants.js, extension/styles/messages.css, CLAUDE.md rules 5 and 6, docs/CHANGELOG.md, four test files, version bumped in nine places."
+}

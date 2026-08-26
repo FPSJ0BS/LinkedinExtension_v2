@@ -2,11 +2,21 @@
  * Messages — write one message, and see what it would actually say to each of
  * the people it names.
  *
- * THIS PAGE COMPOSES AND PREVIEWS. IT DOES NOT SEND. There is no control here
- * that messages anybody, opens LinkedIn, inserts into a composer or starts a
- * run, and there is deliberately no queue for one to drain. The only ways text
- * leaves this page are the clipboard and a CSV the user asks for, both of which
- * put the recruiter between the extension and the person.
+ * THIS PAGE SENDS, AND THAT IS NEW IN 3.14.0. Until this release the only ways
+ * text left here were the clipboard and a CSV, both of which put the recruiter
+ * between the extension and the person. A run now opens each selected
+ * applicant's composer on LinkedIn, types the message, and presses Send — with
+ * nobody reading it in between. That was asked for explicitly, with the
+ * trade-off stated, and rules 5 and 6 were amended in the same task to allow
+ * the two clicks it needs.
+ *
+ * WHICH MAKES EVERY REFUSAL BELOW LOAD-BEARING RATHER THAN ADVISORY. A blocked
+ * message used to be a Copy button the recruiter could not press, and they
+ * would have seen the gap before pasting it. There is no such reader now, so
+ * BLOCKED is the last thing standing between a hole in a template and a hundred
+ * people receiving it. A blocked person cannot be selected, cannot be swept up
+ * by select-all, and cannot enter a run — not because it would look untidy, but
+ * because a sent message cannot be recalled.
  *
  * WHAT IT IS FOR, and it is one thing. A mail merge fails silently: the run
  * completes, every message goes out, and the defect is a hundred people who
@@ -37,7 +47,12 @@
 import { getAllApplicants } from "../applicant-db.js";
 import { getAllProfiles } from "../db.js";
 import { buildCsvFile, downloadCsvText, escapeCell } from "../csv.js";
-import { type ApplicantRecord } from "../messages.js";
+// `STOP_ALL` is imported rather than spelled, deliberately: there is exactly one
+// declaration of that literal in the codebase and `tests/universal-stop.test.js`
+// asserts every surface carrying a Stop reaches it through the constant. A page
+// that hard-codes the string is a page whose Stop silently stops working the
+// day the literal changes.
+import { MESSAGE_RUN_MESSAGES, STOP_ALL, type ApplicantRecord } from "../messages.js";
 import { NavBar } from "./nav.js";
 import { type ProfileRecord, type StatusKind } from "./types.js";
 
@@ -49,6 +64,11 @@ import { type ProfileRecord, type StatusKind } from "./types.js";
 import "../message-templates-core.js";
 import "../template-store.js";
 import "../message-recipients.js";
+// The queue engine, for its limits and its recipient states. This page does not
+// drive the queue — the worker owns it, because an extension page is allowed to
+// close mid-run and a run that dies with its tab is a run that stops halfway
+// through a list. What is read here is vocabulary, not authority.
+import "../message-queue-core.js";
 
 // React 16.0.0 is a global, not an import, and it has no hooks, no Fragments
 // and no createRoot. Class components only — see CLAUDE.md.
@@ -58,6 +78,21 @@ const ReactDOM: any = (globalThis as any).ReactDOM;
 const Templates: any = (globalThis as any).ProfileVaultMessageTemplates;
 const TemplateStore: any = (globalThis as any).ProfileVaultTemplateStore;
 const Recipients: any = (globalThis as any).ProfileVaultMessageRecipients;
+const Queue: any = (globalThis as any).ProfileVaultMessageQueue;
+
+/**
+ * The two limits, read from the queue core rather than restated here.
+ *
+ * They are shown to the recruiter before a run starts, and the numbers on
+ * screen have to be the numbers the worker will actually enforce — a page that
+ * promises a 30-second gap while the engine uses five has told a lie about the
+ * thing most likely to get the account throttled. Falling back to the engine's
+ * own defaults keeps that true even if the core fails to load.
+ */
+const QUEUE_LIMITS: any = (Queue && Queue.QUEUE_LIMITS) || { MIN_GAP_MS: 30000, DAILY_CAP: 50 };
+
+/** How often a live run is asked what it is doing. There is no push channel. */
+const RUN_POLL_MS = 2000;
 
 /**
  * The store, built once at load.
@@ -135,6 +170,38 @@ interface Verdict {
   ready: boolean;
 }
 
+/** One person's progress inside a live run, as the worker reports it. */
+interface RunPerson {
+  id: string;
+  name: string;
+  /** A `RECIPIENT_STATE` — pending, opening, awaiting-send, sent, skipped, failed. */
+  state: string;
+  reason: string;
+}
+
+/**
+ * What a live run looks like from here.
+ *
+ * Pulled, never pushed: an extension page has no channel a service worker can
+ * shout down, so this is the shape of the last `STATUS` reply and it is always
+ * a moment old. Nothing on this page may act on it as though it were current —
+ * in particular the Stop button is rendered whatever this says, because a run
+ * this page believes has finished may still be mid-composer.
+ */
+interface RunView {
+  /** A `QUEUE_STATE` — idle, running, paused, stopped, done. */
+  state: string;
+  total: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  pending: number;
+  /** Milliseconds still owed on the gap between two people, if it is waiting. */
+  waitMs: number;
+  currentName: string;
+  entries: RunPerson[];
+}
+
 interface MessagesState {
   templates: TemplateRecord[];
   templateId: string;
@@ -152,6 +219,16 @@ interface MessagesState {
   message: string;
   messageKind: StatusKind;
   busy: boolean;
+  /** Who a run would go to. Only ever holds the ids of READY people. */
+  selectedIds: string[];
+  /**
+   * The armed confirmation. A run is two deliberate acts, not one click,
+   * because it is the only irreversible thing this extension does.
+   */
+  confirming: boolean;
+  starting: boolean;
+  /** The last `STATUS` reply, or null when no run has been seen. */
+  run: RunView | null;
 }
 
 /** `{{name}}`, whatever form the core reported the reference in. */
@@ -353,6 +430,55 @@ function blockReasons(preview: Preview, ready: boolean): string[] {
   return reasons;
 }
 
+/**
+ * A recipient state, as a class name and as words.
+ *
+ * Written as whole literal class names in one place rather than composed from
+ * the state string, because `tests/visual-layer.test.js` finds class names by
+ * scanning for a quoted class attribute and cannot see a name that is built at
+ * runtime. Every value on the right of this map is therefore also listed in
+ * that test's `dynamic` array for this page — if the two ever disagree, an
+ * element ships with no rule and the suite stays green. Adding a state here
+ * means adding it there.
+ *
+ * (That scanner reads comments too, so this one deliberately does not spell the
+ * attribute out — writing the example literally registered the ellipsis inside
+ * it as a class name the stylesheet was then required to define.)
+ */
+const RUN_STATE_CLASS: Record<string, string> = {
+  pending: "msg-run-state msg-run-pending",
+  opening: "msg-run-state msg-run-opening",
+  "awaiting-send": "msg-run-state msg-run-awaiting",
+  sent: "msg-run-state msg-run-sent",
+  skipped: "msg-run-state msg-run-skipped",
+  failed: "msg-run-state msg-run-failed"
+};
+
+const RUN_STATE_LABEL: Record<string, string> = {
+  pending: "Queued",
+  opening: "Opening",
+  // Deliberately not "Sending". The composer holds the text and the send has
+  // not been pressed yet, and a recruiter reading "Sending" would believe the
+  // message had gone when Stop could still catch it.
+  "awaiting-send": "In composer",
+  sent: "Sent",
+  skipped: "Skipped",
+  failed: "Failed"
+};
+
+function runStateClass(state: string): string {
+  return RUN_STATE_CLASS[state] || "msg-run-state";
+}
+
+function runStateLabel(state: string): string {
+  return RUN_STATE_LABEL[state] || state;
+}
+
+/** Whole seconds still owed on the gap, for a countdown that reads honestly. */
+function secondsLeft(waitMs: number): number {
+  return Math.max(0, Math.ceil(Number(waitMs || 0) / 1000));
+}
+
 class MessagesApp extends React.Component {
   state: MessagesState = {
     templates: [],
@@ -370,8 +496,15 @@ class MessagesApp extends React.Component {
     copiedId: "",
     message: "",
     messageKind: "",
-    busy: false
+    busy: false,
+    selectedIds: [],
+    confirming: false,
+    starting: false,
+    run: null
   };
+
+  /** The `STATUS` poll while a run is live. Cleared on unmount — see below. */
+  private runTimer: any = null;
 
   /**
    * The body textarea, so a palette press can land a token at the caret.
@@ -382,6 +515,14 @@ class MessagesApp extends React.Component {
   componentDidMount() {
     this.loadTemplates();
     this.loadPeople();
+    // Asked once on arrival, before anything is polled: a run started from a
+    // tab the recruiter has since closed is still running in the worker, and a
+    // page that opened blank next to a live run would offer to start a second.
+    this.pollRun();
+  }
+
+  componentWillUnmount() {
+    this.stopPolling();
   }
 
   setMessage = (message: string, messageKind: StatusKind = "") => {
@@ -592,6 +733,193 @@ class MessagesApp extends React.Component {
       const preview = previewFor(person, body);
       return { person, preview, ready: readyFor(person, body, preview) };
     });
+  }
+
+  // ---------------------------------------------------------------- selection
+
+  /**
+   * The people a run would actually go to.
+   *
+   * Recomputed from the CURRENT verdicts every time rather than trusted from
+   * `selectedIds`, and that is the whole point of it being a method. A tick is
+   * recorded against a person, but readiness belongs to the person AND the
+   * template together — editing one word of the body can turn a ready person
+   * blocked while their box stays ticked. Filtering on `ready` here means the
+   * stale tick cannot survive into a payload, so the worst an out-of-date
+   * selection can do is send to fewer people than the box implies. Never more.
+   */
+  selectedVerdicts(): Verdict[] {
+    const wanted = new Set(this.state.selectedIds);
+    return this.verdicts().filter((entry) =>
+      // A person with no recipient record has no value map, and the text would
+      // have to be rendered from something other than what READY was judged
+      // against. `readyFor` lets them through — for Copy, where a human reads
+      // the result before it goes anywhere — so sending has to refuse them
+      // here. In practice this only happens when the recipients core failed to
+      // load, which the page already says loudly at the top.
+      entry.ready && entry.person.recipient && wanted.has(entry.person.id));
+  }
+
+  toggleSelected = (id: string) => {
+    this.setState((previous: MessagesState) => ({
+      selectedIds: previous.selectedIds.includes(id)
+        ? previous.selectedIds.filter((value) => value !== id)
+        : [...previous.selectedIds, id]
+    }));
+  };
+
+  /**
+   * Select-all over the people currently on screen — and only the ready ones.
+   *
+   * A blocked person is not merely skipped by the payload builder; they are
+   * never ticked in the first place, so the count beside the Start button is
+   * the count that will be messaged. A select-all that silently gathered people
+   * it would later drop is how a recruiter comes to believe forty went out when
+   * thirty-one did.
+   */
+  toggleAllReady = (entries: Verdict[]) => {
+    const ids = entries.filter((entry) => entry.ready).map((entry) => entry.person.id);
+    const all = ids.length > 0 && ids.every((id) => this.state.selectedIds.includes(id));
+    this.setState((previous: MessagesState) => ({
+      selectedIds: all
+        ? previous.selectedIds.filter((id) => !ids.includes(id))
+        : [...new Set([...previous.selectedIds, ...ids])]
+    }));
+  };
+
+  // --------------------------------------------------------------------- runs
+
+  /**
+   * One person, in the shape the queue engine takes.
+   *
+   * `renderTemplate` rather than `previewTemplate`, because the preview adds a
+   * length verdict and warnings this does not need, and because the text has to
+   * come off `recipient.values` — the value map the recipients core built — so
+   * that what is sent is what the READY verdict was computed against. Rendering
+   * a second time from a different source is how the screen and the message
+   * come to disagree.
+   */
+  runRecipients(): Array<Record<string, unknown>> {
+    const body = this.state.draftBody;
+    return this.selectedVerdicts().map((entry) => {
+      const recipient = entry.person.recipient;
+      const rendered = Templates.renderTemplate({ body, values: recipient.values });
+      return {
+        id: recipient.id,
+        name: recipient.name,
+        profileUrl: recipient.profileUrl,
+        applicationId: recipient.applicationId,
+        text: String(rendered.text ?? "")
+      };
+    });
+  }
+
+  /** Arm the confirmation. Nothing is sent by this. */
+  askToStart = () => this.setState({ confirming: true });
+
+  cancelStart = () => this.setState({ confirming: false });
+
+  /**
+   * Start the run — the second of the two deliberate acts.
+   *
+   * The payload is rebuilt here rather than carried from `askToStart`, so the
+   * list that goes out is the list as it stands at the moment of confirming and
+   * not as it stood when the dialog opened.
+   */
+  startRun = async () => {
+    const recipients = this.runRecipients();
+    if (!recipients.length) {
+      this.setState({ confirming: false });
+      this.setMessage("Nobody is selected, so there is nothing to send.", "error");
+      return;
+    }
+    this.setState({ confirming: false, starting: true });
+    this.setMessage(`Starting a run to ${recipients.length} people…`);
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: MESSAGE_RUN_MESSAGES.START,
+        recipients,
+        audience: this.state.audience
+      });
+      if (response?.ok === false) throw new Error(response.error || "The run could not be started.");
+      if (response?.alreadyRunning) {
+        this.setMessage("A run is already going. This one was not started.", "error");
+      } else {
+        this.setMessage(`Running. ${recipients.length} people, one at a time.`, "success");
+      }
+      this.startPolling();
+    } catch (error) {
+      this.setMessage(errorText(error), "error");
+    } finally {
+      this.setState({ starting: false });
+    }
+  };
+
+  /**
+   * Stop, and it stops everything — rule 12.
+   *
+   * Not narrowed to this run: the rule is that Stop ends all work, and a
+   * recruiter pressing it in the middle of a send is not asking for a
+   * distinction between which subsystem they meant. What it never does is
+   * discard what the run produced — everyone already sent stays sent, and the
+   * worker records whoever was mid-composer rather than abandoning them.
+   */
+  stopRun = async () => {
+    this.setMessage("Stopping…");
+    try {
+      const response = await chrome.runtime.sendMessage({ type: STOP_ALL });
+      if (response?.ok === false) throw new Error(response.error || "Stop failed.");
+      this.setMessage("Stopped. Everyone already messaged stays messaged.", "success");
+    } catch (error) {
+      this.setMessage(errorText(error), "error");
+    }
+    this.pollRun();
+  };
+
+  startPolling = () => {
+    if (this.runTimer) return;
+    this.runTimer = setInterval(this.pollRun, RUN_POLL_MS);
+  };
+
+  stopPolling = () => {
+    if (!this.runTimer) return;
+    clearInterval(this.runTimer);
+    this.runTimer = null;
+  };
+
+  /**
+   * Ask the worker what the run is doing.
+   *
+   * A failure here is deliberately silent. The worker sleeps after about thirty
+   * seconds idle and a poll that arrives while it is waking gets nothing back;
+   * turning that into a red banner every two seconds would train the recruiter
+   * to ignore the one banner that matters. The previous view is kept instead.
+   */
+  pollRun = async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: MESSAGE_RUN_MESSAGES.STATUS });
+      if (!response?.ok || !response.run) return;
+      const run = response.run as RunView;
+      this.setState({ run });
+      if (run.state !== "running" && run.state !== "paused") this.stopPolling();
+      else this.startPolling();
+    } catch {
+      // The worker is asleep or the page is mid-teardown. Neither is news.
+    }
+  };
+
+  /** This person's state inside the live run, or "" if they are not in one. */
+  runStateFor(id: string): string {
+    const entries = this.state.run?.entries;
+    if (!Array.isArray(entries)) return "";
+    const found = entries.find((entry) => entry.id === id);
+    return found ? String(found.state || "") : "";
+  }
+
+  /** Is a run live enough that starting another would be wrong? */
+  runIsLive(): boolean {
+    const state = this.state.run?.state || "";
+    return state === "running" || state === "paused";
   }
 
   copyText = async (text: string, copiedId: string) => {
@@ -973,14 +1301,31 @@ class MessagesApp extends React.Component {
   renderPerson(entry: Verdict) {
     const { person, preview, ready } = entry;
     const copied = this.state.copiedId === person.id;
+    const checked = this.state.selectedIds.includes(person.id);
+    const runState = this.runStateFor(person.id);
     return (
       <li className={ready ? "msg-recipient" : "msg-recipient msg-recipient-blocked"} key={person.id}>
         <div className="msg-recipient-head">
           <span className="msg-recipient-who">
+            {/* Disabled rather than hidden for a blocked person: the box being
+                visibly un-tickable is what explains why select-all passed them
+                over. A hidden control looks like an oversight. */}
+            <input
+              className="msg-recipient-pick"
+              type="checkbox"
+              checked={checked && ready}
+              disabled={!ready || this.runIsLive()}
+              aria-label={ready
+                ? `Send to ${person.name || "this person"}`
+                : `${person.name || "This person"} is blocked and cannot be sent to`}
+              title={ready ? "Include this person in a run" : "A blocked message cannot be sent"}
+              onChange={() => this.toggleSelected(person.id)}
+            />
             <span className="msg-recipient-name">{person.name || "(no name collected)"}</span>
             {person.subtitle ? <span className="msg-recipient-sub">{person.subtitle}</span> : null}
           </span>
           <span className="msg-recipient-actions">
+            {runState ? <span className={runStateClass(runState)}>{runStateLabel(runState)}</span> : null}
             <span className={ready ? "msg-status msg-status-ready" : "msg-status msg-status-blocked"}>
               {ready ? "Ready" : "Blocked"}
             </span>
@@ -1002,9 +1347,11 @@ class MessagesApp extends React.Component {
   }
 
   renderPeople() {
-    const { search, visibleCount, audience } = this.state;
+    const { search, visibleCount, audience, selectedIds } = this.state;
     const entries = this.verdicts();
-    const ready = entries.filter((entry) => entry.ready).length;
+    const readyEntries = entries.filter((entry) => entry.ready);
+    const ready = readyEntries.length;
+    const allReadyPicked = ready > 0 && readyEntries.every((entry) => selectedIds.includes(entry.person.id));
     const described = describeAudience(audience);
     const visible = entries.slice(0, visibleCount);
     return (
@@ -1023,6 +1370,17 @@ class MessagesApp extends React.Component {
             placeholder="Search these people"
             onChange={(event: any) => this.setState({ search: event.target.value, visibleCount: PAGE_STEP })}
           />
+          {/* Scoped to everyone the search matches, not to the slice currently
+              painted — the list grows with "Show more" rather than paging, so
+              "all" meaning "the first 25" would be a trap. */}
+          <button
+            className="secondary small"
+            type="button"
+            disabled={!ready || this.runIsLive()}
+            onClick={() => this.toggleAllReady(entries)}
+          >
+            {allReadyPicked ? `Clear ${ready} selected` : `Select ${ready} ready`}
+          </button>
           <button className="secondary small" type="button" disabled={!ready} onClick={this.copyAll}>
             Copy every ready message
           </button>
@@ -1047,9 +1405,120 @@ class MessagesApp extends React.Component {
           </button>
         ) : null}
         <p className="msg-note">
-          This page composes and previews. It sends nothing and opens nothing — a message leaves here
-          only when you copy or export it.
+          Blocked people cannot be ticked and are never swept up by Select. A message with a hole in
+          it stays here rather than going out with the gap in it.
         </p>
+      </section>
+    );
+  }
+
+  /**
+   * The live run's own numbers.
+   *
+   * Rendered only when a run has been seen, and it outlives the run itself on
+   * purpose: after a walk finishes the counts are the only record the recruiter
+   * has of what went out, and clearing them the moment the state turns `done`
+   * would answer "did that work?" with a blank panel.
+   */
+  renderRunProgress() {
+    const run = this.state.run;
+    if (!run) return null;
+    const waiting = secondsLeft(run.waitMs);
+    return (
+      <div className="msg-run-progress">
+        <span className="msg-count">
+          {run.sent} sent · {run.skipped} skipped · {run.failed} failed · {run.pending} left
+        </span>
+        {run.state === "running" && run.currentName ? (
+          <p className="msg-run-current">Open now: {run.currentName}</p>
+        ) : null}
+        {/* A queue honouring its gap looks identical to a queue that has hung.
+            Saying which, with the number counting down, is the difference
+            between waiting and pressing Stop on something that was working. */}
+        {waiting > 0 ? (
+          <p className="msg-run-waiting">
+            Waiting {waiting}s before the next person — the gap between messages.
+          </p>
+        ) : null}
+        {run.state === "stopped" ? (
+          <p className="msg-run-waiting">Stopped. Everyone already messaged stays messaged.</p>
+        ) : null}
+        {run.state === "done" ? <p className="msg-run-waiting">Finished.</p> : null}
+      </div>
+    );
+  }
+
+  /**
+   * Start, Stop, and the confirmation between the recruiter and a hundred
+   * messages they cannot recall.
+   *
+   * Stop is rendered unconditionally — rule 12 — and never disabled. It is not
+   * gated on `runIsLive()` because that reads a status reply that is always a
+   * moment old, and the one moment a Stop must work is the moment this page is
+   * wrong about whether anything is running.
+   */
+  renderRun() {
+    const { selectedIds, confirming, starting } = this.state;
+    const count = this.selectedVerdicts().length;
+    const stale = selectedIds.length - count;
+    const gap = Math.round(Number(QUEUE_LIMITS.MIN_GAP_MS || 30000) / 1000);
+    const cap = Number(QUEUE_LIMITS.DAILY_CAP || 50);
+    const live = this.runIsLive();
+    return (
+      <section className="pv-panel msg-panel">
+        <div className="msg-panel-head">
+          <h2>Send</h2>
+          <span className="msg-count">{count} selected</span>
+        </div>
+
+        {/* Ticked, then edited out of readiness. Said plainly, because the
+            number beside Start silently shrinking is the kind of thing a
+            recruiter notices afterwards and cannot explain. */}
+        {stale > 0 ? (
+          <p className="msg-note">
+            {stale} ticked {stale === 1 ? "person is" : "people are"} no longer ready for this
+            template and will be left out.
+          </p>
+        ) : null}
+
+        <p className="msg-note">
+          A run opens each person on LinkedIn, types the message and sends it. It waits {gap}s
+          between people and stops after {cap} in a day.
+        </p>
+
+        {confirming ? (
+          <div className="msg-confirm" role="alertdialog" aria-label="Confirm this run">
+            <p className="msg-confirm-text">
+              Send to {count} {count === 1 ? "person" : "people"}? Messages cannot be recalled once
+              sent.
+            </p>
+            <div className="msg-actions">
+              <button className="danger" type="button" onClick={this.startRun}>
+                Send to {count}
+              </button>
+              <button className="secondary" type="button" onClick={this.cancelStart}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="msg-actions">
+            <button
+              className="primary"
+              type="button"
+              disabled={!count || live || starting}
+              title={live ? "A run is already going" : ""}
+              onClick={this.askToStart}
+            >
+              {live ? "Running…" : `Start a run${count ? ` (${count})` : ""}`}
+            </button>
+            <button className="danger" type="button" onClick={this.stopRun}>
+              Stop
+            </button>
+          </div>
+        )}
+
+        {this.renderRunProgress()}
       </section>
     );
   }
@@ -1065,7 +1534,8 @@ class MessagesApp extends React.Component {
             <p>
               Write one message, then read it back as each person would receive it. A message missing a
               value is blocked rather than patched, because a wrong value is worse than a blank one.
-              Nothing on this page sends anything.
+              Ticked people can be sent to in a run, one at a time, and a sent message cannot be
+              recalled.
             </p>
           </div>
           <div className="header-actions">
@@ -1089,6 +1559,7 @@ class MessagesApp extends React.Component {
           <div className="msg-column">
             {this.renderAudience()}
             {this.renderPreview()}
+            {this.renderRun()}
             {this.renderPeople()}
           </div>
         </div>

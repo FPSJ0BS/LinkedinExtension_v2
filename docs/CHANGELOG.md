@@ -1,5 +1,146 @@
 # CHANGELOG.md
 
+## 3.14.0 — the extension sends the message
+
+**Asked for directly, and the trade-off was put in front of the recruiter before a line was written:
+the extension now opens an applicant's composer, types a templated message and presses Send, with
+nobody reading it in between.** The alternative offered was the same walk stopping with the text in
+the box for a human keypress — which is what `message-queue-core.js` was built for in 3.12.0 — and
+it was declined in favour of the hands-off version. What follows is what that cost, and what was
+done about each piece of it.
+
+### This reverses a decision this project made twice
+
+TASK-0188 built applicant messaging and TASK-0196 reversed it. TASK-0203 attempted the queue-driven
+version and was aborted. `Message` and `Send` have been in the permanently-forbidden list since
+before either attempt, and `tests/message-queue-core.test.js` carried a test whose comment called
+its property *"THE PROPERTY THE WHOLE FEATURE RESTS ON"* — that nothing could leave `awaiting-send`
+except a human. None of that was overridden quietly; rules 5 and 6 were amended in this task, in
+this file, and the tests that guarded them were changed rather than deleted.
+
+### The denylist now says WHICH word fired
+
+The obvious way to allow a Message click is to skip the denylist for that purpose. That is also the
+worst way: LinkedIn's composer sits beside InMail upsells and the ATS rail, so the words worth
+refusing are concentrated exactly where the exemption would have applied.
+
+`FORBIDDEN_APPLICANT_ACTIONS` is one string compiled into patterns, and `.test()` returns a
+boolean — it cannot say which alternative matched. A **third** pattern is now compiled from the same
+string with `g`, and `firedForbiddenWords` reports every word a label actually fired. A purpose
+may then forgive exactly one word:
+
+| Label | Purpose | Fires | Verdict |
+|---|---|---|---|
+| `Message` | `message-open` | `message` | allowed |
+| `Send` | `message-send` | `send` | allowed |
+| `Send InMail` | `message-send` | `send`, `inmail` | **refused** |
+| `Message and reject` | `message-open` | `message`, `reject` | **refused** |
+| `Message` | `message-send` | `message` | **refused** |
+| `Message` | any other purpose | `message` | **refused** |
+
+The word list is untouched, so a word added to it tomorrow is refused inside the composer too. A
+PERMANENT test drives the whole `CONTROL_PURPOSE` enum against four labels and asserts **exactly
+two allowed cells** in the entire grid.
+
+**`Send connection request` is not caught by the denylist at all**, and that was found rather than
+assumed: `\bconnect\b` does not match inside "connection", so the only word it fires is `send` —
+precisely the word `message-send` forgives. The sole thing refusing it is that its allowlist is
+`/^send$/i` rather than a prefix match. That is why the pattern is a bare literal, and there is a
+test pinning that exact label so the reasoning cannot be lost.
+
+### Pressing Send is not evidence that anything was sent
+
+The queue's `markSent` used to mean "the user pressed Send". It now means "the adapter pressed Send
+**and observed the message went**", and the observation is two independent facts: the composer
+emptied, **and** the text appeared in the thread outside the editable. Either alone is ambiguous — a
+composer empties when a draft is discarded, and a matching message in the thread could be one sent
+last week.
+
+Everything short of that is terminal rather than retried:
+
+| What the adapter reports | Outcome |
+|---|---|
+| Verified, `observedSent: true` | **sent** — the only route, one call site in the worker |
+| Pressed, not confirmed | skipped, terminal, **never retried** |
+| No reply at all | skipped, terminal — silence is not evidence |
+| Answered, `pressed: false` | failed, **retryable** — the only retryable outcome |
+
+A person who may have received the message is never offered again. The cost, stated rather than
+buried: a genuinely failed press is counted as skipped rather than retried, and an unconfirmed press
+is under-counted against the 50/day cap because that counts people in `sent`. The gap is still
+charged, so cadence is unaffected.
+
+Two defects were found and fixed during this work, both of which would have messaged somebody twice:
+the synthesized timeout reply echoed `recipientId` and so routed a two-minute silence into the
+*retrying* branch; and the run generation counter started at `0`, colliding with the walker's
+"nobody walking" sentinel so a fresh worker would never resume an interrupted run.
+
+### The composer must be one this extension just opened
+
+LinkedIn keeps a messaging bubble mounted across applicants, holding whichever conversation was open
+last. A resolver that simply found "a composer" would find the **previous applicant's thread** and
+type into it — the same class of defect as the address bar naming the next applicant while the panel
+still shows the previous one. So the visible messaging surfaces are sampled *before* Message is
+pressed, and only a surface that was not there before can be typed into.
+
+`isExcludedContext` still refuses `.msg-overlay-*` for every panel, list and section resolver, and
+that was not weakened — a composer caught by a *section* resolver would be read as the applicant's
+own content. One narrow resolver may look inside it, used only by the send step. **Rule 6 was
+amended for exactly that, and no wider.**
+
+Identity is re-checked from the panel's own markup immediately before the press, not only before
+opening, and `previousIdentity` is passed — without it `describePanelArrival` answers ARRIVED by
+default on a panel that renders no application link, which is a message in the wrong person's
+composer.
+
+### Setting textContent does not work, and the read-back is what makes it safe
+
+The composer is a React-controlled `contenteditable`. Assigning `textContent` paints the
+characters, React's state never learns about them, Send stays disabled, and a forced send transmits
+nothing or the previous draft. The text goes in through `execCommand("insertText")` — deprecated,
+and still the only call producing the events React's onChange path listens for — and the existing
+contents are **selected first**, so a second attempt replaces the draft instead of sending it twice
+over in one message.
+
+Then it is read back out of the DOM and compared. `readBackMatches` is deliberately **three-valued**:
+not-yet-read and read-and-wrong are different facts with opposite answers, and collapsing them either
+loops forever or gives up before looking. Only an exact `true` reaches SEND.
+
+### The click budget went from nine to eleven
+
+`clickMessageOpen` and `clickMessageSend`, two owners rather than one shared presser, because the
+tripwire's value is naming which control a site belongs to and "a message was opened" and "a message
+was sent" are not the same event to be wrong about. Twenty-six count assertions and two owner lists
+were updated by hand. They are the only two clicks in this extension that no later step can undo.
+
+### On the page
+
+The Messages page stopped being read-only. A blocked recipient cannot be ticked, cannot be swept up
+by select-all, and cannot enter a run — that used to be a Copy button a human would have read before
+pasting, and there is no such reader now. Selection is re-derived from current verdicts, so editing
+the template after selecting can only shrink a run, never grow it. Start arms a confirmation naming
+the headcount; Stop is rendered unconditionally and never gated on a status reply that is always a
+moment old.
+
+**`tests/visual-layer.test.js` was under-covering and is fixed here.** Its comment claimed the class
+scanner saw ternary class names. It does not — the regex needs a literal `className="`, and a ternary
+emits `className={` — so seventeen names had no coverage at all while the suite passed green. Found
+by executing the scanner rather than reading it, and fixed in place for the same reason the
+`add a note` denylist hole was.
+
+### Not done, deliberately
+
+No Gemini. The text comes from the template engine, and the queue takes recipients whose text is
+already final — so a future model-written message is a new text provider and **no change to the send
+loop**. There is no contact ledger either: within a run the queue's terminal states make
+double-messaging structurally impossible, but **across runs nothing prevents re-messaging somebody**,
+and re-selecting the same people will message them again.
+
+### Rule 20 stands
+
+`npm run check` passed. Nothing here has been run against a live LinkedIn account, and no claim in
+this entry is a claim about live behaviour.
+
 ## 3.13.0 — the resume LinkedIn will not preview
 
 **The live report, with a screenshot of the card: a `DOC` tile reading "Sushmitha.L's resume", and

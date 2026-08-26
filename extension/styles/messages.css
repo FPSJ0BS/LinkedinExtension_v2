@@ -540,3 +540,120 @@
   margin-top: 12px;
   align-self: flex-start;
 }
+
+/* --------------------------------------------------------------------- send */
+/*
+ * The run controls, and the states a person passes through inside one.
+ *
+ * These are new in 3.14.0, when this page stopped being read-only. The visual
+ * weight is deliberate and it is not decoration: SENT is the only irreversible
+ * outcome on the page, so it is the only pill that is filled rather than tinted,
+ * and FAILED reads as a refusal rather than a warning because a failure here
+ * means somebody who was meant to be messaged was not.
+ */
+.msg-recipient-pick {
+  margin-right: 9px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.msg-recipient-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.msg-run-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--pv-r-pill);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: var(--pv-surface-sunken);
+  color: var(--pv-ink-3);
+}
+
+.msg-run-pending {
+  background: var(--pv-surface-sunken);
+  color: var(--pv-ink-3);
+}
+
+.msg-run-opening {
+  background: var(--pv-accent-soft);
+  color: var(--pv-accent);
+}
+
+/*
+ * In composer — the text is typed and Send has not been pressed. This is the
+ * one state a Stop can still catch, which is why it is the loudest of the
+ * in-flight pills rather than the quietest.
+ */
+.msg-run-awaiting {
+  background: var(--pv-warn-soft);
+  color: var(--pv-warn);
+}
+
+.msg-run-sent {
+  background: var(--pv-good);
+  color: var(--pv-surface);
+}
+
+.msg-run-skipped {
+  background: var(--pv-surface-sunken);
+  color: var(--pv-ink-3);
+}
+
+.msg-run-failed {
+  background: var(--pv-bad-soft);
+  color: var(--pv-bad);
+}
+
+.msg-run-progress {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pv-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg-run-current {
+  margin: 0;
+  color: var(--pv-ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.msg-run-waiting {
+  margin: 0;
+  color: var(--pv-ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/*
+ * The confirmation. Bordered in the refusal colour rather than the accent,
+ * because it is not a prompt to proceed — it is the last place a run can be
+ * called off, and it should not look like the happy path.
+ */
+.msg-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--pv-r-sm);
+  background: var(--pv-bad-soft);
+  box-shadow: inset 0 0 0 1px var(--pv-bad);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg-confirm-text {
+  margin: 0;
+  color: var(--pv-bad);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}

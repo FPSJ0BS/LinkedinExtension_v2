@@ -133,6 +133,45 @@ export const APPLICANT_MESSAGES = {
 } as const;
 
 /**
+ * Walking a list of applicants and messaging each one (3.14.0).
+ *
+ * `START`/`STATUS`/`STOP`/`PAUSE`/`RESUME` are sent to the service worker,
+ * because **the worker owns the run** — the queue, the clock, the daily cap and
+ * the record of who has already been messaged. That is not an arbitrary split.
+ * The run has to survive a navigation, a tab reload and the recruiter closing
+ * the Messages page, and a content script survives none of those; the thing
+ * that keeps the list of who has already been messaged must outlive the page
+ * that started it, or an interruption becomes a second message to somebody who
+ * already got theirs.
+ *
+ * `SEND_ONE` travels the other way — the worker to the applicants content
+ * script — and is the ONLY message in this family that touches a person. One
+ * recipient per round trip, and its reply is an OBSERVATION rather than an
+ * acknowledgement: see `MessageSendObservation` below. The worker never infers
+ * that a message went; it is told, and it refuses to record a send that nothing
+ * watched happen.
+ */
+export const MESSAGE_RUN_MESSAGES = {
+  /** Begin a run over a list of recipients. Detached — replies `{ started: true }`. */
+  START: "PV_MESSAGE_START",
+  /** Current run progress, for the Messages page. Read-only; safe with no run. */
+  STATUS: "PV_MESSAGE_STATUS",
+  /** End the run. Final, never resumed — rule 12. */
+  STOP: "PV_MESSAGE_STOP",
+  /** Hold the walk without ending it. Reversible, unlike STOP. */
+  PAUSE: "PV_MESSAGE_PAUSE",
+  RESUME: "PV_MESSAGE_RESUME",
+  /**
+   * Worker → applicants content script: open this person and send this text.
+   *
+   * The payload carries exactly one `MessageRunRecipient`, which is exactly the
+   * queue's own entry shape (message-queue-core.js:115-133) minus its
+   * bookkeeping. The reply is a `MessageSendObservation`.
+   */
+  SEND_ONE: "PV_MESSAGE_SEND_ONE"
+} as const;
+
+/**
  * The universal Stop.
  *
  * One message that ends every kind of work this extension can be doing: the
@@ -270,6 +309,149 @@ export interface ApplicantRunSummary {
   lastError: string;
   startedAt: string;
   updatedAt: string;
+}
+
+// ------------------------------------------------------- messaging a list (3.14.0)
+// These mirror `src/message-queue-core.js` exactly. That file is the authority —
+// it is the pure engine the worker walks — and every literal below is one of its
+// own `QUEUE_STATE` / `RECIPIENT_STATE` values, spelled the same way. A type here
+// that drifted from the core would not fail a build; it would silently describe a
+// run nobody is having.
+
+/** Must match `QUEUE_STATE` in src/message-queue-core.js. */
+export type MessageQueueState = "idle" | "running" | "paused" | "stopped" | "done";
+
+/**
+ * Must match `RECIPIENT_STATE` in src/message-queue-core.js.
+ *
+ * Exactly one of `sent` / `skipped` / `failed` is terminal, and a person in a
+ * terminal state is never offered again — which is what makes double-messaging
+ * structurally impossible rather than merely unlikely.
+ */
+export type MessageRecipientState =
+  | "pending"
+  | "opening"
+  | "awaiting-send"
+  | "sent"
+  | "skipped"
+  | "failed";
+
+/**
+ * One recipient, as it reaches the content script.
+ *
+ * Exactly the queue's entry shape without its bookkeeping. `text` is the FINAL
+ * rendered message — the worker does not render templates and the content
+ * script does not compose. Whoever puts this list together has already decided
+ * the text, and the composer is checked against this string by read-back, so a
+ * page that changes it after approval is caught rather than sent.
+ */
+export interface MessageRunRecipient {
+  id: string;
+  name: string;
+  profileUrl: string;
+  applicationId: string;
+  text: string;
+}
+
+/**
+ * What the content script must send back from `SEND_ONE`. **This is the whole
+ * safety contract of the feature**, so every field says what it means.
+ *
+ * The distinction the rest of the design rests on is `pressed` versus
+ * `observedSent`. Pressing a Send control is an ACTION; a message going is an
+ * OUTCOME, and the two come apart constantly — LinkedIn rejects the send, the
+ * composer refuses an empty or over-long body, the network drops it, a
+ * restriction interstitial appears in place of the thread. Only `observedSent`
+ * can put a person in `sent`, and it means one specific thing: the composer
+ * emptied AND an outgoing message carrying this text appeared in the thread.
+ * Anything less than that — including a Send that was definitely pressed — is
+ * not a send, because a person wrongly marked sent is a person who never gets
+ * their message.
+ */
+export interface MessageSendObservation {
+  /** The round trip itself completed. `false` means the adapter could not do the work. */
+  ok: boolean;
+  /**
+   * Echo of the `id` this reply is about.
+   *
+   * Required, and the worker refuses a reply that names anybody else. On this
+   * surface the address bar names the NEXT applicant while the panel still
+   * shows the previous one, so identity has to travel with the answer.
+   */
+  recipientId: string;
+  /** This person's own composer was found and opened. */
+  opened: boolean;
+  /** The open composer belongs to this person, proven from the panel's own identifiers. */
+  identityConfirmed: boolean;
+  /** The approved text was placed in the composer. */
+  filled: boolean;
+  /** What the composer actually contained afterwards. Compared to `text` by the worker. */
+  readBack: string;
+  /** The Send control was pressed. An action, never evidence of an outcome. */
+  pressed: boolean;
+  /**
+   * The composer emptied and an outgoing message appeared. The ONLY route to
+   * `sent`, and it must be a literal `true` — absent, `undefined` and "probably"
+   * are all treated as "did not go".
+   */
+  observedSent: boolean;
+  /** How it was observed, kept verbatim for the record. Never parsed. */
+  observation?: string;
+  /** LinkedIn offers no way to message this person at all. Terminal, not retried. */
+  blocked?: boolean;
+  /** The universal Stop reached the content script mid-flight — rule 12. */
+  stopped?: boolean;
+  /** Why not, when not. Shown to the recruiter verbatim. */
+  error?: string;
+}
+
+/** Per-recipient progress, for the Messages page's list. */
+export interface MessageRunEntry {
+  id: string;
+  name: string;
+  profileUrl: string;
+  applicationId: string;
+  state: MessageRecipientState;
+  reason: string;
+  attempts: number;
+  sentAt: number;
+}
+
+/** Counts for the UI, mirroring `describeQueue` in the core. */
+export interface MessageRunSummary {
+  state: MessageQueueState;
+  audience: string;
+  total: number;
+  sent: number;
+  skipped: number;
+  failed: number;
+  pending: number;
+  remaining: number;
+  sentToday: number;
+  dailyCap: number;
+  minGapMs: number;
+  stoppedReason: string;
+}
+
+/** The stored run — what survives the worker being torn down mid-walk. */
+export interface MessageRunRecord {
+  /** The queue object itself, exactly as `createMessageQueue` returned it. */
+  queue: any;
+  jobId: string;
+  tabId: number;
+  startedAt: string;
+  updatedAt: string;
+}
+
+export interface MessageRunStatusResponse {
+  ok: boolean;
+  /** `false` when there is no run at all, which is not an error. */
+  active: boolean;
+  run: MessageRunSummary;
+  entries: MessageRunEntry[];
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
 }
 
 /** What the diagnostics download contains. Fields mirror the live checks. */

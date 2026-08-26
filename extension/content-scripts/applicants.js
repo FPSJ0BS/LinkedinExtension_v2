@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-26-react-v3.13.0";
+  const BUILD_ID = "2026-08-26-react-v3.14.0";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -8826,6 +8826,452 @@
     pumpAutoRun();
   }
 
+  // ------------------------------------------------- sending a message (3.14.0)
+  /**
+   * Open one applicant's composer, type the approved text, send it, and prove
+   * it went.
+   *
+   * THIS IS THE ONLY PART OF THIS EXTENSION THAT CANNOT BE UNDONE. Everything
+   * else here reads: a wrong read is a wrong cell in a CSV, fixed by collecting
+   * again. A wrong send is a stranger holding a message the recruiter did not
+   * mean them to have, and there is no second pass that repairs it. Every
+   * decision below is written for that asymmetry, which is why so many of them
+   * prefer doing nothing to doing something on incomplete evidence.
+   *
+   * THE DIVISION OF LABOUR, and it is the same one `resumeAddressFromCard`
+   * uses: `planMessageStep` in the core decides what happens next and is unit
+   * tested; this function only does DOM. There is no jsdom in this repository,
+   * so anything decided HERE is decided somewhere no test can reach — and the
+   * questions worth being certain about ("can it send the wrong text", "can it
+   * send to the wrong person", "can it send twice") are all decided there.
+   *
+   * WHAT IT REPORTS, and why the shape matters more than usual. The worker
+   * treats `observedSent: true` as the single route to marking somebody sent,
+   * and treats every ambiguous answer as terminal-but-not-sent rather than
+   * retrying it. So this function's job is to be HONEST rather than optimistic:
+   * a press it could not confirm is reported as a press it could not confirm,
+   * and that person is left alone afterwards. The alternative — reporting a
+   * hopeful `true` — messages somebody twice, which is the one outcome worth
+   * more than the cost of occasionally missing somebody.
+   *
+   * `recipientId` is echoed on EVERY path out, including the ones that threw.
+   * Its absence is how the worker recognises silence, and silence is treated as
+   * terminal: a person whose reply was lost must never be offered again, because
+   * the composer may well have sent before the tab stopped answering.
+   */
+
+  /**
+   * Where a composer mounts.
+   *
+   * The two `msg-overlay-*` names are the ones `isExcludedContext` already
+   * knows, and that is deliberate rather than duplication: that function exists
+   * to keep LinkedIn's messaging overlay out of every panel, list and section
+   * resolver in this file, and this is the single place allowed to look inside
+   * it. Rule 6 permits exactly that — "except an overlay this extension opened
+   * itself" — and the proof that it IS ours is the before/after sampling below,
+   * never the selector.
+   *
+   * The role and aria entries carry the weight if a class name ever moves;
+   * neither name here is a generated one (rule 7).
+   */
+  const COMPOSER_SURFACE_SELECTOR = [
+    ".msg-overlay-conversation-bubble",
+    ".msg-form",
+    "form[class*='msg-form']",
+    "[role='dialog'][aria-label*='message' i]",
+    "[aria-modal='true'][aria-label*='message' i]"
+  ].join(",");
+
+  /** The thing text is typed into. A textarea is allowed; most are not one. */
+  const COMPOSER_EDITABLE_SELECTOR =
+    "[contenteditable='true'],[role='textbox'][contenteditable],textarea";
+
+  const COMPOSER_OPEN_TIMEOUT_MS = 6000;
+  const COMPOSER_SENT_TIMEOUT_MS = 8000;
+  /**
+   * The ladder is bounded twice, exactly as the resume card's is: by its own
+   * terminal states, and by this count, so that no future rewording of
+   * `planMessageStep` can turn a sequence into a loop that keeps pressing Send.
+   */
+  const MESSAGE_STEP_CEILING = 8;
+
+  function composerSurfaceCandidates() {
+    return [...document.querySelectorAll(COMPOSER_SURFACE_SELECTOR)];
+  }
+
+  function findComposerEditable(surface) {
+    if (!surface) return null;
+    for (const element of surface.querySelectorAll(COMPOSER_EDITABLE_SELECTOR)) {
+      if (!isVisible(element)) continue;
+      if (element.getAttribute("aria-readonly") === "true") continue;
+      if (element.disabled) continue;
+      return element;
+    }
+    return null;
+  }
+
+  /**
+   * A composer that was NOT on screen before this extension pressed Message.
+   *
+   * The whole safety of the overlay carve-out rests on this one comparison.
+   * LinkedIn keeps a messaging bubble mounted across applicants, and it holds
+   * whichever conversation was open last — so a resolver that simply found "a
+   * composer" would find the PREVIOUS applicant's thread and type into it. That
+   * is not a hypothetical; it is the same class of defect as the address bar
+   * naming the next applicant while the panel still shows the last one, which
+   * this file already has a rule about.
+   *
+   * `before` is sampled VISIBLE-only for the reason `openContactAndCollect`
+   * explains at length: LinkedIn mounts these surfaces hidden and reveals them,
+   * so "new" has to mean newly revealed or nothing is ever new.
+   */
+  function findMessageComposer(before = []) {
+    const seen = new Set(before);
+    for (const surface of composerSurfaceCandidates()) {
+      if (!isVisible(surface)) continue;
+      if (seen.has(surface)) continue;
+      if (!findComposerEditable(surface)) continue;
+      return surface;
+    }
+    return null;
+  }
+
+  /** Whitespace-collapsed, for comparing what was typed with what came back. */
+  function compactMessageText(value) {
+    return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  function readComposerText(editable) {
+    if (!editable) return "";
+    if (typeof editable.value === "string") return editable.value;
+    return editable.innerText || editable.textContent || "";
+  }
+
+  /**
+   * Put the text in, the way a keyboard would.
+   *
+   * **Assigning `textContent` is the obvious thing and it does not work.** The
+   * composer is a React-controlled `contenteditable`: the characters appear on
+   * screen, React's own state never learns about them, Send stays disabled, and
+   * a forced send transmits an empty message or the previous draft. So the text
+   * goes in through `execCommand("insertText")` — which is deprecated and is
+   * still the only call that produces the input events React's onChange path
+   * actually listens for — with a synthetic `beforeinput`/`input` pair as the
+   * fallback for a surface that refuses it.
+   *
+   * The existing contents are SELECTED first rather than appended to. A second
+   * attempt at the same person would otherwise send the message twice over in
+   * one composer, which reads as one message and is far harder to notice than a
+   * failure would have been.
+   */
+  function insertComposerText(editable, text) {
+    if (!editable) return false;
+    try {
+      editable.focus();
+
+      // A textarea has a native value setter that React's descriptor hook
+      // watches. Assigning `.value` directly bypasses it; calling the prototype
+      // setter does not.
+      if (typeof editable.value === "string") {
+        const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editable), "value")?.set;
+        if (setter) setter.call(editable, text);
+        else editable.value = text;
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+
+      const range = document.createRange();
+      range.selectNodeContents(editable);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      let inserted = false;
+      try {
+        inserted = document.execCommand("insertText", false, text);
+      } catch {
+        inserted = false;
+      }
+      if (!inserted) {
+        editable.dispatchEvent(new InputEvent("beforeinput", {
+          bubbles: true, cancelable: true, inputType: "insertText", data: text
+        }));
+        editable.textContent = text;
+      }
+      editable.dispatchEvent(new InputEvent("input", {
+        bubbles: true, cancelable: false, inputType: "insertText", data: text
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Did the message actually go?
+   *
+   * Two independent observations, and BOTH are required. The composer emptying
+   * on its own is what LinkedIn does after a successful send — but it is also
+   * what a discarded draft looks like. The sent text appearing in the thread
+   * outside the editable is the positive evidence, and on its own it could be
+   * the message the recruiter sent this person last week.
+   *
+   * The needle is a prefix rather than the whole message, because a long
+   * message is rendered truncated with a "see more" control and comparing the
+   * whole string would then never match. It is long enough that another message
+   * beginning the same way is not a plausible accident, and if the text is
+   * shorter than that the whole of it is used.
+   */
+  const OUTGOING_NEEDLE_MAX = 120;
+
+  function observedMessageSent(surface, editable, text) {
+    if (!surface || !document.contains(surface)) return false;
+    if (compactMessageText(readComposerText(editable))) return false;
+    const wanted = compactMessageText(text).slice(0, OUTGOING_NEEDLE_MAX);
+    if (!wanted) return false;
+    for (const node of surface.querySelectorAll("li,[role='listitem'],article,p,div[class*='event']")) {
+      if (editable && (node === editable || node.contains(editable) || editable.contains(node))) continue;
+      if (compactMessageText(node.textContent).includes(wanted)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Press the applicant panel's Message control. The TENTH click (3.14.0).
+   *
+   * A one-line function for the reason `clickApplicantPager` is one: the click
+   * budget is asserted by counting call sites in this file, so a press that
+   * happens in two places must still be one site or the tripwire stops being
+   * able to tell a new control from a moved one.
+   */
+  function clickMessageOpen(control) {
+    control.element.click();
+  }
+
+  /**
+   * Press the composer's own Send. The ELEVENTH click, and the only one in this
+   * extension that a later step cannot undo.
+   *
+   * Kept as its own owner rather than folded in with the one above, even though
+   * both are one line: they press genuinely different controls, judged under
+   * different purposes, and the tripwire's whole value is naming which control
+   * a new click site belongs to.
+   */
+  function clickMessageSend(control) {
+    control.element.click();
+  }
+
+  /**
+   * The driver. Walks `planMessageStep` and does what it is told.
+   *
+   * Structured after `resumeAddressFromCard`: a bounded loop, `assertRunnable()`
+   * before every acting step, the control re-resolved immediately before it is
+   * pressed, verification by observing the page rather than by having clicked,
+   * and a `finally` that closes what it opened on every path out including the
+   * ones that threw.
+   */
+  async function sendOneMessage(recipient) {
+    const reply = {
+      ok: false,
+      recipientId: cleanText(recipient?.id),
+      opened: false,
+      identityConfirmed: false,
+      filled: false,
+      readBack: "",
+      pressed: false,
+      observedSent: false,
+      blocked: false,
+      stopped: false,
+      error: ""
+    };
+
+    const wanted = String(recipient?.text ?? "");
+    if (!reply.recipientId || !compactMessageText(wanted)) {
+      reply.error = "no recipient id, or no text to send";
+      return reply;
+    }
+
+    const expected = cleanText(recipient?.applicationId);
+    let composer = null;
+    let editable = null;
+    // Three-valued on purpose: null means "not read back yet" and false means
+    // "read back, and it was the wrong text". They are different facts with
+    // opposite answers, and collapsing them either loops forever or gives up
+    // before it has looked. Only an exact `true` can reach SEND.
+    let readBackMatches = null;
+    let sent = false;
+    let confirmed = false;
+
+    /**
+     * Is the panel still the person we were asked for?
+     *
+     * `state.lastPanelIdentity` is passed as `previousIdentity` and that
+     * argument is load-bearing: `describePanelArrival` answers ARRIVED BY
+     * DEFAULT when the panel renders no application link, so without the
+     * previous identity to compare against, a panel that has not caught up
+     * reports arrival and the message goes into the PREVIOUS applicant's
+     * composer. Asked before opening and again immediately before pressing
+     * Send, because the panel can change underneath a walk mid-type.
+     */
+    const stillTheRightPerson = () => {
+      const seen = describeApplicantArrival(expected, state.lastPanelIdentity);
+      return seen.state === Applicants.PANEL_ARRIVAL.ARRIVED;
+    };
+
+    try {
+      for (let step = 0; step < MESSAGE_STEP_CEILING; step += 1) {
+        const rightPerson = stillTheRightPerson();
+        reply.identityConfirmed = rightPerson;
+
+        const next = Applicants.planMessageStep({
+          composerOpen: Boolean(composer && editable),
+          textInserted: reply.filled,
+          readBackMatches,
+          sent,
+          confirmed,
+          wrongPerson: !rightPerson,
+          // A Stop is a refusal to send, not a reason to abandon a message
+          // already gone: the ladder checks `sent`/`confirmed` above `canSend`,
+          // so a press that has happened is still confirmed and reported.
+          canSend: !state.aborted
+        });
+
+        if (next.action === Applicants.MESSAGE_STEP.DONE) {
+          reply.ok = true;
+          break;
+        }
+        if (next.action === Applicants.MESSAGE_STEP.GIVE_UP) {
+          reply.error = reply.error || next.reason || "gave up";
+          break;
+        }
+
+        if (next.action === Applicants.MESSAGE_STEP.OPEN) {
+          assertRunnable();
+          const panel = arrivalPanel() || applicantPanel();
+          if (!panel) {
+            reply.error = "no applicant panel is mounted";
+            break;
+          }
+          const control = findControl(panel, Applicants.CONTROL_PURPOSE.MESSAGE_OPEN);
+          if (!control) {
+            // Not a failure of this run — this applicant simply cannot be
+            // messaged from here. Reported as blocked so the worker settles them
+            // without spending one of their retries on a control that is never
+            // going to appear.
+            reply.blocked = true;
+            reply.error = "this applicant's panel offers no Message control";
+            break;
+          }
+          // Sampled immediately before the press, so whatever appears after it
+          // is known to be ours rather than the previous applicant's thread.
+          const before = composerSurfaceCandidates().filter(isVisible);
+          try {
+            clickMessageOpen(control);
+          } catch (error) {
+            reply.error = `message-open-failed:${error?.message || error}`;
+            break;
+          }
+          composer = await waitFor(() => findMessageComposer(before), {
+            timeoutMs: COMPOSER_OPEN_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "message-composer"
+          });
+          editable = findComposerEditable(composer);
+          reply.opened = Boolean(composer && editable);
+          if (!reply.opened) {
+            reply.error = "the composer did not open";
+            break;
+          }
+          continue;
+        }
+
+        if (next.action === Applicants.MESSAGE_STEP.INSERT) {
+          assertRunnable();
+          reply.filled = insertComposerText(editable, wanted);
+          if (!reply.filled) {
+            reply.error = "the text could not be put into the composer";
+            break;
+          }
+          continue;
+        }
+
+        if (next.action === Applicants.MESSAGE_STEP.VERIFY) {
+          assertRunnable();
+          reply.readBack = readComposerText(editable);
+          readBackMatches = compactMessageText(reply.readBack) === compactMessageText(wanted);
+          continue;
+        }
+
+        if (next.action === Applicants.MESSAGE_STEP.SEND) {
+          assertRunnable();
+          // Asked again, a beat before the irreversible press. Everything above
+          // this line can be abandoned; nothing below it can.
+          if (!stillTheRightPerson()) {
+            reply.identityConfirmed = false;
+            reply.error = "the panel changed applicant before the message could be sent";
+            break;
+          }
+          // Re-resolved rather than remembered, exactly as the resume card's
+          // download is: it was there a moment ago and may not be now, and
+          // pressing whatever took its place is how a Send becomes something
+          // else entirely.
+          const control = findControl(composer, Applicants.CONTROL_PURPOSE.MESSAGE_SEND);
+          if (!control) {
+            reply.error = "the composer's Send control went away before it could be pressed";
+            break;
+          }
+          try {
+            clickMessageSend(control);
+            sent = true;
+            reply.pressed = true;
+          } catch (error) {
+            reply.error = `message-send-failed:${error?.message || error}`;
+            break;
+          }
+          continue;
+        }
+
+        if (next.action === Applicants.MESSAGE_STEP.CONFIRM) {
+          // Deliberately NOT `assertRunnable()`. Send has been pressed, and the
+          // only useful thing left is finding out whether it went — a Stop
+          // landing here must not throw away that answer, because the worker
+          // reads its absence as "may have sent" and settles the person either
+          // way. Rule 12: Stop ends work, it never discards what work produced.
+          confirmed = Boolean(await waitFor(
+            () => observedMessageSent(composer, editable, wanted) || null,
+            { timeoutMs: COMPOSER_SENT_TIMEOUT_MS, pollMs: OVERLAY.POLL_MS, label: "message-sent" }
+          ));
+          reply.observedSent = confirmed;
+          if (!confirmed) {
+            reply.error = "Send was pressed and nothing confirmed the message went";
+            break;
+          }
+          continue;
+        }
+
+        reply.error = `unknown step: ${next.action}`;
+        break;
+      }
+    } catch (error) {
+      if (error?.stopped) reply.stopped = true;
+      reply.error = reply.error || String(error?.message || error);
+    } finally {
+      // Always, including the paths that threw. A composer left open holds this
+      // applicant's draft over the next applicant's panel, which is the setup
+      // for exactly the defect `findMessageComposer` refuses. `closeOpenedOverlay`
+      // is the shared dismiss — it polls with bare waits and never `waitFor`,
+      // so a Stop cannot throw out of the cleanup and leave the draft on screen.
+      if (composer) {
+        try {
+          await closeOpenedOverlay(composer);
+        } catch {
+          // A dismiss that itself failed is not worth losing the reply over —
+          // the reply is the only record of whether somebody was messaged.
+        }
+      }
+    }
+
+    return reply;
+  }
+
   /**
    * What this layout looks like, with nobody's details in it.
    *
@@ -8954,6 +9400,40 @@
     if (type === "PV_APPLICANT_STATUS") {
       sendResponse({ ok: true, buildId: BUILD_ID, run: { ...state.run }, rows: applicantRows().length });
       return false;
+    }
+
+    /**
+     * Send this one person their message.
+     *
+     * Matched AFTER the Stop branch above, like everything else, so a Stop
+     * arriving alongside a send request ends the run rather than queueing
+     * behind one more message.
+     *
+     * The reply is the worker's only evidence about what happened, so it is
+     * sent on every path — `sendOneMessage` returns its report rather than
+     * throwing, and the `catch` here exists for the case where something above
+     * it fails before that guarantee applies. `recipientId` is echoed even
+     * then: its absence is how the worker recognises silence, and silence is
+     * settled as terminal precisely because a lost reply may have been a
+     * successful send.
+     */
+    if (type === "PV_MESSAGE_SEND_ONE") {
+      sendOneMessage(message?.recipient || {})
+        .then((reply) => sendResponse(reply))
+        .catch((error) => sendResponse({
+          ok: false,
+          recipientId: cleanText(message?.recipient?.id),
+          opened: false,
+          identityConfirmed: false,
+          filled: false,
+          readBack: "",
+          pressed: false,
+          observedSent: false,
+          blocked: false,
+          stopped: Boolean(error?.stopped),
+          error: String(error?.message || error)
+        }));
+      return true;
     }
 
     if (type === "PV_APPLICANT_EXTRACT") {
