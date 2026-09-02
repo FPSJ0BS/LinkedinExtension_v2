@@ -31,7 +31,7 @@ const MessageQueue: any = (globalThis as any).ProfileVaultMessageQueue;
 // collected, so that rule has exactly one implementation.
 const Applicants: any = (globalThis as any).ProfileVaultApplicants;
 
-const BUILD_ID = "2026-09-02-react-v3.14.2";
+const BUILD_ID = "2026-09-02-react-v3.14.3";
 
 const PROFILE_SCRIPTS = ["src/extraction-core.js", "src/connections-core.js", "content.js"];
 const CONNECTION_SCRIPTS = ["src/connections-core.js", "connections.js"];

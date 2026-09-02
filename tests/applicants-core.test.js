@@ -747,7 +747,7 @@ test("a line that counts something the page is showing is never the job title", 
     "KNOWN DEFECT, not desired behaviour — see the comment above before changing this line");
 });
 
-test("a hiring view that renders no tab bar still reads the job's own heading", async () => {
+test("a hiring view with no tab bar reads the job title out of the job's own card", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
   // The reported page's second row is a FILTER bar — "Sort by date applied",
@@ -758,32 +758,81 @@ test("a hiring view that renders no tab bar still reads the job's own heading", 
   assert.equal(filterBar.filter((label) => Applicants.isJobViewTabLabel(label)).length, 0,
     "no filter control reads as a view tab, so there is no bar to find");
 
-  // So the heading reader gets a second way in, used ONLY when there is no bar.
+  // WHAT 3.14.2 DID HERE, AND WHY THIS TEST WAS REWRITTEN RATHER THAN DELETED.
+  // It answered the missing bar by reading `h1,h2,[role='heading']` across the
+  // whole document, fenced against the applicant list and a proven panel. The
+  // fences did not hold — the next live run saved every applicant under
+  // "Ashwin Anil's application", the heading of the panel beside the list —
+  // because each fence is a guess about where an element SITS, and `readJob`
+  // runs from `snapshotPanel` on passes where neither the list nor the panel
+  // has resolved yet. A fence against `null` fences nothing.
+  assert.ok(!/function jobHeadingTitles/.test(source),
+    "the document-wide heading scan is gone, not merely fenced harder");
+  // Scoped to the fence that was removed: `compareDocumentPosition` is used
+  // legitimately elsewhere in this file, so the broad form of this assertion
+  // failed against three unrelated readers.
+  assert.ok(!/compareDocumentPosition\(list\)/.test(source),
+    "and so is the document-order guess it depended on");
+
+  // THE CARD IS PROVEN BY ITS OWN CONTROL INSTEAD — the same discipline
+  // `findJobViewHeader` uses to prove a bar by the tabs it renders (rule 7).
   const read = source.slice(source.indexOf("function readJob"), source.indexOf("function selectedApplicantRow"));
-  assert.match(read, /headings: bar \? headingTitlesIn\(bar\) : jobHeadingTitles\(\)/,
-    "a view with no bar offers the headings the page painted, instead of nothing");
+  assert.match(read, /headings: bar \? headingTitlesIn\(bar\) : jobCardTitles\(\)/,
+    "a view with no bar is answered from the proven card, never from the document");
 
-  // WHAT MAKES IT SAFE IS THE FENCE. Read across the document, the same query
-  // also returns "Naveen Scaria's application" and "Insights from profile", and
-  // both pass `isJobTitleCandidate` — saving one is rule 1's wrong value.
-  const headings = source.slice(source.indexOf("function jobHeadingTitles"), source.indexOf("function containsSiteNav"));
-  assert.match(headings, /!\(list && list\.contains\(element\)\)/, "never a heading inside the applicant list");
-  assert.match(headings, /const panel = mountedApplicantPanel\(\);/,
-    "the PROVEN panel — `applicantPanel()` falls back to the widest main and then to document.body, and a fence containing the whole page fences nothing");
-  assert.match(headings, /!\(panel && panel\.contains\(element\)\)/, "never a heading inside the applicant's own panel");
-  assert.match(headings, /element\.compareDocumentPosition\(list\) & 4/,
-    "and the job header comes BEFORE the list, which catches the panel's headings on a pass where the panel could not be proven");
-  assert.match(headings, /isVisible\(element\) && !isExcludedContext\(element\)/,
-    "nav, footer and the messaging bubbles are still refused here (rule 6)");
+  const card = source.slice(source.indexOf("function findJobCard"), source.indexOf("function containsSiteNav"));
+  assert.match(card, /Applicants\.JOB_CARD_ACTION_PATTERN\.test\(cleanText\(element\.textContent\)\)/,
+    "the card is found by a control the JOB owns, which is nowhere near the list or the panel");
+  assert.match(card, /if \(list && node\.contains\(list\)\) break;/,
+    "a container that has grown to hold the applicant list is the page, not the card");
+  assert.match(card, /if \(text\.length > 400\) break;/, "and it is bounded, so the walk cannot swallow the view");
+  assert.match(card, /isVisible\(element\) && !isExcludedContext\(element\)/,
+    "nav, footer and the messaging bubbles are still refused (rule 6)");
+  assert.match(card, /const headings = headingTitlesIn\(card\);/,
+    "the card's own heading answers first when it paints one");
+  assert.match(card, /Applicants\.jobTitleFromHeader\(cleanText\(card\.innerText \|\| ""\)\)/,
+    "and its first job-shaped line is the fallback — the reported header paints the title in NO heading at all, which is why widening a heading scan could never have reached it");
+  assert.match(card, /if \(!card\) return \[\];/,
+    "no card proven means no answer, and the legacy sweep runs exactly as before — blank beats wrong (rule 1)");
 
-  // The other half of the same defect: LinkedIn's global header is the nav's
-  // PARENT, so `isExcludedContext` — which refuses a nav ANCESTOR — walked
-  // straight through it, and shortest-first let it outrank the job card.
+  // The control's own label must not be able to end the walk. This is what
+  // makes the whole approach safe rather than merely different.
+  assert.ok(!Applicants.isJobTitleCandidate("Manage job"),
+    "the walk passes THROUGH the control it started from, rather than stopping on it");
+
+  // The other half of the 3.14.2 defect, kept: LinkedIn's global header is the
+  // nav's PARENT, so `isExcludedContext` — which refuses a nav ANCESTOR —
+  // walked straight through it, and shortest-first let it outrank the job card.
   assert.match(source, /function containsSiteNav\(element\) \{\s*\n\s*return Boolean\(element\?\.querySelector\("nav,\[role='navigation'\]"\)\);/,
     "site chrome is identified by the nav it contains — structure, not a class name (rule 7)");
   assert.match(read, /a\.chrome === b\.chrome \? a\.text\.length - b\.text\.length : a\.chrome \? 1 : -1/,
     "which DEMOTES it rather than dropping it, so it can still answer when it is the only candidate");
   assert.match(read, /\.slice\(0, 4\)/, "the sweep is otherwise untouched — four shortest, joined");
+});
+
+test("an applicant's own heading is never the job they applied to", () => {
+  // THE SECOND LIVE DEFECT (3.14.3), reported one run after 3.14.2 shipped:
+  // every applicant saved under "Ashwin Anil's application", the heading of the
+  // panel beside the list. Refused by NAME rather than by position, because a
+  // fence is a guess about where an element sits and this is a statement about
+  // what the value is — which holds however LinkedIn rebuilds the page.
+  for (const heading of ["Ashwin Anil’s application", "RAHUL Mishra's application",
+    "Naveen Scaria’s application", "James's application"]) {
+    assert.ok(!Applicants.isJobTitleCandidate(heading), `"${heading}" is an applicant's application, not a job`);
+  }
+  // The job card's own controls, which the card walk passes through.
+  for (const control of ["Manage job", "Manage this job post", "Edit job", "Share job", "Close job", "Repost job"]) {
+    assert.ok(!Applicants.isJobTitleCandidate(control), `"${control}" is the card's control, not the job`);
+  }
+  // And the half that matters more: real jobs that live near those words.
+  for (const real of ["Application Support Engineer", "Managing Director", "Editor",
+    "Job Coach", "Applications Manager", "Business Development Executive"]) {
+    assert.ok(Applicants.isJobTitleCandidate(real), `"${real}" is a job title and must survive the filter`);
+  }
+  // A job already stored under the wrong value repairs itself on the next read,
+  // through the same `mergeJob` path `saveJob` uses — nothing to clear by hand.
+  assert.equal(Applicants.mergeJob({ title: "Ashwin Anil’s application" }, { title: "Business Development Executive" }).title,
+    "Business Development Executive");
 });
 
 test("the location is a rendered place, never whatever the third line happened to be", () => {

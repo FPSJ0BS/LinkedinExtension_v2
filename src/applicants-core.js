@@ -2095,18 +2095,51 @@
     /^\d[\d,]*\s+(?:applicants?|notifications?|messages?|results?|views?|new|unread)\b|^applicants?\s*\(\s*\d/i;
 
   /**
+   * The applicant panel's own heading: "Ashwin Anil's application".
+   *
+   * THE SECOND LIVE DEFECT (3.14.3). 3.14.2 let a view with no tab bar read the
+   * headings the page painted, fenced against the list and the panel — and the
+   * fences did not hold: the next run saved every applicant under
+   * **"Ashwin Anil's application"**, the heading of the panel beside the list.
+   *
+   * The lesson is the one rule 1 keeps teaching. A fence is a guess about where
+   * an element sits; this is a statement about what the VALUE is. No job is
+   * called "somebody's application", on any layout, however the page is built,
+   * so it is refused by name rather than by position — and being refused, a job
+   * already stored under it repairs itself through `mergeJob` on the next read.
+   *
+   * Both apostrophes, because LinkedIn renders the curly one.
+   */
+  const APPLICATION_HEADING_PATTERN = /(?:['’]s|s['’])\s+application$/i;
+
+  /**
+   * The job card's own controls, which sit in the card beside the title.
+   *
+   * The title is read by walking up from one of these to the card that holds it
+   * (see `findJobCard`), so the walk passes THROUGH the control's own label on
+   * the way — and "Manage job" is not a status word, not a tab and not a count,
+   * so nothing above refused it. Whole-string and anchored: a job called
+   * "Manage Director" or "Editor" is untouched.
+   */
+  const JOB_CARD_ACTION_PATTERN =
+    /^(?:manage|edit|view|share|promote|close|reopen|repost|preview)\s+(?:this\s+)?job(?:\s+post(?:ing)?)?$/i;
+
+  /**
    * Could this line be somebody's job title at all?
    *
    * One rule, so the reader, the container walk, the re-read and the merge all
    * agree on what "the job has a title" means. A tab label is not a title, a
    * status word is not a title, a caption naming the field is not the field,
-   * and — since 3.14.2 — a count of the applicants is not the job.
+   * a count of the applicants is not the job (3.14.2), and — since 3.14.3 — an
+   * applicant's own application is not the job they applied to.
    */
   function isJobTitleCandidate(value) {
     const line = cleanText(value);
     if (!line || line.length > 160) return false;
     if (isJobViewTabLabel(line)) return false;
     if (CHROME_COUNT_LINE_PATTERN.test(line)) return false;
+    if (APPLICATION_HEADING_PATTERN.test(line)) return false;
+    if (JOB_CARD_ACTION_PATTERN.test(line)) return false;
     return !JOB_TITLE_CHROME_PATTERN.test(line);
   }
 
@@ -5241,7 +5274,8 @@
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
-    JOB_TITLE_CHROME_PATTERN, CHROME_COUNT_LINE_PATTERN, isJobTitleCandidate, jobTitleFromHeadings,
+    JOB_TITLE_CHROME_PATTERN, CHROME_COUNT_LINE_PATTERN, APPLICATION_HEADING_PATTERN,
+    JOB_CARD_ACTION_PATTERN, isJobTitleCandidate, jobTitleFromHeadings,
     APPLICANT_LOCATION_PATTERN, looksLikeApplicantLocation,
     looksLikeApplicantHeadline, isEmployerCandidate, isCurrentRoleCandidate, isWholeLineControlLabel,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,

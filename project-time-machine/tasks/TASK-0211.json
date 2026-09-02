@@ -1,0 +1,67 @@
+{
+  "schema": 2,
+  "id": "TASK-0211",
+  "name": "Anchor the job title on the job card, not on a document-wide heading scan",
+  "request": "Anchor the job title on the job card, not on a document-wide heading scan",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-09-02T08:30:27.999Z",
+  "completedAt": "2026-09-02T08:34:58.212Z",
+  "startCommit": "469069e37783b1c25dd67becfb5fa1c6b6a2d611",
+  "gitRef": "task/TASK-0211",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package-lock.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 731 tests 0 fail, 18 doc-link files, 34 build files + 5 React entry points validated",
+    "dist/ rebuilt and carries the fix: findJobCard/jobCardTitles present, build id 2026-09-02-react-v3.14.3"
+  ],
+  "result": "TASK-0211 / 3.14.3: the job title is read out of the job's OWN CARD, proven by a control the job owns. REPORTED ONE RUN AFTER 3.14.2 SHIPPED - every applicant then saved under 'Ashwin Anil's application', the heading of the applicant panel beside the list. Third wrong title in a row on this layout. WHY 3.14.2 WAS THE WRONG IDEA, NOT MERELY WRONG: it read h1,h2,[role=heading] across the WHOLE DOCUMENT and fenced the result against the applicant list, against a proven panel, and by document order. Every one of those fences is a GUESS ABOUT WHERE AN ELEMENT SITS, and each fails SILENTLY when the thing it names cannot be resolved on that pass - readJob runs from snapshotPanel on every pass of every applicant's scan, including early ones where neither the list nor the panel has resolved yet, and a fence against null fences nothing. The wrong value also exposed the deeper problem: THE REPORTED HEADER PAINTS ITS TITLE IN NO HEADING ELEMENT AT ALL, so a document-wide heading scan could only ever find somebody ELSE's heading - widening the net was never going to reach the job, only further into the page. findJobCard walks up from 'Manage job' to the smallest container that also holds a line somebody could hold as a job: the same discipline findJobViewHeader already uses to prove a bar by the tabs it renders, and what rule 7 means by structure over position. Bounded at 400 chars, and a container that has grown to hold the applicant list is the page rather than the card. jobCardTitles reads the card's own heading when it paints one and its first job-shaped line when it does not, BOTH FROM INSIDE THE PROVEN CARD, so neither can reach the panel, the list or LinkedIn's navigation. When no card is proven it answers NOTHING and the legacy sweep runs exactly as before - deliberate, because a blank beats a wrong value (rule 1) and the last two releases were both a wrong value. TWO MORE VALUES REFUSED BY NAME IN THE CORE, where the fences used to be: an applicant's own heading (both apostrophes, because LinkedIn renders the curly one) since no job on any layout is called somebody's application; and the card's own controls (Manage job, Edit job, Repost job) because the walk passes THROUGH the control it started from and must not stop on it - verified, 'Manage job' passed isJobTitleCandidate before this. Both are statements about WHAT THE VALUE IS rather than where it sits, which is what makes them hold however LinkedIn rebuilds the page, and being refusals they make a job ALREADY STORED under either one repair itself through mergeJob on the next read. Real jobs near those words were checked rather than assumed: Application Support Engineer, Applications Manager, Managing Director, Editor and Job Coach all still pass. KEPT FROM 3.14.2: the count-line refusal and the containsSiteNav demotion of LinkedIn's global navigation in the legacy sweep. REMOVED: jobHeadingTitles and its document-order fence are GONE rather than fenced harder, and a test asserts their absence so a later change cannot quietly reintroduce a document-wide heading scan. ALSO FIXED IN THE SAME TURN: my first version of that absence test asserted the file contained no compareDocumentPosition at all, which failed against three unrelated readers that use it legitimately - scoped to compareDocumentPosition(list), the fence actually removed. NO LIVE CLAIM: rule 20 stands, and it is the point here - the previous two fixes both passed their checks and were then wrong on the page. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, version bumped in nine places."
+}

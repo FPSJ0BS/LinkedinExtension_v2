@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-09-02-react-v3.14.2";
+  const BUILD_ID = "2026-09-02-react-v3.14.3";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -1896,55 +1896,77 @@
   }
 
   /**
-   * The job's heading on a view that renders NO tab bar at all.
+   * The job card, found by walking up from one of the job's OWN controls.
    *
-   * THE LIVE DEFECT (3.14.2): the reported posting has no tab strip — the row
-   * under the title is a FILTER bar ("Sort by date applied", "Ratings",
-   * "Location", "Years of experience", "Skilled in"). `findJobViewHeader`
-   * needs two view tabs and finds none, so it returns null and the entire
-   * heading path added in 3.14.1 never runs. Every applicant on the job was
-   * saved under "0 notifications total", swept out of LinkedIn's own global
-   * navigation.
+   * THE SECOND LIVE DEFECT (3.14.3). 3.14.2 answered a view with no tab bar by
+   * reading `h1,h2,[role='heading']` across the document, fenced against the
+   * applicant list and the panel. The fences did not hold: the next run saved
+   * every applicant under **"Ashwin Anil's application"**, the heading of the
+   * panel beside the list.
    *
-   * So the heading reader gets a second way in, used ONLY when there is no bar.
-   * Nothing about the bar path changes, and the legacy sweep still produces the
-   * text, the raw record and the count exactly as before — this adds a reader
-   * after the working one rather than replacing it, which is the one rule the
-   * multi-UI guide states outright.
+   * WHY THE FENCES WERE THE WRONG IDEA, not merely wrong. Each one is a guess
+   * about where an element SITS — inside the list, inside a panel that could be
+   * proven, before the list in document order — and every one of those guesses
+   * fails silently when the thing it names cannot be resolved on that pass.
+   * `readJob` runs from `snapshotPanel` on every pass of every applicant's
+   * scan, including early ones where neither the list nor the panel has
+   * resolved yet, and a fence against `null` fences nothing.
    *
-   * WHAT MAKES IT SAFE IS THE FENCE, NOT THE QUERY. Read across the whole
-   * document, `h1,h2,[role='heading']` also returns the APPLICANT's headings —
-   * "Naveen Scaria's application", "Insights from profile" — and each of those
-   * passes `isJobTitleCandidate` happily. Saving one would be rule 1's wrong
-   * value, and worse than the blank it replaced. Three fences, all structural,
-   * because rule 7 says resolve by structure rather than by class name:
+   * And the deeper problem the wrong value exposed: the reported header paints
+   * its title in NO heading element at all, so a document-wide heading scan
+   * could only ever find somebody else's heading. Widening the net was never
+   * going to reach the job.
    *
-   *   - never inside the applicant list, whose rows are the applicants;
-   *   - never inside a PROVEN panel. `mountedApplicantPanel()` deliberately,
-   *     not `applicantPanel()`, which falls back to the widest `main` and then
-   *     to `document.body` — a fence containing the whole page fences nothing;
-   *   - and, when a list is on screen, the heading must come BEFORE it in
-   *     document order. The job header sits above both columns; the panel is
-   *     the column beside the list. This is what catches the applicant's own
-   *     headings on a pass where the panel could not be proven.
+   * SO THE CARD IS PROVEN BY ITS OWN CONTROL INSTEAD. "Manage job" belongs to
+   * the job, sits inside the card that carries the title, and appears nowhere
+   * near the applicant list or the panel — the same discipline
+   * `findJobViewHeader` already uses to prove a bar by the tabs it renders, and
+   * what rule 7 means by resolving on structure rather than position. The walk
+   * stops at the first ancestor that holds a line somebody could hold as a job,
+   * so it is the smallest container carrying both the control and the title.
    *
-   * `isExcludedContext` still refuses `nav`, `footer` and the messaging
-   * bubbles, so LinkedIn's global navigation cannot answer here either.
+   * The control's own label cannot be the answer: `JOB_CARD_ACTION_PATTERN`
+   * refuses it in the core, beside the count lines and the applicant headings,
+   * so the walk passes through "Manage job" rather than stopping on it.
    */
-  function jobHeadingTitles() {
+  function findJobCard() {
     const list = applicantList();
-    const panel = mountedApplicantPanel();
-    const rank = (element) => (element.tagName === "H1" ? 0 : element.tagName === "H2" ? 1 : 2);
-    return [...document.querySelectorAll("h1,h2,[role='heading']")]
-      .filter((element) => isVisible(element) && !isExcludedContext(element))
-      .filter((element) => !(list && list.contains(element)))
-      .filter((element) => !(panel && panel.contains(element)))
-      // Node.DOCUMENT_POSITION_FOLLOWING (4): the list comes after the heading.
-      .filter((element) => !list || Boolean(element.compareDocumentPosition(list) & 4))
-      .map((element) => ({ rank: rank(element), text: cleanText(element.innerText || "") }))
-      .filter((entry) => Applicants.isJobTitleCandidate(entry.text))
-      .sort((a, b) => a.rank - b.rank)
-      .map((entry) => entry.text);
+    const actions = [...document.querySelectorAll("a,button,[role='button']")]
+      .filter((element) => Applicants.JOB_CARD_ACTION_PATTERN.test(cleanText(element.textContent))
+        && isVisible(element) && !isExcludedContext(element));
+    for (const action of actions) {
+      for (let node = action.parentElement; node && node !== document.body; node = node.parentElement) {
+        // Grown past the card into the page itself.
+        if (list && node.contains(list)) break;
+        const text = cleanText(node.innerText || "");
+        if (text.length > 400) break;
+        if (Applicants.jobTitleFromHeader(text)) return node;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The job's title on a view that renders no tab bar, or [] if none is proven.
+   *
+   * The card's own heading answers first when it paints one — structure, as
+   * rule 7 asks — and its first line that could be a job is the fallback for
+   * the reported layout, which paints the title in no heading at all. Both are
+   * read from INSIDE the proven card, so neither can reach the applicant's
+   * panel, the list, or LinkedIn's navigation.
+   *
+   * An empty answer is deliberate and is not a failure: `parseJobHeader` then
+   * falls through to the legacy sweep exactly as it did before 3.14.2. A blank
+   * beats a wrong value (rule 1), and the last two releases were both a wrong
+   * value.
+   */
+  function jobCardTitles() {
+    const card = findJobCard();
+    if (!card) return [];
+    const headings = headingTitlesIn(card);
+    if (headings.length) return headings;
+    const line = Applicants.jobTitleFromHeader(cleanText(card.innerText || ""));
+    return line ? [line] : [];
   }
 
   /**
@@ -1987,15 +2009,16 @@
         .map((entry) => entry.text)
         .join("\n");
     // The bar's own heading answers first; the line scan is the fallback for a
-    // bar that renders none. Since 3.14.2 a view with no bar at all offers the
-    // headings the page painted, fenced by `jobHeadingTitles` — it is the only
-    // reader that can name the job on a layout whose header carries no tabs,
-    // and without it the answer comes from whatever the sweep sorted first.
+    // bar that renders none. Since 3.14.3 a view with no bar at all offers the
+    // title read out of the PROVEN job card — never a document-wide heading
+    // scan, which is what saved an applicant's own heading as the job in
+    // 3.14.2. When no card is proven this is empty and the legacy sweep answers
+    // exactly as it did before, because a blank beats a wrong value (rule 1).
     const job = Applicants.parseJobHeader({
       text: header,
       title: document.title,
       url: location.href,
-      headings: bar ? headingTitlesIn(bar) : jobHeadingTitles()
+      headings: bar ? headingTitlesIn(bar) : jobCardTitles()
     });
 
     // The description lives on the job-details view rather than the applicants

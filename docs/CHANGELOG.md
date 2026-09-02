@@ -1,5 +1,69 @@
 # CHANGELOG.md
 
+## 3.14.3 — the job title comes out of the job's own card
+
+**Reported one run after 3.14.2 shipped: every applicant was then saved under
+`Ashwin Anil's application`** — the heading of the applicant panel beside the list. The value was
+different; the failure was the same one, and the third in a row on this layout.
+
+### Why 3.14.2's fences were the wrong idea, not merely wrong
+
+3.14.2 answered a view with no tab bar by reading `h1,h2,[role='heading']` **across the whole
+document**, fenced against the applicant list and against a proven panel, and required the heading to
+precede the list in document order. Every one of those fences is a **guess about where an element
+sits**, and each fails *silently* when the thing it names cannot be resolved on that pass — `readJob`
+runs from `snapshotPanel` on every pass of every applicant's scan, including early ones where neither
+the list nor the panel has resolved yet. **A fence against `null` fences nothing.**
+
+The wrong value also exposed the deeper problem: **the reported header paints its title in no heading
+element at all.** A document-wide heading scan could therefore only ever find somebody *else's*
+heading. Widening the net was never going to reach the job — it could only reach further into the
+page.
+
+### What changed
+
+**The card is proven by a control the job owns.** `findJobCard` walks up from `Manage job` to the
+smallest container that also holds a line somebody could hold as a job. That is the same discipline
+`findJobViewHeader` already uses to prove a bar by the tabs it renders, and what rule 7 means by
+resolving on structure rather than position. The walk is bounded, and a container that has grown to
+hold the applicant list is the page rather than the card.
+
+`jobCardTitles` reads the card's own heading when it paints one and its first job-shaped line when it
+does not — **both from inside the proven card**, so neither can reach the panel, the list or
+LinkedIn's navigation. When no card is proven it answers **nothing** and the legacy sweep runs exactly
+as it did before 3.14.2. That is deliberate: a blank beats a wrong value (rule 1), and the last two
+releases were both a wrong value.
+
+**Two more values are refused by name, in the core, where the fences used to be.** An applicant's own
+heading — `Ashwin Anil's application`, either apostrophe — because no job on any layout is called
+somebody's application. And the card's own controls — `Manage job`, `Edit job`, `Repost job` — because
+the walk passes *through* the control it started from and must not stop on it. Both are statements
+about **what the value is** rather than about where it sits, which is what makes them hold however
+LinkedIn rebuilds the page. Being refusals, they also mean a job **already stored** under either one
+repairs itself on the next read, through the same `mergeJob` path `saveJob` uses.
+
+Real jobs that live near those words were checked rather than assumed: **Application Support
+Engineer**, **Applications Manager**, **Managing Director**, **Editor** and **Job Coach** all still
+pass.
+
+### Kept from 3.14.2
+
+The count-line refusal (`0 notifications total`, `649 applicants (628 results)`) and the demotion of
+LinkedIn's global navigation in the legacy sweep — `containsSiteNav` identifies chrome by the nav it
+**contains**, since `isExcludedContext` only refuses a nav *ancestor* and the global header is the
+nav's *parent*.
+
+### Removed
+
+`jobHeadingTitles` and its document-order fence are **gone, not fenced harder**. A test asserts their
+absence, so a later change cannot quietly reintroduce a document-wide heading scan.
+
+### Verification
+
+`npm run check` passed. **No live claim: rule 20 stands** — this is the third fix aimed at a live
+posting that cannot be loaded from here, and the previous two both passed their checks and were then
+wrong on the page. Confirming it is a step in Chrome.
+
 ## 3.14.2 — the job title on a view that renders no tab bar
 
 **Reported live, with the extension's own job filter in the screenshot: every applicant on a real
