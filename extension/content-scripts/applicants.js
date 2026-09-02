@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-09-02-react-v3.14.1";
+  const BUILD_ID = "2026-09-02-react-v3.14.2";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -1895,6 +1895,74 @@
     return state.jobHeader;
   }
 
+  /**
+   * The job's heading on a view that renders NO tab bar at all.
+   *
+   * THE LIVE DEFECT (3.14.2): the reported posting has no tab strip — the row
+   * under the title is a FILTER bar ("Sort by date applied", "Ratings",
+   * "Location", "Years of experience", "Skilled in"). `findJobViewHeader`
+   * needs two view tabs and finds none, so it returns null and the entire
+   * heading path added in 3.14.1 never runs. Every applicant on the job was
+   * saved under "0 notifications total", swept out of LinkedIn's own global
+   * navigation.
+   *
+   * So the heading reader gets a second way in, used ONLY when there is no bar.
+   * Nothing about the bar path changes, and the legacy sweep still produces the
+   * text, the raw record and the count exactly as before — this adds a reader
+   * after the working one rather than replacing it, which is the one rule the
+   * multi-UI guide states outright.
+   *
+   * WHAT MAKES IT SAFE IS THE FENCE, NOT THE QUERY. Read across the whole
+   * document, `h1,h2,[role='heading']` also returns the APPLICANT's headings —
+   * "Naveen Scaria's application", "Insights from profile" — and each of those
+   * passes `isJobTitleCandidate` happily. Saving one would be rule 1's wrong
+   * value, and worse than the blank it replaced. Three fences, all structural,
+   * because rule 7 says resolve by structure rather than by class name:
+   *
+   *   - never inside the applicant list, whose rows are the applicants;
+   *   - never inside a PROVEN panel. `mountedApplicantPanel()` deliberately,
+   *     not `applicantPanel()`, which falls back to the widest `main` and then
+   *     to `document.body` — a fence containing the whole page fences nothing;
+   *   - and, when a list is on screen, the heading must come BEFORE it in
+   *     document order. The job header sits above both columns; the panel is
+   *     the column beside the list. This is what catches the applicant's own
+   *     headings on a pass where the panel could not be proven.
+   *
+   * `isExcludedContext` still refuses `nav`, `footer` and the messaging
+   * bubbles, so LinkedIn's global navigation cannot answer here either.
+   */
+  function jobHeadingTitles() {
+    const list = applicantList();
+    const panel = mountedApplicantPanel();
+    const rank = (element) => (element.tagName === "H1" ? 0 : element.tagName === "H2" ? 1 : 2);
+    return [...document.querySelectorAll("h1,h2,[role='heading']")]
+      .filter((element) => isVisible(element) && !isExcludedContext(element))
+      .filter((element) => !(list && list.contains(element)))
+      .filter((element) => !(panel && panel.contains(element)))
+      // Node.DOCUMENT_POSITION_FOLLOWING (4): the list comes after the heading.
+      .filter((element) => !list || Boolean(element.compareDocumentPosition(list) & 4))
+      .map((element) => ({ rank: rank(element), text: cleanText(element.innerText || "") }))
+      .filter((entry) => Applicants.isJobTitleCandidate(entry.text))
+      .sort((a, b) => a.rank - b.rank)
+      .map((entry) => entry.text);
+  }
+
+  /**
+   * Is this sweep candidate LinkedIn's own global navigation?
+   *
+   * `isExcludedContext` refuses an element with a `nav` ANCESTOR, and the
+   * global header is the nav's PARENT — so it walked straight through, and on
+   * the reported page it is what supplied "0 notifications total". A `header`
+   * that contains a `nav` is site chrome; a job card does not carry one.
+   *
+   * Used only to DEMOTE, never to delete: if it is the only candidate on the
+   * page it is still read, because a layout that is working today must keep
+   * working even if the only element carrying the title also carries a nav.
+   */
+  function containsSiteNav(element) {
+    return Boolean(element?.querySelector("nav,[role='navigation']"));
+  }
+
   function readJob(accumulator) {
     // The job header sits above both columns, so it is read from the document
     // rather than from the applicant panel.
@@ -1904,22 +1972,30 @@
       // Only when the tabs are not on screen at all — a job view that renders no
       // tab bar, or one whose labels this build does not know yet. The original
       // sweep, unchanged, so a page that worked before still works.
+      // Only when the tabs are not on screen at all — a job view that renders no
+      // tab bar, or one whose labels this build does not know yet. The sweep and
+      // its shortest-first ordering are unchanged, so a page that worked before
+      // still works; since 3.14.2 LinkedIn's global navigation is sorted to the
+      // BACK of it rather than removed, so it can still answer when it is the
+      // only candidate but can no longer outrank the job card.
       : [...document.querySelectorAll("header,[class*='topcard'],[class*='job-title'],h1")]
         .filter((element) => isVisible(element) && !isExcludedContext(element))
-        .map((element) => cleanText(element.innerText || ""))
-        .filter(Boolean)
-        .sort((a, b) => a.length - b.length)
+        .map((element) => ({ chrome: containsSiteNav(element), text: cleanText(element.innerText || "") }))
+        .filter((entry) => entry.text)
+        .sort((a, b) => (a.chrome === b.chrome ? a.text.length - b.text.length : a.chrome ? 1 : -1))
         .slice(0, 4)
+        .map((entry) => entry.text)
         .join("\n");
     // The bar's own heading answers first; the line scan is the fallback for a
-    // bar that renders none. The legacy sweep above contributes NO headings on
-    // purpose — it is the compatibility path for layouts that already work, and
-    // its `h1` may be LinkedIn's own page heading rather than the job's.
+    // bar that renders none. Since 3.14.2 a view with no bar at all offers the
+    // headings the page painted, fenced by `jobHeadingTitles` — it is the only
+    // reader that can name the job on a layout whose header carries no tabs,
+    // and without it the answer comes from whatever the sweep sorted first.
     const job = Applicants.parseJobHeader({
       text: header,
       title: document.title,
       url: location.href,
-      headings: bar ? headingTitlesIn(bar) : []
+      headings: bar ? headingTitlesIn(bar) : jobHeadingTitles()
     });
 
     // The description lives on the job-details view rather than the applicants

@@ -2049,16 +2049,64 @@
     /^(?:job\s*titles?|titles?|job\s*names?|names?|roles?|positions?|overview|summary|details?|status|posted|active|inactive|draft|closed|paused|expired|archived|on\s*hold|open|linkedin)$/i;
 
   /**
+   * A line that counts something the page is showing. Never a job title.
+   *
+   * THE LIVE DEFECT (3.14.2), reported with the extension's own job filter in
+   * the screenshot: every applicant on a real posting was saved under the job
+   * title **"0 notifications total"** — the screen-reader label LinkedIn paints
+   * beside the Notifications icon in its global navigation.
+   *
+   * Two separate failures put it there, and this pattern answers the second:
+   *
+   *   - The view renders NO tab bar, so `findJobViewHeader` finds fewer than
+   *     two tabs, returns null, and the whole heading path is skipped. The
+   *     legacy sweep runs instead, sorts candidates by SHORTEST text and takes
+   *     the first line that is not chrome — and LinkedIn's own global header is
+   *     not excluded, because `isExcludedContext` refuses a `nav` ANCESTOR and
+   *     the global header is the nav's PARENT.
+   *   - Nothing could refuse the value once read. It is not one of the exact
+   *     chrome words, so `isJobTitleCandidate` said yes; and because it said
+   *     yes, `mergeJob`'s narrow repair could not replace it either. The wrong
+   *     title was PERMANENT — fill-blanks-only protects a filled value, and
+   *     this one was filled. The recruiter's only route back was to clear the
+   *     job.
+   *
+   * So a counted line is refused by shape, which also makes every job already
+   * stored under one repairable by the merge on the next read.
+   *
+   * Every branch is anchored on the count itself rather than on "contains the
+   * word", because rule 1 says a wrong value is worse than a blank one and the
+   * inverse is just as true — a shape test that is too eager refuses somebody's
+   * real job. "Notifications Engineer", "Views Analyst" and "Message Delivery
+   * Lead" all still pass; no job is called "0 notifications total" or
+   * "649 applicants".
+   *
+   * FOUND WHILE PROVING THAT, AND DELIBERATELY NOT FIXED HERE: a job whose
+   * title BEGINS with "Applicant" is already refused, and has been since
+   * 3.7.23 — `JOB_VIEW_TAB_PATTERN` is `^applicants?\b`, so
+   * "Applicant Support Specialist" reads as the Applicants tab and
+   * `isJobTitleCandidate` answers false. It is a real rule-1 defect (that job
+   * saves blank) but it is NOT this defect, and the repair is a tightening of
+   * the pattern that decides which element on the page IS the header — load
+   * bearing for every layout that currently works. It wants its own task and
+   * its own fixtures rather than a drive-by here.
+   */
+  const CHROME_COUNT_LINE_PATTERN =
+    /^\d[\d,]*\s+(?:applicants?|notifications?|messages?|results?|views?|new|unread)\b|^applicants?\s*\(\s*\d/i;
+
+  /**
    * Could this line be somebody's job title at all?
    *
    * One rule, so the reader, the container walk, the re-read and the merge all
    * agree on what "the job has a title" means. A tab label is not a title, a
-   * status word is not a title, and a caption naming the field is not the field.
+   * status word is not a title, a caption naming the field is not the field,
+   * and — since 3.14.2 — a count of the applicants is not the job.
    */
   function isJobTitleCandidate(value) {
     const line = cleanText(value);
     if (!line || line.length > 160) return false;
     if (isJobViewTabLabel(line)) return false;
+    if (CHROME_COUNT_LINE_PATTERN.test(line)) return false;
     return !JOB_TITLE_CHROME_PATTERN.test(line);
   }
 
@@ -5193,7 +5241,7 @@
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
-    JOB_TITLE_CHROME_PATTERN, isJobTitleCandidate, jobTitleFromHeadings,
+    JOB_TITLE_CHROME_PATTERN, CHROME_COUNT_LINE_PATTERN, isJobTitleCandidate, jobTitleFromHeadings,
     APPLICANT_LOCATION_PATTERN, looksLikeApplicantLocation,
     looksLikeApplicantHeadline, isEmployerCandidate, isCurrentRoleCandidate, isWholeLineControlLabel,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,

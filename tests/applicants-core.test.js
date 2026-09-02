@@ -696,6 +696,96 @@ test("the job header is found by its own tabs, resolved once, and written to eve
   assert.match(source, /job: listJob,/, "and the one job read is what every row carries");
 });
 
+test("a line that counts something the page is showing is never the job title", () => {
+  // THE LIVE DEFECT (3.14.2), reported from a real posting with the extension's
+  // own job filter in the screenshot: every applicant was saved under the job
+  // title "0 notifications total" — the screen-reader label LinkedIn paints
+  // beside the Notifications icon in its GLOBAL NAVIGATION.
+  //
+  // Two failures stacked. The view renders no tab bar, so the heading path
+  // added in 3.14.1 never ran and the legacy sweep answered instead; and once
+  // the value was read, nothing could refuse it.
+  assert.ok(!Applicants.isJobTitleCandidate("0 notifications total"),
+    "the reported value itself, refused by shape rather than by an exact word");
+
+  // The count line the same page renders above the list, which would otherwise
+  // be the FIRST thing a document-wide heading read finds. It is not refused by
+  // the tab pattern, which is anchored and expects "Applicants" to come first.
+  assert.ok(!Applicants.isJobTitleCandidate("649 applicants (628 results)"));
+  assert.ok(!Applicants.isJobViewTabLabel("649 applicants (628 results)"),
+    "which is exactly why the exact-word list could not catch it");
+  for (const chrome of ["3 new", "12 messages", "1 notification", "1,005 applicants", "24 results", "75 views"]) {
+    assert.ok(!Applicants.isJobTitleCandidate(chrome), `"${chrome}" counts something; it is not somebody's job`);
+  }
+
+  // THE HALF THAT MATTERS MORE. A shape test that is too eager refuses a real
+  // job, which is rule 1 in the other direction — so every branch is anchored
+  // on the count itself, never on "contains the word".
+  for (const real of ["Notifications Engineer", "Views Analyst", "Message Delivery Lead",
+    "Results Coordinator", "New Business Manager", "Business Development Executive"]) {
+    assert.ok(Applicants.isJobTitleCandidate(real), `"${real}" is a job title and must survive the filter`);
+  }
+
+  // AND THE REPAIR, which is why this had to be a refusal rather than a fence
+  // in the reader. A wrong title that reads as filled is PERMANENT: fill-blanks
+  // -only protects it in the accumulator and again in `saveJob`, so the
+  // recruiter's only route back was to clear the job. Refusing the value makes
+  // `mergeJob`'s narrow repair fire on the next read instead.
+  assert.equal(Applicants.mergeJob({ title: "0 notifications total" }, { title: "Business Development Executive" }).title,
+    "Business Development Executive", "a job already stored under the bad value repairs itself");
+  assert.equal(Applicants.mergeJob({ title: "Business Development Executive" }, { title: "Senior BDE" }).title,
+    "Business Development Executive", "and one real title still never replaces another (rule 4)");
+
+  // FOUND WHILE PROVING THE ABOVE, PRE-EXISTING, AND NOT FIXED HERE. A job
+  // whose title begins with "Applicant" reads as the Applicants TAB, because
+  // `JOB_VIEW_TAB_PATTERN` is `^applicants?\b` — so it has saved blank since
+  // 3.7.23. This test PINS the defect rather than endorsing it: the repair is a
+  // tightening of the pattern that decides which element even IS the header,
+  // which is load-bearing for every layout that works today and wants its own
+  // task. If a later change fixes it, this assertion is where it fails.
+  assert.ok(!Applicants.isJobTitleCandidate("Applicant Support Specialist"),
+    "KNOWN DEFECT, not desired behaviour — see the comment above before changing this line");
+});
+
+test("a hiring view that renders no tab bar still reads the job's own heading", async () => {
+  const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
+
+  // The reported page's second row is a FILTER bar — "Sort by date applied",
+  // "Ratings", "Location", "Years of experience", "Skilled in" — and not one of
+  // those is a view tab, so `findJobViewHeader` finds fewer than two and
+  // returns null. Proven against the core rather than asserted in prose.
+  const filterBar = ["Sort by date applied", "Ratings", "Location", "Years of experience", "Skilled in", "Manage job"];
+  assert.equal(filterBar.filter((label) => Applicants.isJobViewTabLabel(label)).length, 0,
+    "no filter control reads as a view tab, so there is no bar to find");
+
+  // So the heading reader gets a second way in, used ONLY when there is no bar.
+  const read = source.slice(source.indexOf("function readJob"), source.indexOf("function selectedApplicantRow"));
+  assert.match(read, /headings: bar \? headingTitlesIn\(bar\) : jobHeadingTitles\(\)/,
+    "a view with no bar offers the headings the page painted, instead of nothing");
+
+  // WHAT MAKES IT SAFE IS THE FENCE. Read across the document, the same query
+  // also returns "Naveen Scaria's application" and "Insights from profile", and
+  // both pass `isJobTitleCandidate` — saving one is rule 1's wrong value.
+  const headings = source.slice(source.indexOf("function jobHeadingTitles"), source.indexOf("function containsSiteNav"));
+  assert.match(headings, /!\(list && list\.contains\(element\)\)/, "never a heading inside the applicant list");
+  assert.match(headings, /const panel = mountedApplicantPanel\(\);/,
+    "the PROVEN panel — `applicantPanel()` falls back to the widest main and then to document.body, and a fence containing the whole page fences nothing");
+  assert.match(headings, /!\(panel && panel\.contains\(element\)\)/, "never a heading inside the applicant's own panel");
+  assert.match(headings, /element\.compareDocumentPosition\(list\) & 4/,
+    "and the job header comes BEFORE the list, which catches the panel's headings on a pass where the panel could not be proven");
+  assert.match(headings, /isVisible\(element\) && !isExcludedContext\(element\)/,
+    "nav, footer and the messaging bubbles are still refused here (rule 6)");
+
+  // The other half of the same defect: LinkedIn's global header is the nav's
+  // PARENT, so `isExcludedContext` — which refuses a nav ANCESTOR — walked
+  // straight through it, and shortest-first let it outrank the job card.
+  assert.match(source, /function containsSiteNav\(element\) \{\s*\n\s*return Boolean\(element\?\.querySelector\("nav,\[role='navigation'\]"\)\);/,
+    "site chrome is identified by the nav it contains — structure, not a class name (rule 7)");
+  assert.match(read, /a\.chrome === b\.chrome \? a\.text\.length - b\.text\.length : a\.chrome \? 1 : -1/,
+    "which DEMOTES it rather than dropping it, so it can still answer when it is the only candidate");
+  assert.match(read, /\.slice\(0, 4\)/, "the sweep is otherwise untouched — four shortest, joined");
+});
+
 test("the location is a rendered place, never whatever the third line happened to be", () => {
   // THE LIVE DEFECT: every applicant's location was saved as
   // **"Filter and sort"** — a button in the *list* column. `location` was

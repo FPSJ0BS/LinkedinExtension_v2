@@ -1,0 +1,67 @@
+{
+  "schema": 2,
+  "id": "TASK-0210",
+  "name": "Read the job title on a hiring view that renders no tab bar",
+  "request": "Read the job title on a hiring view that renders no tab bar",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-09-02T08:15:26.661Z",
+  "completedAt": "2026-09-02T08:25:45.050Z",
+  "startCommit": "8ef3176afc4a2274f57eb1cfc174088f7ff63148",
+  "gitRef": "task/TASK-0210",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package-lock.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 730 tests 0 fail (2 new), 18 doc-link files, 34 build files + 5 React entry points validated",
+    "dist/ rebuilt and carries the fix: jobHeadingTitles/containsSiteNav present, build id 2026-09-02-react-v3.14.2, manifest 3.14.2"
+  ],
+  "result": "TASK-0210 / 3.14.2: the job title on a hiring view that renders NO tab bar. REPORTED LIVE with the extension's own job filter in the screenshot - every applicant on a real posting saved under the title '0 notifications total', which is the screen-reader label LinkedIn paints beside the Notifications icon IN ITS OWN GLOBAL NAVIGATION. Two failures stacked, both established by running the shipped parser rather than reading it. (1) The posting renders no tab strip at all - the row under the header is a FILTER bar (Sort by date applied / Ratings / Location / Years of experience / Skilled in) and not one of those is a view tab, so findJobViewHeader needs two, finds ZERO, returns null, and the entire heading path added in 3.14.1 never runs. The previous release was diagnosed on a captured workspace whose header did carry tabs; this layout never reaches it. (2) The legacy sweep answered instead and LinkedIn's global header was in the running: it sorts by SHORTEST text, and isExcludedContext refuses a nav ANCESTOR while the global header is the nav's PARENT, so it walked straight through - measured against the reported page the global header is shorter than the job card and sorted first. (3) Nothing could refuse the value once read: it is not one of the exact chrome words, so isJobTitleCandidate said yes, and BECAUSE it said yes mergeJob's narrow repair could not fire - the wrong title was PERMANENT, protected as a filled value in the accumulator and again in saveJob, and the only route back was clearing the job. CHROME_COUNT_LINE_PATTERN refuses a line that COUNTS something the page is showing, anchored on the count itself and never on 'contains the word', because rule 1 cuts both ways - Notifications Engineer, Views Analyst and Message Delivery Lead all still pass. Refusing the value rather than fencing the reader is deliberate: it is what makes every job ALREADY STORED under one repair itself on the next read through the same mergeJob path saveJob uses, so nothing has to be cleared by hand. jobHeadingTitles gives the heading reader a SECOND WAY IN, used only when there is no bar; the bar path is untouched and the sweep still produces the text, the raw record and the count exactly as before - a reader added AFTER the working one, which is the one rule the multiple-UI guide states outright. WHAT MAKES IT SAFE IS THE FENCE, NOT THE QUERY: read across the document the same selector also returns 'Naveen Scaria's application' and 'Insights from profile' and BOTH pass isJobTitleCandidate, so saving one would be rule 1's wrong value. Three structural fences (rule 7) - never inside the applicant list, never inside a PROVEN panel (mountedApplicantPanel deliberately, because applicantPanel falls back to the widest main and then to document.body and a fence containing the whole page fences nothing), and the heading must precede the list in document order, which catches the panel's headings on a pass where the panel could not be proven. containsSiteNav identifies chrome by the nav it CONTAINS rather than by a class name and DEMOTES rather than drops, so the global header can no longer outrank the job card but still answers when it is the only candidate. FOUND WHILE PROVING THIS AND DELIBERATELY NOT FIXED: a job whose title begins with 'Applicant' has saved blank since 3.7.23 because JOB_VIEW_TAB_PATTERN is anchored on applicants? - a real rule-1 defect, but the repair tightens the pattern that decides which element IS the header, load-bearing for every layout that works today; a test PINS it rather than endorsing it and says so in its message. The applicant count also stays null here: the page reads '649 applicants (628 results)' and the bracketed number is 628, the FILTERED count, while the real total is 649 - a regex loosened to grab it would record the wrong one. NO LIVE CLAIM: rule 20 stands - this is a live posting that cannot be loaded from here, and confirming the title now saves correctly is a step in Chrome. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, version bumped in nine places."
+}

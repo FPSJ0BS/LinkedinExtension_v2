@@ -1,5 +1,80 @@
 # CHANGELOG.md
 
+## 3.14.2 — the job title on a view that renders no tab bar
+
+**Reported live, with the extension's own job filter in the screenshot: every applicant on a real
+posting was saved under the job title `0 notifications total`.** That string is the screen-reader
+label LinkedIn paints beside the Notifications icon **in its own global navigation** — so the title
+was not merely wrong, it was read from a different part of the page than the job.
+
+### Two failures, stacked
+
+**The view renders no tab bar at all.** The row under the header on this posting is a *filter* bar —
+"Sort by date applied", "Ratings", "Location", "Years of experience", "Skilled in" — and not one of
+those is a view tab. `findJobViewHeader` needs two, finds none, and returns `null`, so **the whole
+heading path added in 3.14.1 never ran.** The fix shipped in the previous release was diagnosed on a
+captured workspace whose header *did* carry tabs; this layout never reaches it.
+
+**The legacy sweep answered instead, and LinkedIn's global header was in the running.** That sweep
+takes `header,[class*='topcard'],[class*='job-title'],h1`, sorts by **shortest text** and reads the
+first line that is not chrome. `isExcludedContext` refuses an element with a `nav` **ancestor** — and
+the global header is the nav's **parent**, so it walked straight through. Measured against the
+reported page, the global header is *shorter* than the job card, so it sorted first.
+
+**And nothing could refuse the value once it was read.** `0 notifications total` is not one of the
+exact chrome words, so `isJobTitleCandidate` said yes — and because it said yes, `mergeJob`'s narrow
+repair could not fire either. The wrong title was **permanent**: fill-blanks-only protects a filled
+value in the accumulator and again in `saveJob`, and the recruiter's only route back was to clear the
+job.
+
+### What changed
+
+`CHROME_COUNT_LINE_PATTERN` refuses **a line that counts something the page is showing** —
+`0 notifications total`, `649 applicants (628 results)`, `3 new`, `75 views`. Every branch is anchored
+on the count itself, never on "contains the word", because rule 1 cuts both ways and a shape test that
+is too eager refuses somebody's real job: **Notifications Engineer**, **Views Analyst** and **Message
+Delivery Lead** all still pass. Refusing the value rather than fencing the reader is what makes every
+job **already stored** under one repair itself on the next read, through the same `mergeJob` path that
+`saveJob` uses — no job has to be cleared by hand.
+
+`jobHeadingTitles()` gives the heading reader a **second way in, used only when there is no bar**. The
+bar path is untouched, and the legacy sweep still produces the text, the raw record and the count
+exactly as before — this is a reader added *after* the working one, which is the one rule the
+multiple-UI guide states outright.
+
+**What makes it safe is the fence, not the query.** Read across the document, `h1,h2,[role=heading]`
+also returns the applicant's own headings — "Naveen Scaria's application", "Insights from profile" —
+and both pass `isJobTitleCandidate`. Saving one would be rule 1's wrong value, worse than the blank it
+replaced. Three structural fences (rule 7): never inside the applicant list; never inside a **proven**
+panel — `mountedApplicantPanel()` deliberately, because `applicantPanel()` falls back to the widest
+`main` and then to `document.body`, and a fence containing the whole page fences nothing; and, when a
+list is on screen, the heading must come **before** it in document order, which catches the panel's
+headings on a pass where the panel could not be proven.
+
+`containsSiteNav` identifies site chrome by **the nav it contains** rather than by a class name, and it
+**demotes rather than drops**: LinkedIn's global header sorts to the back of the sweep, so it can no
+longer outrank the job card but can still answer when it is the only candidate on the page.
+
+### Found while proving this, and deliberately not fixed
+
+**A job whose title begins with "Applicant" has saved blank since 3.7.23.** `JOB_VIEW_TAB_PATTERN` is
+anchored on `applicants?`, so "Applicant Support Specialist" reads as the Applicants *tab* and
+`isJobTitleCandidate` answers false. It is a real rule-1 defect, but it is not this one, and the repair
+is a tightening of the pattern that decides which element on the page **is** the header — load-bearing
+for every layout that works today. A test **pins** it rather than endorsing it, and says so in its
+message: if a later change fixes it, that assertion is where it fails.
+
+**The applicant count is still `null` on this layout.** `APPLICANT_COUNT_PATTERN` wants
+`applicants (N)`; the page reads `649 applicants (628 results)`. Left alone on purpose — the bracketed
+number is **628, the filtered count**, while the real total is **649**, so a regex loosened to grab it
+would record the wrong one. Blank over wrong, rule 1.
+
+### Verification
+
+`npm run check` passed. **No live claim: rule 20 stands** — the reported page is a live LinkedIn
+posting that cannot be loaded from here, and confirming the title now saves correctly is a step in
+Chrome.
+
 ## 3.14.1 — the job title is the heading, not the first line that is not a tab
 
 **Reported against a screenshot of a captured recruiter workspace: every applicant on the job was
