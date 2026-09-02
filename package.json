@@ -8,6 +8,7 @@
     "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "node scripts/build.mjs",
+    "dev": "npm run build",
     "test": "node --test tests/*.test.js",
     "docs:check": "node scripts/check-doc-links.mjs",
     "validate": "node scripts/validate-build.mjs",

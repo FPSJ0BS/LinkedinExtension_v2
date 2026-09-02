@@ -1,0 +1,18 @@
+{
+  "schema": 2,
+  "id": "TASK-0208",
+  "name": "Add dev script to package.json",
+  "request": "Add dev script to package.json",
+  "type": "change",
+  "status": "aborted",
+  "startedAt": "2026-09-02T07:42:27.646Z",
+  "completedAt": null,
+  "startCommit": "834c283d7f18a7a6a31bcfef97054634a7e07e28",
+  "commit": null,
+  "gitRef": "task/TASK-0208",
+  "files": [],
+  "checks": [],
+  "result": null,
+  "abortedAt": "2026-09-02T07:44:33.168Z",
+  "abortReason": "Aborted by operator"
+}

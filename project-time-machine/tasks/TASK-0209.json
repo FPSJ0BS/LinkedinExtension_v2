@@ -1,0 +1,23 @@
+{
+  "schema": 2,
+  "id": "TASK-0209",
+  "name": "Add dev script to package.json",
+  "request": "Add dev script to package.json",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-09-02T07:48:03.617Z",
+  "completedAt": "2026-09-02T07:49:04.239Z",
+  "startCommit": "834c283d7f18a7a6a31bcfef97054634a7e07e28",
+  "gitRef": "task/TASK-0209",
+  "files": [
+    {
+      "change": "modified",
+      "path": "package.json"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 728 tests 0 fail, 18 doc-link files, 34 build files + 5 React entry points validated",
+    "npm run dev executed directly and rebuilt dist/ (Built Profile Vault React 3.14.1)"
+  ],
+  "result": "Added a \"dev\" script to package.json that runs \"npm run build\", so \"npm run dev\" builds dist/. Placed beside \"build\" in the scripts block; it is a plain alias, not a watcher, so it inherits build.mjs's behaviour of deleting dist/ before compiling. No other file changed: no test or script asserts the script list beyond scripts.package (tests/packaging.test.js:134), which is untouched. Also folded in the untracked record for TASK-0208, an earlier operator-aborted attempt at this same request."
+}
