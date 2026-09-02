@@ -1,0 +1,66 @@
+{
+  "schema": 2,
+  "id": "TASK-0207",
+  "name": "Read the job title from the header's own heading, not the first non-tab line",
+  "request": "Read the job title from the header's own heading, not the first non-tab line",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-09-02T07:15:31.435Z",
+  "completedAt": "2026-09-02T07:22:16.359Z",
+  "startCommit": "159eebbfddaee8fef52aa2fa66c8821c616a67ff",
+  "gitRef": "task/TASK-0207",
+  "files": [
+    {
+      "change": "modified",
+      "path": "docs/CHANGELOG.md"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/applicants.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/connections.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/content-scripts/content.js"
+    },
+    {
+      "change": "modified",
+      "path": "extension/manifest.json"
+    },
+    {
+      "change": "modified",
+      "path": "package-lock.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    },
+    {
+      "change": "modified",
+      "path": "src/applicants-core.js"
+    },
+    {
+      "change": "modified",
+      "path": "src/background.ts"
+    },
+    {
+      "change": "modified",
+      "path": "src/react/popup.tsx"
+    },
+    {
+      "change": "modified",
+      "path": "tests/applicants-core.test.js"
+    }
+  ],
+  "checks": [
+    "npm run check passed - typecheck, build, 728 tests 0 fail, doc links, 34 build files and 5 React entry points validated"
+  ],
+  "result": "TASK-0207 / 3.14.1: the job title is read from the heading the page painted, not from the first header line that is not a recognised view tab. REPORTED against a captured recruiter workspace whose header renders an ACTIVE eyebrow, an h1 'TEST - ML Engineer', a company line and a tab bar 'Overview / Applicants / Job details / Settings': all thirty applicants were saved under the title 'Overview'. WHY, established by running the shipped parser rather than reading it - 'the first line that is not a view tab' is not a definition of a job title, it is a definition of whatever chrome comes first, and THREE separate lines beat the real title to it. (1) 'Overview' is not a tab this build knows, so on the TAB LIST it read as the line-that-is-not-a-tab, the tab list answered yes to 'does this node hold a title', and findJobViewHeader STOPPED WALKING one level below the h1. The guard it stopped on was written in 3.7.23 for exactly this case and only works while every tab is recognised; one unknown tab defeats it. (2) 'ACTIVE', the status eyebrow, is the first line of the header section - so even with Overview added to the pattern the answer would have been ACTIVE. (3) 'Job title', a caption, which is what an sr-only or labelled layout renders above the value and is the literal string the report opened with; clipped text is still innerText. THE FIX IS NOT MORE WORDS IN THE TAB PATTERN, which loses to the next eyebrow LinkedIn invents. A job view states its job in a HEADING - structure, which is what rule 7 asks to resolve by, and the old code never looked at one. isJobTitleCandidate is now ONE rule used by four callers so the reader, the container walk, the re-read and the merge cannot disagree about what 'the job has a title' means; it refuses tab labels and an EXACT-WORD chrome list, never a shape test, because rule 1 says a wrong value is worse than a blank and a heuristic would eventually refuse somebody's real job - 'Active Directory Administrator' passes, 'Active' does not. jobTitleFromHeadings answers first and the line scan is the fallback; parseJobHeader's new headings parameter DEFAULTS TO EMPTY so every existing caller behaves exactly as before, asserted by comparing a call with no headings against one with []. findJobViewHeader now prefers an ancestor carrying a heading, keeps the first line-scan match as the fallback and returns it at both early exits, so a bar with no heading resolves to THE SAME ELEMENT AS BEFORE. jobTitleFromHeader skips chrome rather than only tabs - a strict tightening, every line it accepted before it still accepts. THE RE-READ GATE was 'if (!listJob?.title)' and a wrong title is a title, so a run reading the bar before it hydrated settled on the chrome and never looked again; it is now !isJobTitleCandidate, a strict superset of the old gate, and it MERGES rather than assigns because it now re-reads a job that has fields and a later pass answering title:null must not blank the count and url the first got. ONE NARROW REPAIR in mergeJob for title alone: a job stored under 'Overview' was PERMANENT - the value is filled, so fill-blanks-only refused to replace it in the accumulator and again in saveJob, and the recruiter's only route back was to clear the job. It fires only when the stored value is chrome AND the arriving one is a real candidate, so it can never replace one genuine title with another; every other field keeps fill-blanks-only untouched (rule 4). NOT DONE DELIBERATELY: the legacy sweep contributes no headings and is otherwise untouched - it is the compatibility path for layouts that already work and its h1 may be LinkedIn's own page heading rather than the job's. It remains a known weak spot, because sorting candidates by shortest text means a short chrome word outranks a real title by construction, which is the 3.7.23 defect surviving in the fallback. FIVE source-shape assertions pinning the old code were updated by hand rather than deleted, each keeping the original reasoning and stating what replaced it. NO LIVE CLAIM: rule 20 stands - the page this was diagnosed from is a local test harness, which reproduces the defect exactly. Files: src/applicants-core.js, extension/content-scripts/applicants.js, tests/applicants-core.test.js, docs/CHANGELOG.md, version bumped in nine places."
+}

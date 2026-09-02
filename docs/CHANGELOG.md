@@ -1,5 +1,82 @@
 # CHANGELOG.md
 
+## 3.14.1 — the job title is the heading, not the first line that is not a tab
+
+**Reported against a screenshot of a captured recruiter workspace: every applicant on the job was
+saved under a job title that was not the job's title.** The header shows an `ACTIVE` eyebrow, an
+`<h1>` reading "TEST – ML Engineer", a company line, and a tab bar reading
+"Overview · Applicants · Job details · Settings". Thirty applicants were saved under **`Overview`**.
+
+### Why "the first line that is not a view tab" was never a definition of a job title
+
+`jobTitleFromHeader` picked the first line of the header that `isJobViewTabLabel` did not recognise.
+That is not a description of a job title; it is a description of whatever chrome happens to come
+first. Three separate lines beat the real title to it on this one page, and each was verified by
+running the shipped function rather than by reading it:
+
+- **`Overview` is not a tab this build knows.** The pattern lists `hiring plan`, `candidate search`,
+  `applicants`, `manage coworkers`, `job details`, `settings` and four more — not `Overview`. So on
+  the tab list itself, `Overview` read as "the line that is not a tab", the tab list therefore
+  answered yes to "does this node hold a title", and **`findJobViewHeader` stopped walking there** —
+  one level below the `<h1>`. The guard `if (Applicants.jobTitleFromHeader(text)) return node;` was
+  written in 3.7.23 for exactly this — "the smallest element carrying the tabs is usually the tab
+  list alone and holds no title at all" — and it only works while every tab is recognised. One
+  unknown tab defeats it.
+- **`ACTIVE`**, the job's status eyebrow, is the first line of the header section — so even with
+  `Overview` added to the pattern, the answer would have been `ACTIVE`.
+- **`Job title`**, a caption. An sr-only or labelled layout renders the field name above the value,
+  and clipped text is still `innerText`. That is the literal string the report opened with.
+
+**The fix is not to keep adding words to the tab pattern.** That loses to the next eyebrow LinkedIn
+invents. A job view states its job in a **heading**, which is structure, which is what rule 7 asks to
+resolve by — and the old code never looked at one.
+
+### What changed
+
+- **`isJobTitleCandidate` — one rule, used by four callers**, so the reader, the container walk, the
+  re-read and the merge cannot disagree about what "the job has a title" means. It refuses a tab
+  label and an **exact-word** chrome list (`Job title`, `Title`, `Role`, `Position`, `Overview`,
+  `Status`, `Active`, `Draft`, `Closed`, `Paused`, `Expired`, `Archived`, `On hold`, `LinkedIn`, …).
+  Exact words and never a shape test, because rule 1 says a wrong value is worse than a blank and a
+  heuristic would eventually refuse somebody's real job. `Active Directory Administrator` is a job
+  title and passes; `Active` is not one and does not.
+- **`jobTitleFromHeadings` answers first, the line scan is the fallback.** `parseJobHeader` takes an
+  optional `headings`, defaulting to empty — so **every existing caller behaves exactly as it did**,
+  which a test asserts by comparing a call with no `headings` against one with `[]`.
+- **`findJobViewHeader` prefers an ancestor that carries a heading**, keeping the first line-scan
+  match as the fallback and returning it at both early exits. When no ancestor carries a heading it
+  resolves to **the same element it resolved to before**, so a bar that worked keeps working.
+- **`jobTitleFromHeader` skips chrome rather than only tabs.** A strict tightening of the same rule:
+  every line it accepted before it still accepts, minus the exact words. It now walks past `ACTIVE`
+  to the line beneath it.
+- **The re-read gate was `if (!listJob?.title)`,** and a wrong title is a title — so a run that read
+  the bar before it hydrated settled on the chrome and never looked again. It is now
+  `!isJobTitleCandidate(...)`, a strict superset: everything the old gate re-read for, this re-reads
+  for too. It **merges** rather than assigns, because this now re-reads a job that has fields and a
+  later pass answering `title: null` must not blank the count and the url the first one got.
+- **One narrow repair in `mergeJob`, for `title` alone.** A job stored under `Overview` was permanent
+  — the value is filled, so fill-blanks-only refused to replace it, in the accumulator and again in
+  `saveJob`; the recruiter's only route back was to clear the job. The repair fires only when what is
+  stored is chrome **and** what is arriving is a real candidate, so it can never replace one genuine
+  title with another. Every other field keeps fill-blanks-only untouched (rule 4).
+
+### Deliberately not changed
+
+**The legacy sweep contributes no headings.** When the tab bar is not found at all, `readJob` still
+falls back to `header,[class*='topcard'],[class*='job-title'],h1` sorted by text length — a path
+whose `h1` may be LinkedIn's own page heading rather than the job's. It is the compatibility path for
+layouts that already work, and it was left alone on purpose; it still benefits from the tightened
+line scan. It remains a known weak spot: sorting candidates by *shortest text* means a short chrome
+word outranks a real title by construction, which is the 3.7.23 defect surviving in the fallback.
+
+### Verified
+
+`npm run check` — typecheck, build, **728 tests 0 fail**, doc links, `dist/` validation. The three
+failure modes were each driven through the shipped parser and now return `TEST – ML Engineer`; the
+3.7.23 live bar still returns `Human resource recruiters` with count 1005. **Rule 20 stands: this was
+not confirmed against live LinkedIn.** The page it was diagnosed from is a local test harness, and
+the harness reproduces the defect exactly.
+
 ## 3.14.0 — the extension sends the message
 
 **Asked for directly, and the trade-off was put in front of the recruiter before a line was written:

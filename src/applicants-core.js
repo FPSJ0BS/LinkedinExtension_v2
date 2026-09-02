@@ -2025,24 +2025,86 @@
   }
 
   /**
+   * Chrome that renders exactly where a job title renders, and is not one.
+   *
+   * THE DEFECT (3.14.1): "the first line that is not a view tab" is not a
+   * definition of a job title — it is a definition of whatever chrome happens to
+   * come first. Three separate lines beat the real title to it on a captured
+   * recruiter workspace whose bar reads "Overview · Applicants · Job details ·
+   * Settings" above an `ACTIVE` eyebrow and an `<h1>`:
+   *
+   *   - `Overview` — a view tab this build did not know, so it read as the
+   *     "line that is not a tab" and made the TAB LIST look like it held a
+   *     title. `findJobViewHeader` stopped there and never reached the heading.
+   *   - `ACTIVE` — the job's status eyebrow, rendered above the `<h1>`.
+   *   - `Job title` — a label, which is what an sr-only caption or a labelled
+   *     layout renders above the value. Clipped text is still `innerText`.
+   *
+   * Each was saved as the job title for every applicant on the job. The list is
+   * a small set of EXACT words, never a heuristic, because rule 1 says a wrong
+   * value is worse than a blank one and a shape test would eventually refuse a
+   * real title. No job is called "Active", "Overview" or "Job title".
+   */
+  const JOB_TITLE_CHROME_PATTERN =
+    /^(?:job\s*titles?|titles?|job\s*names?|names?|roles?|positions?|overview|summary|details?|status|posted|active|inactive|draft|closed|paused|expired|archived|on\s*hold|open|linkedin)$/i;
+
+  /**
+   * Could this line be somebody's job title at all?
+   *
+   * One rule, so the reader, the container walk, the re-read and the merge all
+   * agree on what "the job has a title" means. A tab label is not a title, a
+   * status word is not a title, and a caption naming the field is not the field.
+   */
+  function isJobTitleCandidate(value) {
+    const line = cleanText(value);
+    if (!line || line.length > 160) return false;
+    if (isJobViewTabLabel(line)) return false;
+    return !JOB_TITLE_CHROME_PATTERN.test(line);
+  }
+
+  /**
    * The job's own title, out of the header bar's text.
    *
    * One definition, used by `parseJobHeader` to read the title and by the
    * content script to decide whether a candidate container even holds one —
    * because the smallest element carrying the tabs is often the tab list alone,
    * which renders every tab and no title at all.
+   *
+   * Since 3.14.1 it skips chrome rather than only tabs, so it walks PAST an
+   * `ACTIVE` eyebrow to the line beneath it instead of stopping on it. That is
+   * a tightening of the same rule, never a loosening: every line it accepted
+   * before it still accepts, minus the exact words above.
    */
   function jobTitleFromHeader(text) {
-    return toLines(text).find((line) => line && !isJobViewTabLabel(line) && line.length <= 160) || "";
+    return toLines(text).find((line) => isJobTitleCandidate(line)) || "";
   }
 
-  function parseJobHeader({ text = "", title = "", url = "" } = {}) {
+  /**
+   * The title out of the headings the page painted, which is the better signal.
+   *
+   * Rule 7 asks for structure over position, and a job view states its job in a
+   * heading — so an `<h1>` is worth more than "whichever line sorted first".
+   * The line scan above stays exactly where it was, as the fallback for a bar
+   * that renders no heading at all; this only gets to answer first.
+   */
+  function jobTitleFromHeadings(headings) {
+    const list = Array.isArray(headings) ? headings : [headings];
+    for (const entry of list) {
+      const line = cleanText(entry);
+      if (isJobTitleCandidate(line)) return line;
+    }
+    return "";
+  }
+
+  function parseJobHeader({ text = "", title = "", url = "", headings = [] } = {}) {
     const lines = toLines(text);
     const context = parseHiringContext(url);
     const countLine = lines.find((line) => APPLICANT_COUNT_PATTERN.test(line)) || cleanText(text);
     const countMatch = APPLICANT_COUNT_PATTERN.exec(countLine);
-    // The heading is the first line that is not one of the view tabs.
-    const heading = jobTitleFromHeader(text);
+    // The heading the page painted, then the first line that is not chrome.
+    // `headings` defaults to empty, so a caller that does not pass one gets the
+    // line scan and nothing else — exactly what every caller got before 3.14.1.
+    const heading = jobTitleFromHeadings(headings) || jobTitleFromHeader(text);
 
     return {
       id: context.jobId,
@@ -2055,12 +2117,29 @@
     };
   }
 
-  /** Merge a later, more hydrated read of the job over an earlier one. */
+  /**
+   * Merge a later, more hydrated read of the job over an earlier one.
+   *
+   * Fill-blanks-only, and that stays true for every field: a filled value is
+   * never replaced by another filled value, because "a later read enriches
+   * rather than overwrites" (rule 4) is what keeps a half-rendered pass from
+   * undoing a good one.
+   *
+   * ONE NARROW REPAIR, added in 3.14.1 for `title` alone. A job saved under
+   * `Overview` or `ACTIVE` was permanent: the stored value is filled, so no
+   * later read could replace it, in the accumulator or in `saveJob` — the
+   * recruiter's only route back was to clear the job. The repair fires ONLY
+   * when what is stored is chrome by the exact-word list above AND what is
+   * arriving is a real candidate, so it can never overwrite a genuine title
+   * with another genuine title. That is the fill-blanks rule applied to a value
+   * that was never a title in the first place, not an exception to it.
+   */
   function mergeJob(existing, incoming) {
     const merged = { ...(existing || {}) };
     for (const [key, value] of Object.entries(incoming || {})) {
       if (value === null || value === undefined || value === "") continue;
       if (merged[key] === null || merged[key] === undefined || merged[key] === "") merged[key] = value;
+      else if (key === "title" && !isJobTitleCandidate(merged[key]) && isJobTitleCandidate(value)) merged[key] = value;
     }
     return merged;
   }
@@ -5114,6 +5193,7 @@
     // job and applicant headers
     parseJobHeader, mergeJob, parseApplicantHeader, cleanApplicantName,
     JOB_VIEW_TAB_PATTERN, isJobViewTabLabel, countJobViewTabs, jobTitleFromHeader,
+    JOB_TITLE_CHROME_PATTERN, isJobTitleCandidate, jobTitleFromHeadings,
     APPLICANT_LOCATION_PATTERN, looksLikeApplicantLocation,
     looksLikeApplicantHeadline, isEmployerCandidate, isCurrentRoleCandidate, isWholeLineControlLabel,
     NAME_CHROME_PATTERN, NAME_IMAGE_ARTIFACT_PATTERN, isApplicantNameCandidate,

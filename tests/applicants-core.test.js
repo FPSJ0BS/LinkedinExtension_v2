@@ -564,6 +564,93 @@ test("the job title is the header bar's one line that is not a view tab", () => 
   assert.equal(job.applicantCount, 1005);
 });
 
+test("the job title is the heading the page painted, never the chrome above it", () => {
+  // THE DEFECT (3.14.1), reported against a captured recruiter workspace whose
+  // header renders, in this order: an `ACTIVE` status eyebrow, an `<h1>` reading
+  // "TEST – ML Engineer", a company line, and the tab bar
+  // "Overview · Applicants · Job details · Settings". Thirty applicants were
+  // saved under the title "Overview".
+  const tabList = ["Overview", "Applicants", "Job details", "Settings"].join("\n");
+  const headerBar = ["ACTIVE", "TEST – ML Engineer", "Applicant Lab Test Co. · Pune · Full-time", tabList].join("\n");
+
+  // WHY IT HAPPENED. `Overview` is a view tab this build does not know, so it
+  // was "the line that is not a tab" — which made the TAB LIST look like it
+  // held a title and stopped the container walk one level below the heading.
+  assert.ok(!Applicants.isJobViewTabLabel("Overview"), "still not a tab label — the fix is not to keep adding words");
+  assert.ok(Applicants.countJobViewTabs(tabList) >= 2, "the tab list still identifies itself as a bar");
+  assert.equal(Applicants.jobTitleFromHeader(tabList), "",
+    "but it carries no title any more, so the walk keeps going");
+
+  // Each of the three lines that beat the real title to it, refused by name.
+  for (const chrome of ["Overview", "ACTIVE", "Active", "Job title", "Job titles", "Status", "Draft", "Closed", "LinkedIn"]) {
+    assert.ok(!Applicants.isJobTitleCandidate(chrome), `"${chrome}" is chrome, not somebody's job`);
+  }
+  // And the titles themselves, which is the half that matters more.
+  for (const real of ["TEST – ML Engineer", "Business analyst", "English teacher", "Human resource recruiters",
+    "Human Resources Executive", "Senior Frontend Engineer", "Active Directory Administrator"]) {
+    assert.ok(Applicants.isJobTitleCandidate(real), `"${real}" is a job title and must survive the filter`);
+  }
+
+  // The line scan now walks PAST the eyebrow instead of stopping on it.
+  assert.equal(Applicants.jobTitleFromHeader(headerBar), "TEST – ML Engineer");
+
+  // And the heading answers first, which is the signal that does not depend on
+  // this build knowing every eyebrow word LinkedIn might render (rule 7).
+  assert.equal(Applicants.jobTitleFromHeadings(["TEST – ML Engineer"]), "TEST – ML Engineer");
+  assert.equal(Applicants.jobTitleFromHeadings(["Applicants", "Overview"]), "",
+    "a bar whose only headings are chrome offers nothing, and the line scan takes over");
+  assert.equal(
+    Applicants.parseJobHeader({ text: headerBar, title: "Applicant Lab", url: APPLICANTS_URL, headings: ["TEST – ML Engineer"] }).title,
+    "TEST – ML Engineer"
+  );
+});
+
+test("passing no headings leaves parseJobHeader exactly as it was", () => {
+  // The regression guard for "do not change what already works": `headings`
+  // defaults to empty, so every caller that does not pass one — and every
+  // layout resolved through the legacy sweep, which deliberately contributes
+  // none — gets the line scan and nothing else.
+  const bar = ["Human resource recruiters", "Hiring plan", "Candidate search", "Applicants (1,005)", "Manage coworkers"].join("\n");
+  const withoutHeadings = Applicants.parseJobHeader({ text: bar, title: "Top fit | LinkedIn", url: APPLICANTS_URL });
+  const withEmpty = Applicants.parseJobHeader({ text: bar, title: "Top fit | LinkedIn", url: APPLICANTS_URL, headings: [] });
+  assert.deepEqual(withoutHeadings, withEmpty);
+  assert.equal(withoutHeadings.title, "Human resource recruiters");
+  assert.equal(withoutHeadings.applicantCount, 1005);
+
+  // The document.title fallback is untouched, including its "| LinkedIn" strip.
+  assert.equal(Applicants.parseJobHeader({ text: "", title: "Data Scientist | LinkedIn", url: "" }).title, "Data Scientist");
+  // A header that says nothing and a title that is chrome still says nothing
+  // rather than inventing one (rule 1).
+  assert.equal(Applicants.parseJobHeader({ text: "", title: "", url: "" }).title, null);
+});
+
+test("a job stored under chrome can be repaired, and a real title never overwritten", () => {
+  // Both stickiness mechanisms are why "Overview" was permanent: the value is
+  // filled, so fill-blanks-only refused to replace it, in the accumulator and
+  // again in `saveJob`. The repair is scoped to `title` and to a stored value
+  // that is chrome by the exact-word list.
+  assert.equal(Applicants.mergeJob({ title: "Overview" }, { title: "TEST – ML Engineer" }).title, "TEST – ML Engineer");
+  assert.equal(Applicants.mergeJob({ title: "ACTIVE" }, { title: "Business analyst" }).title, "Business analyst");
+  assert.equal(Applicants.mergeJob({ title: "Job title" }, { title: "English teacher" }).title, "English teacher");
+
+  // It can NEVER replace one real title with another — that is rule 4, and it
+  // is what keeps a half-rendered pass from undoing a good one.
+  assert.equal(Applicants.mergeJob({ title: "Business analyst" }, { title: "English teacher" }).title, "Business analyst");
+  // Nor can chrome replace chrome, or a blank replace anything.
+  assert.equal(Applicants.mergeJob({ title: "Overview" }, { title: "ACTIVE" }).title, "Overview");
+  assert.equal(Applicants.mergeJob({ title: "Business analyst" }, { title: "" }).title, "Business analyst");
+  assert.equal(Applicants.mergeJob({ title: "Business analyst" }, { title: null }).title, "Business analyst");
+
+  // And the repair is `title` ONLY. Every other field keeps fill-blanks-only,
+  // so a later read still enriches rather than overwrites.
+  assert.equal(Applicants.mergeJob({ company: "Acme", location: "Pune", applicantCount: 30 },
+    { company: "Other", location: "Delhi", applicantCount: 99 }).company, "Acme");
+  assert.equal(Applicants.mergeJob({ location: "Pune" }, { location: "Delhi" }).location, "Pune");
+  assert.equal(Applicants.mergeJob({ applicantCount: 30 }, { applicantCount: 99 }).applicantCount, 30);
+  assert.equal(Applicants.mergeJob({ title: null }, { title: "Business analyst" }).title, "Business analyst",
+    "and filling a blank works exactly as it always did");
+});
+
 test("the job header is found by its own tabs, resolved once, and written to every applicant", async () => {
   const source = await readFile(resolve(root, "extension/content-scripts/applicants.js"), "utf8");
 
@@ -577,9 +664,20 @@ test("the job header is found by its own tabs, resolved once, and written to eve
   assert.match(find, /Applicants\.isJobViewTabLabel\(cleanText\(element\.textContent\)\)/,
     "the bar is identified by the tabs it renders, never by a class name or a position (rule 7)");
   assert.match(find, /if \(Applicants\.countJobViewTabs\(text\) < 2\) continue;/, "two tabs, so one stray label is not a bar");
-  assert.match(find, /if \(Applicants\.jobTitleFromHeader\(text\)\) return node;/,
-    "and it has to hold a line that is NOT a tab — the tab list alone holds no title");
-  assert.match(find, /if \(list && node\.contains\(list\)\) return null;/, "a container holding the applicant list is the page");
+  // 3.14.1: holding a non-tab line was the WHOLE test, and it is not enough.
+  // On a bar reading "Overview · Applicants · Job details · Settings" the
+  // unknown tab `Overview` is a non-tab line, so the TAB LIST passed this test,
+  // the walk stopped on it, and the `<h1>` above it was never seen — every
+  // applicant on the job was saved under the title "Overview". The walk now
+  // prefers an ancestor carrying a heading and keeps the old answer as the
+  // fallback, so a bar that resolved before resolves to the same element.
+  assert.match(find, /if \(headingTitlesIn\(node\)\.length\) return node;/,
+    "an ancestor that actually carries a heading wins — structure, not line order (rule 7)");
+  assert.match(find, /if \(!fallback && Applicants\.jobTitleFromHeader\(text\)\) fallback = node;/,
+    "and the line scan is kept as the fallback, so a bar with no heading still resolves");
+  assert.match(find, /return fallback;\s*\n\s*\}/, "including at the exits, which returned that same node before");
+  assert.match(find, /if \(list && node\.contains\(list\)\) return fallback;/,
+    "a container holding the applicant list is the page — and it hands back the node the old code returned here");
   assert.ok(!/isExcludedContext/.test(find),
     "a nav is allowed here because the element was proven by its own content rather than guessed at");
 
@@ -591,9 +689,10 @@ test("the job header is found by its own tabs, resolved once, and written to eve
     "re-resolved only when the element has left the document");
   assert.match(source, /state\.jobHeader = null;/, "and dropped by beginRun, so another job never inherits this one's title");
 
-  // Written to every applicant, and "once" means "once it answered".
-  assert.match(source, /if \(!listJob\?\.title\) \{\s*\n\s*listJob = attempt\("read job"/,
-    "a bar that had not hydrated when the run started must not title the whole job null");
+  // Written to every applicant, and since 3.14.1 "once" means "once it answered
+  // with a title somebody could actually hold", not merely with something.
+  assert.match(source, /if \(!Applicants\.isJobTitleCandidate\(listJob\?\.title\)\) \{\s*\n\s*const reread = attempt\("read job"/,
+    "a bar that had not hydrated must not title the whole job null — nor `Overview`");
   assert.match(source, /job: listJob,/, "and the one job read is what every row carries");
 });
 
@@ -1961,14 +2060,21 @@ test("the list pass opens every applicant across every page and takes what the p
   // read succeeded still reads exactly once — and `readJob` now works off a
   // cached element, so even the retry is not a page-wide query.
   assert.match(run, /let listJob = attempt\("read job", jobAccumulator/, "the job is read once per run");
-  assert.match(run, /if \(!listJob\?\.title\) \{/, "and re-read only while it has no answer to reuse");
+  // 3.14.1 widened "no answer" to "no USABLE answer". `!listJob?.title` treated
+  // `Overview` as an answer to reuse, so a run that read the bar before it
+  // hydrated settled on the chrome and never looked again. Every title the old
+  // gate re-read for, this one re-reads for too — it only adds the chrome.
+  assert.match(run, /if \(!Applicants\.isJobTitleCandidate\(listJob\?\.title\)\) \{/,
+    "and re-read only while it has no answer it could actually use");
+  assert.match(run, /listJob = Applicants\.mergeJob\(listJob \|\| \{\}, reread\)/,
+    "merged, so a later pass answering `title: null` cannot blank the count the first one got");
   assert.equal((run.match(/readJob\(jobAccumulator\)/g) || []).length, 2,
     "the initial read and that one guarded retry — never a read per row");
   // The only read inside the loop is the guarded one: every occurrence is
   // preceded either by the `let` that opens the run or by the no-title gate.
   for (const before of run.split(/readJob\(jobAccumulator\)/).slice(0, -1)) {
-    assert.match(before.slice(-160), /let listJob = attempt\("read job", jobAccumulator, \(\) => $|if \(!listJob\?\.title\) \{[\s\S]*$/,
-      "a read of the job header must be the opening one or the no-title retry");
+    assert.match(before.slice(-200), /let listJob = attempt\("read job", jobAccumulator, \(\) => $|if \(!Applicants\.isJobTitleCandidate\(listJob\?\.title\)\) \{[\s\S]*$/,
+      "a read of the job header must be the opening one or the no-usable-title retry");
   }
 
   // Its own button, exactly as the connections surface has always had "Find All

@@ -32,7 +32,7 @@
 (() => {
   "use strict";
 
-  const BUILD_ID = "2026-08-26-react-v3.14.0";
+  const BUILD_ID = "2026-09-02-react-v3.14.1";
   const Core = globalThis.ProfileVaultCore;
   const Applicants = globalThis.ProfileVaultApplicants;
   if (!Core) throw new Error("Profile Vault extraction core is unavailable.");
@@ -1825,20 +1825,56 @@
    * this cheap: `textContent` on candidate controls forces no layout, and only
    * the handful of ancestors above one of them are measured.
    */
+  /**
+   * The heading texts inside a container that could be a job title, best first.
+   *
+   * The job view states its job in a heading, so `<h1>` outranks `<h2>` outranks
+   * a generic `role='heading'` — structure, which is what rule 7 asks to resolve
+   * by, rather than "whichever line came first". Every candidate is put through
+   * the core's one rule, so a bar carrying `<h1>Applicants</h1>` offers nothing.
+   */
+  function headingTitlesIn(container) {
+    if (!(container instanceof Element)) return [];
+    const rank = (element) => (element.tagName === "H1" ? 0 : element.tagName === "H2" ? 1 : 2);
+    return [...container.querySelectorAll("h1,h2,[role='heading']")]
+      .filter((element) => isVisible(element))
+      .map((element) => ({ rank: rank(element), text: cleanText(element.innerText || "") }))
+      .filter((entry) => Applicants.isJobTitleCandidate(entry.text))
+      .sort((a, b) => a.rank - b.rank)
+      .map((entry) => entry.text);
+  }
+
+  /**
+   * THE 3.14.1 DEFECT, and why the walk no longer stops at the first match.
+   *
+   * `jobTitleFromHeader(text)` was the whole test for "this node holds a title",
+   * and it answers yes to any line that is not a tab this build knows. On a
+   * captured workspace whose bar reads "Overview · Applicants · Job details ·
+   * Settings", `Overview` is not a tab this build knows — so the TAB LIST
+   * answered yes, the walk stopped on it, and the `<h1>` one level up was never
+   * seen. `job.title` was saved as "Overview" for all thirty applicants.
+   *
+   * So the walk now prefers an ancestor that actually carries a heading, and
+   * keeps the first line-scan match as the fallback. When no ancestor carries
+   * one it returns exactly the node this returned before, including at both
+   * early exits — a bar that worked before is resolved to the same element.
+   */
   function findJobViewHeader() {
     const tabs = [...document.querySelectorAll("a,button,[role='tab']")]
       .filter((element) => Applicants.isJobViewTabLabel(cleanText(element.textContent)) && isVisible(element));
     if (tabs.length < 2) return null;
     const list = applicantList();
+    let fallback = null;
     for (let node = tabs[0].parentElement; node && node !== document.body; node = node.parentElement) {
       // A container that swallows the applicant list is the page, not the bar.
-      if (list && node.contains(list)) return null;
+      if (list && node.contains(list)) return fallback;
       const text = cleanText(node.innerText || "");
-      if (text.length > 400) return null;
+      if (text.length > 400) return fallback;
       if (Applicants.countJobViewTabs(text) < 2) continue;
-      if (Applicants.jobTitleFromHeader(text)) return node;
+      if (headingTitlesIn(node).length) return node;
+      if (!fallback && Applicants.jobTitleFromHeader(text)) fallback = node;
     }
-    return null;
+    return fallback;
   }
 
   /**
@@ -1875,7 +1911,16 @@
         .sort((a, b) => a.length - b.length)
         .slice(0, 4)
         .join("\n");
-    const job = Applicants.parseJobHeader({ text: header, title: document.title, url: location.href });
+    // The bar's own heading answers first; the line scan is the fallback for a
+    // bar that renders none. The legacy sweep above contributes NO headings on
+    // purpose — it is the compatibility path for layouts that already work, and
+    // its `h1` may be LinkedIn's own page heading rather than the job's.
+    const job = Applicants.parseJobHeader({
+      text: header,
+      title: document.title,
+      url: location.href,
+      headings: bar ? headingTitlesIn(bar) : []
+    });
 
     // The description lives on the job-details view rather than the applicants
     // view, so it is read when it happens to be rendered and left null when it
@@ -7839,8 +7884,19 @@
       // title the entire job `null`, which is the same missing column the
       // screenshot was reporting. Retried only while there is no title, so the
       // common case is one read for the whole run and this costs nothing.
-      if (!listJob?.title) {
-        listJob = attempt("read job", jobAccumulator, () => readJob(jobAccumulator)) || listJob;
+      // "Once it answered" has to mean "once it answered with a title", not
+      // "once it answered with something" (3.14.1). A bar that had not hydrated
+      // renders its chrome first, so the run could settle on `Overview` and
+      // never look again — a wrong title is a title, and this guard let it
+      // through. `isJobTitleCandidate` is a superset of the old `!title` test:
+      // everything it re-reads for, the old one re-read for too.
+      // Merged rather than assigned, because this now re-reads a job that HAS
+      // fields: a later pass that answers `title: null` must not blank the count
+      // and the url the first one got. `mergeJob` keeps every filled field and
+      // repairs the one thing this retry exists for.
+      if (!Applicants.isJobTitleCandidate(listJob?.title)) {
+        const reread = attempt("read job", jobAccumulator, () => readJob(jobAccumulator));
+        if (reread) listJob = Applicants.mergeJob(listJob || {}, reread);
       }
       const fromRow = Applicants.buildApplicantListRecord({
         name: row.name,
