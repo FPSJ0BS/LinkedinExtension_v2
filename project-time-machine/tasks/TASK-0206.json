@@ -1,0 +1,30 @@
+{
+  "schema": 2,
+  "id": "TASK-0206",
+  "name": "Drop the unused npm React dependencies that carry the node-fetch advisory",
+  "request": "Drop the unused npm React dependencies that carry the node-fetch advisory",
+  "type": "change",
+  "status": "completed",
+  "startedAt": "2026-09-02T05:05:20.441Z",
+  "completedAt": "2026-09-02T05:08:00.307Z",
+  "startCommit": "3de3ed79b3e596a25d29665018dae3bb4f0d0621",
+  "gitRef": "task/TASK-0206",
+  "files": [
+    {
+      "change": "modified",
+      "path": "package-lock.json"
+    },
+    {
+      "change": "modified",
+      "path": "package.json"
+    },
+    {
+      "change": "modified",
+      "path": "scripts/build.mjs"
+    }
+  ],
+  "checks": [
+    "npm run check passed: typecheck, build, 725 tests 0 fail, doc links in 18 files, validate-build 34 files and 5 React entry points; npm audit reports 0 vulnerabilities"
+  ],
+  "result": "Removed react and react-dom from package.json dependencies: nothing imports them (zero 'from \"react\"' matches in src/ or extension/), the runtime is the hand-placed extension/vendor/*.production.min.js that validate-build.mjs asserts every page loads, and scripts/package.mjs excludes node_modules from the installer. Their only effect was pulling fbjs -> isomorphic-fetch -> node-fetch <2.6.7, five high-severity advisories that no code path could reach. npm audit now reports 0 vulnerabilities with no 'audit fix --force', which was rejected because it installs react 16.14.0 and would leave package.json declaring a version the extension does not run. The two version numbers are preserved in a new 'vendoredRuntime' field that npm ignores. ALSO FIXED, found because it broke the verification: scripts/build.mjs passed an absolute -p path to tsc with shell:true on Windows, so a checkout under a path containing spaces ('linkdin version v2') was re-split by the shell into a project plus two stray source files - error TS5042 - after lines 11-12 had already deleted dist/ and .build/, leaving no loadable extension. The project path is now passed relative to cwd, which is already root. dist/ is rebuilt and byte-identical in what it ships: vendor/ is untouched."
+}

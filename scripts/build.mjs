@@ -11,7 +11,12 @@ const distDir = path.join(root, "dist");
 await rm(buildDir, { recursive: true, force: true });
 await rm(distDir, { recursive: true, force: true });
 
-const tsc = spawnSync("tsc", ["-p", path.join(root, "tsconfig.json")], {
+// The project path is passed RELATIVE to cwd, never absolute: shell is true on
+// Windows, the shell re-splits the command line on spaces, and a checkout under
+// a path like "linkdin version v2" turned -p <abs> into a project plus two stray
+// source files ("error TS5042: Option 'project' cannot be mixed with source
+// files"). dist/ and .build/ are already deleted by the time that fires.
+const tsc = spawnSync("tsc", ["-p", "tsconfig.json"], {
   cwd: root,
   stdio: "inherit",
   shell: process.platform === "win32"

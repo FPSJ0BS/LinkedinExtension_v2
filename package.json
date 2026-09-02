@@ -24,7 +24,8 @@
     "tm:watch": "node project-time-machine/scripts/watch.js",
     "tm:checkpoints": "node project-time-machine/scripts/watch.js list"
   },
-  "dependencies": {
+  "vendoredRuntime": {
+    "comment": "React is NOT an npm dependency. extension/vendor/react.production.min.js and react-dom.production.min.js are the runtime every page loads, placed by hand and asserted by scripts/validate-build.mjs. These are the versions of those two files; update them here when the files change.",
     "react": "16.0.0",
     "react-dom": "16.0.1"
   },
